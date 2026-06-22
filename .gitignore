@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+data/
+node_modules/
+*.log
+vercel-login*.cmd
+vercel-login*.log
+server.err.log
+server.out.log
+.vercel/
+.DS_Store
