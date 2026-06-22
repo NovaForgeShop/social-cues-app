@@ -1,0 +1,19 @@
+{
+  "name": "Social Cues",
+  "short_name": "Social Cues",
+  "description": "Social Cues command center for campaigns, approvals, proof, and growth.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#07090d",
+  "theme_color": "#07090d",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
