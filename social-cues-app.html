@@ -1,0 +1,3008 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07090d">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <title>Social Cues Alpha</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07090d;
+      --surface: #10131a;
+      --surface-2: #171b24;
+      --panel-bg: rgba(16,19,26,.84);
+      --sidebar-bg: rgba(6,8,12,.72);
+      --control-bg: rgba(255,255,255,.06);
+      --subtle-bg: rgba(255,255,255,.045);
+      --button-bg: rgba(255,255,255,.075);
+      --line: rgba(255,255,255,.1);
+      --text: #f8fafc;
+      --muted: rgba(248,250,252,.62);
+      --label: rgba(248,250,252,.44);
+      --chip-text: rgba(255,255,255,.78);
+      --notice-text: rgba(248,250,252,.76);
+      --cyan: #28d7ee;
+      --pink: #ff386b;
+      --lime: #93dd55;
+      --amber: #f6bd4a;
+      --blue: #64a9ff;
+      --violet: #a88cff;
+      --ink: #05070a;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    html[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f6f7f4;
+      --surface: #ffffff;
+      --surface-2: #eef2ef;
+      --panel-bg: rgba(255,255,255,.88);
+      --sidebar-bg: rgba(255,255,255,.82);
+      --control-bg: rgba(5,7,10,.045);
+      --subtle-bg: rgba(5,7,10,.035);
+      --button-bg: rgba(5,7,10,.055);
+      --line: rgba(5,7,10,.12);
+      --text: #111827;
+      --muted: rgba(17,24,39,.64);
+      --label: rgba(17,24,39,.48);
+      --chip-text: rgba(17,24,39,.78);
+      --ink: #05070a;
+      --notice-text: rgba(17,24,39,.76);
+      --cyan: #047c95;
+      --pink: #c71f53;
+      --lime: #4f8f25;
+      --amber: #a96705;
+      --blue: #2563eb;
+      --violet: #7056c8;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        linear-gradient(135deg, rgba(127,127,127,.08) 0 1px, transparent 1px 13px),
+        radial-gradient(circle at 12% -5%, rgba(40,215,238,.18), transparent 28rem),
+        radial-gradient(circle at 92% 8%, rgba(255,56,107,.16), transparent 26rem),
+        radial-gradient(circle at 60% 100%, rgba(147,221,85,.08), transparent 30rem),
+        var(--bg);
+      color: var(--text);
+    }
+
+    button, input, textarea, select { font: inherit; }
+    button {
+      border: 0;
+      color: inherit;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: .42;
+      cursor: not-allowed;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 260px 1fr 360px;
+    }
+
+    .side, .right {
+      background: var(--sidebar-bg);
+      backdrop-filter: blur(18px);
+      height: 100vh;
+      position: sticky;
+      top: 0;
+      overflow-y: auto;
+      padding: 20px 16px;
+    }
+
+    .side { border-right: 1px solid var(--line); }
+    .right { border-left: 1px solid var(--line); }
+    main { padding: 24px; min-width: 0; }
+
+    .brand {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 22px;
+    }
+    .mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, var(--cyan), var(--pink));
+      color: var(--ink);
+      font-weight: 950;
+      letter-spacing: 0;
+      font-size: 14px;
+    }
+    .brand strong { display: block; font-size: 18px; }
+    .brand span { color: var(--muted); font-size: 12px; }
+
+    .nav {
+      display: grid;
+      gap: 7px;
+      margin-bottom: 22px;
+    }
+    .nav button {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 12px;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
+    }
+    .nav button.active {
+      background: rgba(255,255,255,.08);
+      color: #fff;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 32px; line-height: 1.04; letter-spacing: -.035em; }
+    h2 { font-size: 18px; letter-spacing: -.015em; }
+    h3 { font-size: 14px; }
+    p { color: var(--muted); line-height: 1.52; }
+    .small-label {
+      display: block;
+      color: var(--label);
+      font-size: 11px;
+      letter-spacing: .12em;
+      font-weight: 850;
+      text-transform: uppercase;
+      margin-bottom: 7px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 330px;
+      gap: 16px;
+      margin-bottom: 16px;
+      padding: 20px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,.11);
+      background:
+        linear-gradient(120deg, rgba(40,215,238,.14), transparent 48%),
+        linear-gradient(300deg, rgba(255,56,107,.14), transparent 52%),
+        var(--panel-bg);
+      box-shadow: 0 30px 90px rgba(0,0,0,.28);
+    }
+    .kicker {
+      display: inline-flex;
+      width: fit-content;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 9px;
+      margin-bottom: 12px;
+      border-radius: 999px;
+      background: rgba(147,221,85,.12);
+      color: var(--lime);
+      border: 1px solid rgba(147,221,85,.26);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .hero h1 { margin-bottom: 10px; }
+    .hero p { max-width: 780px; }
+
+    .panel, .metric, .card {
+      background: var(--panel-bg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 20px 70px rgba(0,0,0,.22);
+    }
+    .panel { padding: 17px; }
+    .metric {
+      position: relative;
+      overflow: hidden;
+      padding: 15px;
+    }
+    .metric::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 2px;
+      background: linear-gradient(90deg, var(--cyan), var(--pink));
+    }
+    .metric span { color: var(--muted); font-size: 12px; font-weight: 750; }
+    .metric strong { display: block; font-size: 28px; margin-top: 5px; letter-spacing: -.04em; }
+    .metric em { color: var(--lime); font-style: normal; font-size: 12px; font-weight: 850; }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(340px, .95fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .stack { display: grid; gap: 12px; }
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .actions {
+      display: flex;
+      gap: 9px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      margin-top: 13px;
+    }
+
+    textarea, input, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--control-bg);
+      color: var(--text);
+      outline: none;
+      padding: 11px 12px;
+    }
+    textarea { resize: vertical; min-height: 118px; line-height: 1.48; }
+    textarea:focus, input:focus, select:focus { border-color: rgba(40,215,238,.58); }
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 11px;
+      margin-top: 12px;
+    }
+
+    .primary {
+      background: linear-gradient(135deg, var(--cyan), var(--pink));
+      color: var(--ink);
+      font-weight: 950;
+      border-radius: 8px;
+      padding: 11px 13px;
+    }
+    .secondary {
+      background: var(--button-bg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-weight: 800;
+    }
+    .danger {
+      background: rgba(255,56,107,.12);
+      border: 1px solid rgba(255,56,107,.28);
+      color: var(--pink);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-weight: 800;
+    }
+
+    .campaign-button {
+      width: 100%;
+      text-align: left;
+      padding: 12px;
+      border-radius: 8px;
+      background: var(--subtle-bg);
+      border: 1px solid var(--line);
+      margin-bottom: 9px;
+    }
+    .campaign-button.active {
+      border-color: rgba(40,215,238,.42);
+      background: rgba(40,215,238,.08);
+    }
+    .campaign-button strong { display: block; font-size: 13px; margin-bottom: 3px; }
+    .campaign-button span { color: var(--muted); font-size: 11px; }
+
+    .variant {
+      position: relative;
+      overflow: hidden;
+      padding: 15px;
+      border-radius: 8px;
+      background: var(--subtle-bg);
+      border: 1px solid var(--line);
+    }
+    .variant::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 4px;
+      background: var(--accent, var(--cyan));
+    }
+    .variant-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+      margin-bottom: 10px;
+    }
+    .variant textarea { min-height: 138px; margin-top: 10px; }
+    .tags {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 9px;
+    }
+    .tag, .pill {
+      border-radius: 999px;
+      padding: 5px 8px;
+      font-size: 11px;
+      font-weight: 850;
+      background: var(--button-bg);
+      color: var(--chip-text);
+    }
+    .tag {
+      border: 1px solid color-mix(in srgb, var(--accent, var(--cyan)) 42%, transparent);
+      background: color-mix(in srgb, var(--accent, var(--cyan)) 15%, transparent);
+      color: var(--text);
+    }
+    .draft { color: var(--amber); background: rgba(246,189,74,.14); }
+    .approved { color: var(--cyan); background: rgba(40,215,238,.13); }
+    .published { color: var(--lime); background: rgba(147,221,85,.14); }
+    .revision { color: var(--pink); background: rgba(255,56,107,.13); }
+
+    .variant-tools {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 11px;
+    }
+    .variant-tools button {
+      padding: 9px;
+      border-radius: 8px;
+      background: var(--button-bg);
+      border: 1px solid var(--line);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .section { display: none; }
+    .section.active { display: block; animation: rise .24s ease both; }
+    .empty {
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      padding: 20px;
+      color: var(--muted);
+      text-align: center;
+    }
+    .notice {
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(40,215,238,.18);
+      background: rgba(40,215,238,.07);
+      color: var(--notice-text);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .file-input {
+      display: none;
+    }
+    .media-preview {
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: rgba(0,0,0,.22);
+    }
+    .media-preview img, .media-preview video {
+      display: block;
+      width: 100%;
+      max-height: 260px;
+      object-fit: cover;
+    }
+    .media-preview .media-copy {
+      padding: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .login-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(40,215,238,.2), transparent 28rem),
+        radial-gradient(circle at 80% 12%, rgba(255,56,107,.18), transparent 26rem),
+        rgba(7,9,13,.96);
+    }
+    .login-screen.hidden { display: none; }
+    .login-card {
+      width: min(520px, 100%);
+      padding: 24px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: var(--panel-bg);
+      box-shadow: 0 28px 110px rgba(0,0,0,.42);
+    }
+    .login-card h1 { margin-bottom: 10px; }
+    .login-card p { margin-bottom: 16px; }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1120px) {
+      .app { grid-template-columns: 82px 1fr; }
+      .brand div:last-child, .nav span:last-child, .campaigns-small { display: none; }
+      .right { display: none; }
+      .hero, .grid-2 { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 760px) {
+      .app { display: block; }
+      .side { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .brand div:last-child, .nav span:last-child { display: block; }
+      .nav { grid-template-columns: repeat(3, 1fr); }
+      .nav button { justify-content: center; padding: 9px; }
+      main { padding: 16px 12px 40px; }
+      .hero { padding: 16px; }
+      .hero h1 { font-size: 27px; }
+      .grid-4, .form-grid { grid-template-columns: 1fr 1fr; }
+      .variant-tools { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="login-screen hidden" id="loginScreen">
+    <div class="login-card">
+      <div class="brand">
+        <div class="mark">SC</div>
+        <div>
+          <strong>Social Cues</strong>
+          <span>Social command center</span>
+        </div>
+      </div>
+      <h1>Log in to Social Cues</h1>
+      <p>Start as a Social Cues customer user. This alpha workspace is set up to launch Social Cues itself.</p>
+      <label>
+        <span class="small-label">Name</span>
+        <input id="loginNameInput" placeholder="Cory Barton">
+      </label>
+      <div style="height:10px"></div>
+      <label>
+        <span class="small-label">Email</span>
+        <input id="loginEmailInput" placeholder="you@example.com">
+      </label>
+      <div style="height:10px"></div>
+      <label>
+        <span class="small-label">Workspace</span>
+        <input id="loginWorkspaceInput" value="Social Cues Alpha">
+      </label>
+      <div class="actions">
+        <button class="primary" id="loginButton">Continue to Social Cues</button>
+      </div>
+      <p style="font-size:12px;margin-top:14px">Local test login only. Real authentication comes next through the backend session system.</p>
+    </div>
+  </div>
+
+  <div class="app">
+    <aside class="side">
+      <div class="brand">
+        <div class="mark">SC</div>
+        <div>
+          <strong>Social Cues</strong>
+          <span id="workspaceLabel">Customer workspace</span>
+        </div>
+      </div>
+
+      <nav class="nav" id="nav">
+        <button class="active" data-view="dashboard"><span class="dot"></span><span>Dashboard</span></button>
+        <button data-view="onboarding"><span class="dot"></span><span>Onboard</span></button>
+        <button data-view="studio"><span class="dot"></span><span>Studio</span></button>
+        <button data-view="approvals"><span class="dot"></span><span>Approvals</span></button>
+        <button data-view="calendar"><span class="dot"></span><span>Calendar</span></button>
+        <button data-view="growth"><span class="dot"></span><span>Growth</span></button>
+        <button data-view="actionlab"><span class="dot"></span><span>Action</span></button>
+        <button data-view="devices"><span class="dot"></span><span>Devices</span></button>
+        <button data-view="accounts"><span class="dot"></span><span>Accounts</span></button>
+        <button data-view="integrations"><span class="dot"></span><span>Integrations</span></button>
+        <button data-view="billing"><span class="dot"></span><span>Billing</span></button>
+        <button data-view="settings"><span class="dot"></span><span>Settings</span></button>
+      </nav>
+
+      <div class="campaigns-small">
+        <div class="row" style="margin-bottom:10px">
+          <span class="small-label" style="margin:0">Campaigns</span>
+          <button class="secondary" id="newCampaignSmall" style="padding:7px 9px;font-size:12px">New</button>
+        </div>
+        <div id="campaignList"></div>
+      </div>
+    </aside>
+
+    <main>
+      <section id="dashboard" class="section active">
+        <div class="hero">
+          <div>
+            <div class="kicker">Customer operating system</div>
+            <h1>Turn one honest idea into a social system that compounds.</h1>
+            <p>Log in as a Social Cues user, connect provider-verified social accounts, create campaigns, approve content, attach media, and turn real platform signals into a working growth machine.</p>
+            <div class="tags">
+              <span class="tag">Local persistence</span>
+              <span class="tag">Approval-first</span>
+              <span class="tag">Profile-aware</span>
+              <span class="tag">Exportable model</span>
+            </div>
+          </div>
+          <div class="panel">
+            <span class="small-label">Active campaign</span>
+            <h2 id="activeCampaignTitle">No campaign</h2>
+            <p id="activeCampaignMeta">Create or select a campaign to begin.</p>
+            <div class="actions">
+              <button class="primary" data-jump="studio">Open Studio</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-4">
+          <div class="metric"><span>Campaigns</span><strong id="metricCampaigns">0</strong><em>stored here</em></div>
+          <div class="metric"><span>Drafts</span><strong id="metricDrafts">0</strong><em>need review</em></div>
+          <div class="metric"><span>Approved</span><strong id="metricApproved">0</strong><em>ready</em></div>
+          <div class="metric"><span>Scheduled</span><strong id="metricPublished">0</strong><em>queued</em></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="row">
+              <div>
+                <h2>Run queue</h2>
+                <p>What needs your attention right now.</p>
+              </div>
+              <button class="secondary" data-jump="approvals">Review</button>
+            </div>
+            <div style="height:12px"></div>
+            <div class="stack" id="dashboardQueue"></div>
+          </div>
+          <div class="panel">
+            <h2>Workspace model</h2>
+            <p>This copy stores your customer workspace in this browser on this machine. Export it often while testing.</p>
+            <div style="height:12px"></div>
+            <div class="notice" id="storageNotice"></div>
+            <div class="actions">
+              <button class="secondary" id="exportModelDash">Export model</button>
+              <button class="secondary" id="downloadContentDash">Export content</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="onboarding" class="section">
+        <div class="grid-2">
+          <div class="panel">
+            <div class="row">
+              <div>
+                <h2>Meet Social Cues</h2>
+                <p>Tell Social Cues who you are, what the workspace exists to do, and what social accounts matter first.</p>
+              </div>
+              <button class="primary" id="completeOnboarding">Save and continue</button>
+            </div>
+            <div style="height:12px"></div>
+            <label>
+              <span class="small-label">Bio</span>
+              <textarea id="bioInput" placeholder="Who are you or the business?"></textarea>
+            </label>
+            <div style="height:10px"></div>
+            <label>
+              <span class="small-label">Purpose</span>
+              <textarea id="purposeInput" placeholder="What are we trying to grow and why?"></textarea>
+            </label>
+            <div class="form-grid">
+              <label>
+                <span class="small-label">Offer/product</span>
+                <input id="offerInput" placeholder="Social Cues alpha, service package, subscription, etc.">
+              </label>
+              <label>
+                <span class="small-label">Audience</span>
+                <input id="audienceDescInput" placeholder="Creators, local businesses, agencies...">
+              </label>
+            </div>
+          </div>
+          <div class="panel">
+            <h2>Setup sequence</h2>
+            <p>Social Cues alpha starts here, then moves into social account connection and command-center analytics.</p>
+            <div style="height:14px"></div>
+            <div class="stack" id="onboardingSteps"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="studio" class="section">
+        <div class="grid-2">
+          <div class="panel">
+            <div class="row">
+              <div>
+                <h2>Campaign studio</h2>
+                <p>Create the brief, choose posture, and generate platform-native variants.</p>
+              </div>
+              <button class="primary" id="newCampaign">New campaign</button>
+            </div>
+            <div style="height:12px"></div>
+            <label>
+              <span class="small-label">Campaign title</span>
+              <input id="campaignTitleInput" placeholder="Social Cues alpha launch push">
+            </label>
+            <div style="height:10px"></div>
+            <label>
+              <span class="small-label">Brief</span>
+              <textarea id="briefInput" placeholder="What are we trying to communicate?"></textarea>
+            </label>
+            <div class="form-grid">
+              <label>
+                <span class="small-label">Goal</span>
+                <select id="goalInput">
+                  <option>Build demand</option>
+                  <option>Grow audience</option>
+                  <option>Drive sales</option>
+                  <option>Educate market</option>
+                  <option>Launch product</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Tone</span>
+                <select id="toneInput">
+                  <option>Sharp and useful</option>
+                  <option>Founder-led</option>
+                  <option>Bold and direct</option>
+                  <option>Warm and practical</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Disclosure context</span>
+                <select id="disclosureInput">
+                  <option>Organic/no material connection</option>
+                  <option>Sponsored</option>
+                  <option>Affiliate link</option>
+                  <option>Gifted product</option>
+                  <option>Founder or employee post</option>
+                  <option>Customer testimonial</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Risk posture</span>
+                <select id="riskInput">
+                  <option>Balanced growth</option>
+                  <option>Conservative compliance</option>
+                  <option>Launch hype</option>
+                  <option>Educational only</option>
+                </select>
+              </label>
+            </div>
+            <div class="actions">
+              <button class="secondary" id="saveCampaign">Save campaign</button>
+              <button class="primary" id="generateVariants">Generate variants</button>
+            </div>
+            <div style="height:14px"></div>
+            <div class="stack" id="rulesBox"></div>
+          </div>
+
+          <div class="panel">
+            <h2>Operator profile</h2>
+            <p>Social Cues uses this to shape the interface and recommendations.</p>
+            <div class="form-grid">
+              <label>
+                <span class="small-label">Operator</span>
+                <select id="operatorInput">
+                  <option>Founder</option>
+                  <option>Creator</option>
+                  <option>Agency operator</option>
+                  <option>Local business owner</option>
+                  <option>Ecommerce lead</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Primary outcome</span>
+                <select id="outcomeInput">
+                  <option>Build demand</option>
+                  <option>Grow audience</option>
+                  <option>Drive sales</option>
+                  <option>Educate market</option>
+                  <option>Launch product</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">View mode</span>
+                <select id="displayInput">
+                  <option>Command center</option>
+                  <option>Creator studio</option>
+                  <option>Commerce cockpit</option>
+                  <option>Compliance-aware</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Automation</span>
+                <select id="automationInput">
+                  <option>Approval-first</option>
+                  <option>Draft-heavy</option>
+                  <option>Schedule-ready</option>
+                  <option>Strict manual review</option>
+                </select>
+              </label>
+            </div>
+            <div class="actions">
+              <button class="secondary" id="saveProfile">Save profile</button>
+            </div>
+            <div style="height:14px"></div>
+            <div class="notice" id="profileSummary"></div>
+          </div>
+        </div>
+
+        <div style="height:14px"></div>
+        <div class="stack" id="variantList"></div>
+      </section>
+
+      <section id="approvals" class="section">
+        <div class="panel">
+          <div class="row">
+            <div>
+              <h2>Approval room</h2>
+              <p>Approve only the content you want Social Cues to queue, remind on, or publish through provider-verified accounts.</p>
+            </div>
+            <button class="primary" id="publishApproved">Schedule approved</button>
+          </div>
+          <div style="height:14px"></div>
+          <div class="stack" id="approvalList"></div>
+        </div>
+      </section>
+
+      <section id="calendar" class="section">
+        <div class="panel">
+          <h2>Calendar</h2>
+          <p>Approved, queued, and published content by platform-specific posting slot.</p>
+          <div style="height:14px"></div>
+          <div class="stack" id="calendarList"></div>
+        </div>
+      </section>
+
+      <section id="growth" class="section">
+        <div class="grid-2">
+          <div class="panel">
+            <h2>Growth diagnosis</h2>
+            <p>Live source data, computed account state, and manual estimates are separated so growth never reads like unsourced platform analytics.</p>
+            <div style="height:14px"></div>
+            <div class="stack" id="growthList"></div>
+          </div>
+          <div class="panel">
+            <h2>Manual baseline</h2>
+            <p>Planning estimates only. These numbers are not live Meta, Instagram, TikTok, or Facebook analytics.</p>
+            <div class="form-grid">
+              <label><span class="small-label">Audience size</span><input id="audienceInput" type="number" min="0"></label>
+              <label><span class="small-label">Avg. views</span><input id="viewsInput" type="number" min="0"></label>
+              <label><span class="small-label">Engagement %</span><input id="engagementInput" type="number" min="0" step=".1"></label>
+              <label><span class="small-label">Posts/week</span><input id="cadenceInput" type="number" min="0" step=".5"></label>
+            </div>
+            <div class="actions">
+              <button class="secondary" id="saveBaseline">Save baseline</button>
+            </div>
+            <div style="height:14px"></div>
+            <div class="notice" id="baselineInsight"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="actionlab" class="section">
+        <div class="grid-2">
+          <div class="panel">
+            <div class="row">
+              <div>
+                <h2>Action Lab</h2>
+                <p>Turn strategy into experiments, inquiries, and investigations with owners, outcomes, and receipts.</p>
+              </div>
+              <button class="primary" id="addAction">Add action</button>
+            </div>
+            <div style="height:12px"></div>
+            <div class="form-grid">
+              <label>
+                <span class="small-label">Action type</span>
+                <select id="actionTypeInput">
+                  <option>Experiment</option>
+                  <option>Inquiry</option>
+                  <option>Investigation</option>
+                  <option>Build task</option>
+                  <option>Sales task</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Priority</span>
+                <select id="actionPriorityInput">
+                  <option>High</option>
+                  <option selected>Medium</option>
+                  <option>Low</option>
+                </select>
+              </label>
+            </div>
+            <div style="height:10px"></div>
+            <label>
+              <span class="small-label">Action</span>
+              <input id="actionTitleInput" placeholder="Test 3 TikTok hooks for Social Cues launch">
+            </label>
+            <div style="height:10px"></div>
+            <label>
+              <span class="small-label">Expected signal</span>
+              <textarea id="actionSignalInput" placeholder="What evidence will tell us this worked?"></textarea>
+            </label>
+            <div style="height:14px"></div>
+            <div class="stack" id="actionList"></div>
+          </div>
+          <div class="panel">
+            <h2>Investigation queue</h2>
+            <p>What Social Cues should learn next to improve speed, quality, evidence, or sales.</p>
+            <div style="height:14px"></div>
+            <div class="stack" id="inquiryList"></div>
+            <div class="actions">
+              <button class="secondary" id="seedActions">Seed next moves</button>
+              <button class="secondary" id="exportActions">Export actions</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="devices" class="section">
+        <div class="grid-2">
+          <div class="panel">
+            <div class="row">
+              <div>
+                <h2>Phone and desktop handoff</h2>
+                <p>Design the workflow so capture, review, editing, and launch control move cleanly between devices.</p>
+              </div>
+              <button class="primary" id="createHandoff">Create handoff link</button>
+            </div>
+            <div style="height:14px"></div>
+            <div class="stack" id="deviceFlowList"></div>
+          </div>
+          <div class="panel">
+            <h2>Current local handoff</h2>
+            <p>Use export/import for handoff while backend sync and device pairing are brought online.</p>
+            <div style="height:14px"></div>
+            <label>
+              <span class="small-label">Handoff link</span>
+              <input id="handoffLinkInput" readonly>
+            </label>
+            <div class="actions">
+              <button class="secondary" id="copyHandoff">Copy link</button>
+              <button class="secondary" id="exportHandoff">Export handoff packet</button>
+            </div>
+            <div style="height:14px"></div>
+            <div class="notice">Future version: phone app and desktop app will share the same authenticated workspace, so this link opens the same campaign on either device.</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="accounts" class="section">
+        <div class="grid-2">
+          <div class="panel">
+            <div class="row">
+              <div>
+                <h2>Social accounts</h2>
+                <p>Connect provider-verified accounts Social Cues can analyze or publish for when permissions and assets are available.</p>
+              </div>
+              <button class="secondary" id="compileAnalytics">Analyze accounts</button>
+            </div>
+            <div style="height:14px"></div>
+            <div class="stack" id="socialAccountList"></div>
+          </div>
+          <div class="panel">
+            <h2>Connection notes</h2>
+            <p>Connection status now comes from backend OAuth evidence only. Accounts are not marked connected unless Social Cues has provider account data and server-side token storage.</p>
+            <div style="height:14px"></div>
+            <div class="notice">Meta login is wired. TikTok, X, YouTube, Shopify, Canva, and Sora stay unavailable until their real provider flows are added.</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="integrations" class="section">
+        <div class="grid-2">
+          <div class="panel">
+            <div class="row">
+              <div>
+                <h2>Integration cockpit</h2>
+                <p>First production stack: OpenAI for intelligence, Social Cues Queue for scheduled publishing/reminders, Shopify for commerce evidence.</p>
+              </div>
+              <button class="primary" id="exportIntegrationConfig">Export config</button>
+            </div>
+            <div style="height:14px"></div>
+            <div class="stack" id="integrationList"></div>
+          </div>
+          <div class="panel">
+            <h2>Local readiness</h2>
+            <p>This test copy does not store live API secrets. Mark readiness here and put real keys only in the backend environment file.</p>
+            <div class="form-grid">
+              <label>
+                <span class="small-label">OpenAI</span>
+                <select id="openaiStatusInput">
+                  <option>Needed</option>
+                  <option>Credential ready</option>
+                  <option>Connected in backend</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Social Cues Queue</span>
+                <select id="queueStatusInput">
+                  <option>Needed</option>
+                  <option>Credential ready</option>
+                  <option>Connected in backend</option>
+                  <option>Supabase queue ready</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Shopify</span>
+                <select id="shopifyStatusInput">
+                  <option>Needed</option>
+                  <option>Credential ready</option>
+                  <option>Connected in backend</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Canva</span>
+                <select id="canvaStatusInput">
+                  <option>Needed</option>
+                  <option>Credential ready</option>
+                  <option>Connected in backend</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Sora</span>
+                <select id="soraStatusInput">
+                  <option>Needed</option>
+                  <option>Credential ready</option>
+                  <option>Connected in backend</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Publishing path</span>
+                <select id="publishingPathInput">
+                  <option>Social Cues Queue first</option>
+                  <option>Native adapters first</option>
+                  <option>Reminder/export first</option>
+                </select>
+              </label>
+            </div>
+            <div class="actions">
+              <button class="secondary" id="saveIntegrations">Save readiness</button>
+            </div>
+            <div style="height:14px"></div>
+            <div class="notice">Recommended order: OpenAI generation endpoint, Supabase-backed Social Cues Queue, reminders/exports for blocked platforms, Shopify commerce context, then native platform adapters.</div>
+          </div>
+        </div>
+        <div style="height:18px"></div>
+        <div class="grid-2">
+          <div class="panel">
+            <div class="row">
+              <div>
+                <h2>SCv2 Meta surfaces</h2>
+                <p>Live capability map for every Meta lane Social Cues can use or submit for review.</p>
+              </div>
+              <button class="secondary" id="refreshMeta">Refresh Meta</button>
+            </div>
+            <div style="height:14px"></div>
+            <div class="stack" id="metaCapabilityList"></div>
+          </div>
+          <div class="panel">
+            <h2>Connected Meta assets</h2>
+            <p>Tokens stay server-side. This panel only shows asset names, status, permissions, and review gates.</p>
+            <div style="height:14px"></div>
+            <div class="stack" id="metaAssetList"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="billing" class="section">
+        <div class="grid-2">
+          <div class="panel">
+            <div class="row">
+              <div>
+                <h2>Billing</h2>
+                <p>Alpha payment path for turning Social Cues into revenue quickly.</p>
+              </div>
+              <button class="primary" id="createCheckout">Create checkout link</button>
+            </div>
+            <div style="height:14px"></div>
+            <div class="stack" id="planList"></div>
+          </div>
+          <div class="panel">
+            <h2>Payment setup</h2>
+            <p>Use Stripe Payment Links first for speed, then Stripe Checkout/subscriptions when hosted.</p>
+            <div class="form-grid">
+              <label>
+                <span class="small-label">Billing status</span>
+                <select id="billingStatusInput">
+                  <option>Not configured</option>
+                  <option>Payment Link ready</option>
+                  <option>Stripe Checkout ready</option>
+                  <option>Live subscriptions</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Selected plan</span>
+                <select id="selectedPlanInput">
+                  <option>Founder Audit - $99</option>
+                  <option>Campaign Build - $299</option>
+                  <option>Managed Proof Sprint - $499</option>
+                  <option>Social Cues Pro - $49/mo</option>
+                </select>
+              </label>
+            </div>
+            <div style="height:10px"></div>
+            <label>
+              <span class="small-label">Stripe payment link or checkout URL</span>
+              <input id="paymentLinkInput" placeholder="https://buy.stripe.com/...">
+            </label>
+            <div class="actions">
+              <button class="secondary" id="saveBilling">Save billing</button>
+              <button class="secondary" id="openCheckout">Open checkout</button>
+            </div>
+            <div style="height:14px"></div>
+            <div class="notice">Keep Stripe secret keys on the backend only. The browser stores only public/payment-link status for this alpha.</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="settings" class="section">
+        <div class="grid-2">
+          <div class="panel">
+            <h2>Local model</h2>
+            <p>Export and import your Social Cues working model for this test run.</p>
+            <div class="actions" style="justify-content:flex-start">
+              <button class="primary" id="exportModel">Export full model</button>
+              <button class="secondary" id="importModelButton">Import model</button>
+              <button class="secondary" id="exportContent">Export content bundle</button>
+              <button class="secondary" id="saveDisk">Save to disk</button>
+              <button class="secondary" id="loadDisk">Load from disk</button>
+              <button class="danger" id="resetAll">Reset local copy</button>
+            </div>
+            <input class="file-input" id="importModelInput" type="file" accept="application/json">
+            <div style="height:14px"></div>
+            <div class="notice">Direct-file mode stores data in this browser. Server/app mode also saves to disk at <strong>Social Cues-testable-app/data/model.json</strong>.</div>
+          </div>
+          <div class="panel">
+            <h2>Security posture</h2>
+            <p>Convenience for daily use, friction for risky actions.</p>
+            <div class="form-grid">
+              <label>
+                <span class="small-label">Session</span>
+                <select id="sessionInput">
+                  <option>Keep me logged in</option>
+                  <option>Session only</option>
+                  <option>High-security mode</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Step-up check</span>
+                <select id="stepUpInput">
+                  <option>Re-auth before publish/account changes</option>
+                  <option>Re-auth before every publish</option>
+                  <option>Require manual login each session</option>
+                </select>
+              </label>
+            </div>
+            <div class="actions">
+              <button class="secondary" id="saveSecurity">Save security</button>
+              <button class="danger" id="logoutButton">Log out</button>
+            </div>
+          </div>
+          <div class="panel">
+            <h2>Appearance</h2>
+            <p>Match the workspace to the device or choose the look manually.</p>
+            <div class="form-grid">
+              <label>
+                <span class="small-label">Theme</span>
+                <select id="themeInput">
+                  <option value="auto">Automatic</option>
+                  <option value="dark">Dark</option>
+                  <option value="light">Light</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Mode</span>
+                <input id="themePreviewInput" readonly>
+              </label>
+            </div>
+            <div class="actions">
+              <button class="secondary" id="saveTheme">Save appearance</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="right">
+      <div class="panel">
+        <h2>Launch room</h2>
+        <p>Approved content ready for the next push.</p>
+        <div style="height:12px"></div>
+        <div class="stack" id="launchRoom"></div>
+      </div>
+      <div style="height:14px"></div>
+      <div class="panel">
+        <h2>Provider readiness</h2>
+        <p>Live account, token, and permission status. Placeholders move out as real provider evidence comes online.</p>
+        <div style="height:12px"></div>
+        <div class="stack" id="connectorList"></div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "Social Cues-alpha-run";
+    const SERVER_MODE = location.protocol === "http:" || location.protocol === "https:";
+
+    const platforms = [
+      { id: "tiktok", name: "TikTok", accent: "#ff386b", bestTime: "5:40 PM", connector: "Content Posting API", fit: "Discovery and hooks", tags: ["#AItools", "#SmallBiz", "#CreatorTools", "#Automation", "#TechTok"] },
+      { id: "instagram", name: "Instagram", accent: "#f77737", bestTime: "6:15 PM", connector: "Meta Instagram API", fit: "Visual trust and saves", tags: ["#CreatorBusiness", "#SmallBusinessTools", "#AIWorkflow", "#ContentStrategy", "#NoCode"] },
+      { id: "threads", name: "Threads", accent: "#f8fafc", bestTime: "10:20 AM", connector: "Threads API", fit: "Conversation and thought leadership", tags: ["#buildinpublic", "#FounderMode", "#CreatorTools", "#AI"] },
+      { id: "youtube", name: "YouTube", accent: "#ff4d4d", bestTime: "12:30 PM", connector: "YouTube Data API", fit: "Search and authority", tags: ["AI tools", "creator workflow", "social media automation", "small business software"] },
+      { id: "facebook", name: "Facebook", accent: "#64a9ff", bestTime: "8:10 AM", connector: "Meta Pages API", fit: "Community and local trust", tags: ["#SmallBusiness", "#MarketingTools", "#ContentPlanning"] },
+      { id: "x", name: "X", accent: "#dbeafe", bestTime: "9:05 AM", connector: "X API", fit: "Signal and conversation", tags: ["#buildinpublic", "#AI", "#SaaS"] },
+      { id: "shopify", name: "Shopify", accent: "#93dd55", bestTime: "Campaign source", connector: "Shopify Admin GraphQL", fit: "Commerce and attribution", tags: ["launch", "creator-stack", "automation"] }
+    ];
+
+    const growthPlan = [
+      ["Diagnose", "Read cadence, engagement, views, saves, comments, weak formats, and top posts before asking for extra user data.", "#28d7ee"],
+      ["Focus", "Pick one bottleneck: hooks, consistency, format fit, CTA clarity, timing, or offer path.", "#93dd55"],
+      ["Rebuild", "Create content pillars and platform variants that turn the page into a repeatable system.", "#f6bd4a"],
+      ["Compound", "Turn winners into sequels, Shorts, threads, reels, email prompts, and Shopify campaigns.", "#ff386b"],
+      ["Protect", "Avoid fake engagement, spam patterns, duplicate blasts, and unsupported claims.", "#a88cff"],
+      ["Map", "Assign each platform a job: discovery, trust, community, search, commerce, retention, or conversion.", "#64a9ff"]
+    ];
+
+    const defaultModel = {
+      version: "0.2.0-local",
+      currentUser: null,
+      workspace: {
+        name: "Social Cues Alpha",
+        owner: "Alpha User",
+        purpose: "Launch Social Cues as a customer-ready social command center"
+      },
+      onboarding: {
+        complete: false,
+        bio: "This workspace is testing Social Cues as an end-user customer.",
+        purpose: "Use Social Cues to launch itself with a repeatable social growth engine, customer-ready onboarding, media planning, account connections, and revenue path.",
+        offer: "Social Cues alpha",
+        audience: "Creators, small businesses, agencies, and ecommerce operators"
+      },
+      profile: {
+        operator: "Founder",
+        outcome: "Build demand",
+        display: "Command center",
+        automation: "Approval-first"
+      },
+      security: {
+        session: "Keep me logged in",
+        stepUp: "Re-auth before publish/account changes"
+      },
+      settings: {
+        theme: "auto"
+      },
+      baseline: {
+        audience: 0,
+        avgViews: 0,
+        engagement: 0,
+        cadence: 0
+      },
+      activeCampaignId: "camp-Social Cues-self-launch",
+      campaigns: [
+        {
+          id: "camp-Social Cues-self-launch",
+          title: "Social Cues Customer-Ready Alpha Launch",
+          brief: "Launch Social Cues as the social command center for creators, small businesses, agencies, and ecommerce operators. Show how it helps a customer log in, connect social accounts, analyze metrics, generate platform-native campaigns, attach or generate media, approve content, and turn results into a repeatable growth system.",
+          goal: "Build demand",
+          tone: "Sharp and useful",
+          disclosure: "Founder or employee post",
+          riskPosture: "Balanced growth",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          variants: []
+        }
+      ],
+      billing: {
+        status: "Not configured",
+        selectedPlan: "Founder Audit - $99",
+        paymentLink: "",
+        checkoutMode: "payment-link-first",
+        offers: [
+          { name: "Founder Audit", price: "$99", description: "Diagnose one underperforming page and deliver a first campaign plan." },
+          { name: "Campaign Build", price: "$299", description: "Build a 30-day platform-native launch campaign." },
+          { name: "Managed Proof Sprint", price: "$499", description: "Run a proof sprint with content, metrics, and next moves." },
+          { name: "Social Cues Pro", price: "$49/mo", description: "Self-serve workspace for campaigns, approvals, media, and analytics." }
+        ]
+      },
+      proof: [
+        {
+          id: "proof-seed-1",
+          type: "Workflow saved",
+          metric: "Prototype to usable local run",
+          note: "Social Cues moved from visual prototype into a persistent local alpha with onboarding, accounts, campaigns, approvals, media, billing, exports, and growth diagnosis.",
+          createdAt: new Date().toISOString()
+        }
+      ],
+      handoff: {
+        lastLink: ""
+      },
+      integrations: {
+        openai: "Needed",
+        publishingQueue: "Supabase queue ready",
+        shopify: "Needed",
+        canva: "Needed",
+        sora: "Needed",
+        publishingPath: "Social Cues Queue first"
+      },
+      analytics: {
+        lastCompiledAt: null,
+        status: "Waiting for connected accounts",
+        metrics: []
+      },
+      connectedAccounts: [
+        { id: "acct-tiktok", platform: "tiktok", name: "TikTok", handle: "", status: "not connected", connectedAt: null },
+        { id: "acct-instagram", platform: "instagram", name: "Instagram", handle: "", status: "not connected", connectedAt: null },
+        { id: "acct-threads", platform: "threads", name: "Threads", handle: "", status: "not connected", connectedAt: null },
+        { id: "acct-youtube", platform: "youtube", name: "YouTube", handle: "", status: "not connected", connectedAt: null },
+        { id: "acct-facebook", platform: "facebook", name: "Facebook Page", handle: "", status: "not connected", connectedAt: null },
+        { id: "acct-x", platform: "x", name: "X", handle: "", status: "not connected", connectedAt: null },
+        { id: "acct-shopify", platform: "shopify", name: "Shopify", handle: "", status: "not connected", connectedAt: null },
+        { id: "acct-canva", platform: "canva", name: "Canva", handle: "", status: "not connected", connectedAt: null },
+        { id: "acct-sora", platform: "sora", name: "Sora", handle: "", status: "not connected", connectedAt: null }
+      ],
+      actions: [
+        {
+          id: "act-seed-1",
+          type: "Experiment",
+          priority: "High",
+          status: "active",
+          title: "Run Social Cues self-launch alpha sprint",
+          signal: "At least one campaign shipped, evidence captured, and one reusable launch insight captured.",
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: "act-seed-2",
+          type: "Investigation",
+          priority: "High",
+          status: "active",
+          title: "Map direct publishing developer accounts",
+          signal: "Prepare TikTok, Meta, YouTube, and X app requirements for approval-first scheduling.",
+          createdAt: new Date().toISOString()
+        }
+      ],
+      activity: []
+    };
+
+    const integrationStack = [
+      {
+        id: "openai",
+        name: "OpenAI",
+        accent: "#28d7ee",
+        role: "Generation, scoring, image concepts, evidence-to-launch strategy, and growth diagnosis.",
+        backend: "OPENAI_API_KEY",
+        firstUse: "Server-side /api/generate endpoint for platform variants and campaign scoring."
+      },
+      {
+        id: "publishingQueue",
+        name: "Social Cues Queue",
+        accent: "#ff386b",
+        role: "Native scheduling, reminders, and server-side publish jobs owned by Social Cues.",
+        backend: "SUPABASE_URL, scheduled_posts table, platform OAuth tokens",
+        firstUse: "Approved variants become timed queue items. Social Cues publishes when allowed or alerts the user when a platform needs manual handoff."
+      },
+      {
+        id: "shopify",
+        name: "Shopify",
+        accent: "#93dd55",
+        role: "Commerce context, product links, discount codes, UTM attribution, and revenue evidence.",
+        backend: "SHOPIFY_STORE_DOMAIN, SHOPIFY_ADMIN_ACCESS_TOKEN",
+        firstUse: "Pull products/offers into campaigns and attach conversion context to the evidence trail."
+      },
+      {
+        id: "canva",
+        name: "Canva",
+        accent: "#64a9ff",
+        role: "Branded post graphics, thumbnails, covers, and reusable creative templates.",
+        backend: "CANVA_CLIENT_ID, CANVA_CLIENT_SECRET",
+        firstUse: "Generate design briefs and template autofill packets for approved variants."
+      },
+      {
+        id: "sora",
+        name: "Sora",
+        accent: "#f6bd4a",
+        role: "Video concept generation, short-form scripts, scene prompts, and visual directions.",
+        backend: "SORA / OpenAI video access",
+        firstUse: "Turn platform post angles into video prompts and shot lists."
+      },
+      {
+        id: "native",
+        name: "Native adapters",
+        accent: "#a88cff",
+        role: "Long-term direct integrations for TikTok, Meta, YouTube, X, and more.",
+        backend: "Provider OAuth apps",
+        firstUse: "Turn scheduled queue items into real platform posts once each provider approves scopes."
+      }
+    ];
+
+    const actionSeeds = [
+      ["Experiment", "High", "Test 3 hooks for Social Cues self-launch", "Find one hook with the strongest comment/save/share signal."],
+      ["Inquiry", "Medium", "Ask 5 creators what breaks in their posting workflow", "Collect exact pain language for landing page and onboarding."],
+      ["Investigation", "High", "Identify the first paid beta niche", "Pick the highest-urgency buyer: creators, local businesses, agencies, or ecommerce operators."],
+      ["Build task", "High", "Connect OpenAI generation endpoint", "Replace local content generation with server-side model output."],
+      ["Sales task", "Medium", "Draft $99 founder audit offer", "Create a simple service offer that can sell before full SaaS launch."]
+    ];
+
+    let model = loadModel();
+    let metaState = { loading: false, error: "", capabilities: [], accounts: [], metaConnection: null };
+
+    const $ = selector => document.querySelector(selector);
+    const $$ = selector => Array.from(document.querySelectorAll(selector));
+
+    function clone(value) {
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    function normalizeModel(raw) {
+      const next = { ...clone(defaultModel), ...raw };
+      if (!Array.isArray(next.connectedAccounts)) next.connectedAccounts = clone(defaultModel.connectedAccounts);
+      next.connectedAccounts = next.connectedAccounts.filter(account => account.platform !== "buffer");
+      const existingPlatforms = new Set(next.connectedAccounts.map(account => account.platform));
+      defaultModel.connectedAccounts.forEach(account => {
+        if (!existingPlatforms.has(account.platform)) next.connectedAccounts.push(clone(account));
+      });
+      if (!("currentUser" in next)) next.currentUser = null;
+      if (!Array.isArray(next.actions)) next.actions = clone(defaultModel.actions);
+      if (!next.onboarding) next.onboarding = clone(defaultModel.onboarding);
+      if (!next.analytics) next.analytics = clone(defaultModel.analytics);
+      next.settings = { ...clone(defaultModel.settings), ...(next.settings || {}) };
+      next.integrations = {
+        ...clone(defaultModel.integrations),
+        ...(next.integrations || {})
+      };
+      if (next.integrations.buffer && !next.integrations.publishingQueue) {
+        next.integrations.publishingQueue = next.integrations.buffer;
+      }
+      delete next.integrations.buffer;
+      if (next.integrations.publishingPath === "Buffer first") next.integrations.publishingPath = "Social Cues Queue first";
+      if (next.integrations.publishingPath === "Manual export first") next.integrations.publishingPath = "Reminder/export first";
+      next.actions = next.actions.map(action => {
+        if (action.title === "Compare Buffer-first publishing vs native adapters") {
+          return {
+            ...action,
+            title: "Map direct publishing developer accounts",
+            signal: "Prepare TikTok, Meta, YouTube, and X app requirements for approval-first scheduling."
+          };
+        }
+        return action;
+      });
+      return next;
+    }
+
+    function loadModel() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (!saved) return normalizeModel(clone(defaultModel));
+        return normalizeModel(JSON.parse(saved));
+      } catch {
+        return normalizeModel(clone(defaultModel));
+      }
+    }
+
+    async function syncModelFromServer(reason = "Synced server model.") {
+      if (!SERVER_MODE) return false;
+      try {
+        const response = await fetch("/api/model", { cache: "no-store" });
+        if (!response.ok) return false;
+        const serverModel = normalizeModel(await response.json());
+        model = serverModel;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
+        if (reason) {
+          model.activity = model.activity || [];
+          if (!model.activity.some(item => item.message === reason)) {
+            model.activity.unshift({ at: new Date().toISOString(), message: reason });
+            model.activity = model.activity.slice(0, 20);
+          }
+        }
+        render();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    function resolvedTheme() {
+      const selected = model?.settings?.theme || "auto";
+      if (selected === "light" || selected === "dark") return selected;
+      return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    }
+
+    function applyTheme() {
+      const theme = resolvedTheme();
+      document.documentElement.dataset.theme = theme;
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", theme === "light" ? "#f6f7f4" : "#07090d");
+      const preview = $("#themePreviewInput");
+      if (preview) preview.value = `${theme[0].toUpperCase()}${theme.slice(1)}${(model.settings?.theme || "auto") === "auto" ? " by device" : " locked"}`;
+    }
+
+    function saveModel(message) {
+      model.updatedAt = new Date().toISOString();
+      if (message) {
+        model.activity.unshift({ at: new Date().toISOString(), message });
+        model.activity = model.activity.slice(0, 20);
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
+      if (SERVER_MODE) {
+        fetch("/api/model", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(model)
+        }).catch(() => {});
+      }
+      render();
+    }
+
+    function loginUser() {
+      const name = clean($("#loginNameInput").value) || "Social Cues User";
+      const email = clean($("#loginEmailInput").value) || "user@local.test";
+      const workspace = clean($("#loginWorkspaceInput").value) || "Social Cues Alpha";
+      model.currentUser = {
+        id: "user-local",
+        name,
+        email,
+        role: "Owner",
+        loggedInAt: new Date().toISOString()
+      };
+      model.workspace.name = workspace;
+      if (!model.workspace.owner || model.workspace.owner === "Cory Barton") model.workspace.owner = name;
+      saveModel(`Logged in as ${name}.`);
+    }
+
+    function logoutUser() {
+      model.currentUser = null;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
+      render();
+    }
+
+    async function saveToDisk() {
+      if (!SERVER_MODE) {
+        alert("Disk save is available when running from http://127.0.0.1:4177.");
+        return;
+      }
+      const response = await fetch("/api/model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(model)
+      });
+      if (!response.ok) throw new Error("Disk save failed");
+      saveModel("Saved model to disk.");
+    }
+
+    async function loadFromDisk() {
+      if (!SERVER_MODE) {
+        alert("Disk load is available when running from http://127.0.0.1:4177.");
+        return;
+      }
+      const response = await fetch("/api/model");
+      if (!response.ok) throw new Error("Disk load failed");
+      model = { ...clone(defaultModel), ...(await response.json()) };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
+      saveModel("Loaded model from disk.");
+    }
+
+    function activeCampaign() {
+      return model.campaigns.find(c => c.id === model.activeCampaignId) || model.campaigns[0] || null;
+    }
+
+    function uid(prefix) {
+      return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`;
+    }
+
+    function clean(text) {
+      return (text || "").trim().replace(/\s+/g, " ");
+    }
+
+    function hasStoredToken(account) {
+      return Boolean(account?.token || account?.accessToken || account?.refreshToken || account?.tokenStored);
+    }
+
+    function isRealConnectedAccount(account) {
+      if (!account || account.status !== "connected") return false;
+      if (typeof account.connected === "boolean") return account.connected;
+      if (account.platform === "meta") return account.oauthProvider === "meta" && hasStoredToken(account) && Boolean(account.providerAccountId);
+      if (["facebook", "instagram"].includes(account.platform)) return account.oauthProvider === "meta" && hasStoredToken(account) && Boolean(account.providerAccountId);
+      if (account.platform === "threads") return account.oauthProvider === "threads" && hasStoredToken(account) && Boolean(account.providerAccountId);
+      return hasStoredToken(account) && Boolean(account.providerAccountId || account.oauthProvider);
+    }
+
+    function platformCopy(platform, campaign) {
+      const brief = clean(campaign.brief);
+      const profile = model.profile;
+      const base = `${brief}\n\nBuilt from ${profile.operator.toLowerCase()} mode for ${profile.outcome.toLowerCase()}.`;
+      const templates = {
+        tiktok: `POV: your content system finally stops leaking energy.\n\n${base}\n\nHook: one idea should become six native posts, not six copy-paste chores.\n\nComment CUES if you want the workflow.`,
+        instagram: `One idea. Six platform-native versions. One approval flow.\n\n${base}\n\nSave this if your content planning has been scattered across notes, tabs, and half-finished drafts.`,
+        threads: `The useful part of AI for social is not volume. It is fit.\n\n${base}\n\nSocial Cues turns one brief into platform-native options, then keeps approval visible before anything ships.`,
+        youtube: `Title: I Built a Social Command Center for Creator Businesses\n\nShorts script:\nMost people do not need more content ideas. They need a system that turns ideas into repeatable execution.\n\n${base}\n\nThis is Social Cues.`,
+        facebook: `Building something practical for creators and small businesses:\n\n${base}\n\nThe goal is simple: clearer campaigns, better-fit posts, and a review step before anything goes live.`,
+        x: `Building Social Cues in public.\n\n${base}\n\nThe wedge: AI adapts the content, but the operator approves the launch.`,
+        shopify: `Campaign context: ${base}\n\nAttach product links, UTM tags, offers, and conversion notes so social content can connect back to business outcomes.`
+      };
+      return templates[platform.id];
+    }
+
+    function platformRule(platform) {
+      const formats = {
+        tiktok: "Short hook, payoff, comment CTA, fast visual concept",
+        instagram: "Save-worthy caption, hashtags, visual trust angle",
+        threads: "Conversational thought, reply prompt, build-in-public cadence",
+        youtube: "Searchable title, Shorts script, authority angle",
+        facebook: "Community framing, local trust, page-safe CTA",
+        x: "Signal-first post, build-in-public thread seed",
+        shopify: "Offer, UTM context, product or conversion tie-in"
+      };
+      return formats[platform.id] || platform.fit;
+    }
+
+    function claimFlags(text) {
+      const lower = text.toLowerCase();
+      const checks = [
+        ["guaranteed", "Guarantees need proof."],
+        ["viral", "Frame as trend-informed, not guaranteed viral."],
+        ["make $", "Income claims need substantiation."],
+        ["risk-free", "Risk-free claims need review."],
+        ["overnight", "Overnight growth claims are risky."]
+      ];
+      return checks.filter(([term]) => lower.includes(term)).map(([, flag]) => flag);
+    }
+
+    function disclosureNote(campaign) {
+      if (campaign.disclosure === "Organic/no material connection") return "No disclosure prompt.";
+      return `${campaign.disclosure}: add clear disclosure before final publish.`;
+    }
+
+    function createCampaign() {
+      const id = uid("camp");
+      const campaign = {
+        id,
+        title: "Untitled Social Cues campaign",
+        brief: "Describe the campaign idea here.",
+        goal: model.profile.outcome,
+        tone: "Sharp and useful",
+        disclosure: "Organic/no material connection",
+        riskPosture: "Balanced growth",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        variants: []
+      };
+      model.campaigns.unshift(campaign);
+      model.activeCampaignId = id;
+      saveModel("Created a new campaign.");
+      jump("studio");
+    }
+
+    function createCampaignFromIdea(title, brief, goal = "Build demand") {
+      const id = uid("camp");
+      const campaign = {
+        id,
+        title,
+        brief,
+        goal,
+        tone: "Founder-led",
+        disclosure: "Founder or employee post",
+        riskPosture: "Balanced growth",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        variants: []
+      };
+      model.campaigns.unshift(campaign);
+      model.activeCampaignId = id;
+      saveModel(`Created campaign: ${title}.`);
+      return campaign;
+    }
+
+    function saveCampaignFromForm() {
+      let campaign = activeCampaign();
+      if (!campaign) {
+        createCampaign();
+        campaign = activeCampaign();
+      }
+      campaign.title = clean($("#campaignTitleInput").value) || "Untitled campaign";
+      campaign.brief = clean($("#briefInput").value);
+      campaign.goal = $("#goalInput").value;
+      campaign.tone = $("#toneInput").value;
+      campaign.disclosure = $("#disclosureInput").value;
+      campaign.riskPosture = $("#riskInput").value;
+      campaign.updatedAt = new Date().toISOString();
+      saveModel(`Saved campaign: ${campaign.title}.`);
+    }
+
+    function generateVariants() {
+      saveCampaignFromForm();
+      const campaign = activeCampaign();
+      const flags = claimFlags(campaign.brief);
+      campaign.variants = platforms.map(platform => ({
+        id: uid(platform.id),
+        platform: platform.id,
+        status: "draft",
+        copy: platformCopy(platform, campaign),
+        tags: platform.tags,
+        bestTime: platform.bestTime,
+        fit: platform.fit,
+        connector: platform.connector,
+        disclosure: campaign.disclosure,
+        flags,
+        updatedAt: new Date().toISOString()
+      }));
+      saveModel(`Generated ${campaign.variants.length} variants for ${campaign.title}.`);
+    }
+
+    function syncCopy(id) {
+      const campaign = activeCampaign();
+      const variant = campaign?.variants.find(v => v.id === id);
+      if (!variant) return;
+      const textarea = document.querySelector(`[data-copy="${id}"]`);
+      if (textarea) variant.copy = textarea.value;
+      variant.updatedAt = new Date().toISOString();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
+    }
+
+    function setStatus(id, status) {
+      syncCopy(id);
+      const campaign = activeCampaign();
+      const variant = campaign?.variants.find(v => v.id === id);
+      if (!variant) return;
+      variant.status = status;
+      if (status === "published") {
+        variant.publishedAt = new Date().toISOString();
+        variant.mockViews = Math.round(4200 + Math.random() * 64000);
+      }
+      if (status === "queued") {
+        variant.queuedAt = new Date().toISOString();
+        variant.scheduledFor = nextScheduleTime(variant);
+      }
+      saveModel(`${platformName(variant.platform)} marked ${status}.`);
+    }
+
+    function nextScheduleTime() {
+      const scheduled = new Date();
+      scheduled.setMinutes(scheduled.getMinutes() + 90);
+      return scheduled.toISOString();
+    }
+
+    function strengthen(id) {
+      syncCopy(id);
+      const campaign = activeCampaign();
+      const variant = campaign?.variants.find(v => v.id === id);
+      if (!variant) return;
+      variant.copy += "\n\nRevision note: lead with the clearest outcome, then make the CTA more specific.";
+      variant.status = "needs revision";
+      saveModel(`${platformName(variant.platform)} variant strengthened.`);
+    }
+
+    function publishApproved() {
+      const campaign = activeCampaign();
+      if (!campaign) return;
+      let count = 0;
+      campaign.variants.forEach(v => {
+        syncCopy(v.id);
+        if (v.status === "approved") {
+          v.status = "queued";
+          v.queuedAt = new Date().toISOString();
+          v.scheduledFor = nextScheduleTime(v);
+          count++;
+        }
+      });
+      saveModel(count ? `Scheduled ${count} approved variants in Social Cues Queue.` : "No approved variants to schedule.");
+    }
+
+    function addProof() {
+      const type = $("#proofTypeInput").value;
+      const metric = clean($("#proofMetricInput").value) || "Unlabeled result";
+      const note = clean($("#proofNoteInput").value) || "No note yet.";
+      model.proof = model.proof || [];
+      model.proof.unshift({
+        id: uid("proof"),
+        type,
+        metric,
+        note,
+        createdAt: new Date().toISOString()
+      });
+      $("#proofMetricInput").value = "";
+      $("#proofNoteInput").value = "";
+      saveModel(`Captured proof point: ${metric}.`);
+    }
+
+    function createSelfLaunchCampaign() {
+      const evidence = (model.proof || []).slice(0, 4).map(item => `${item.type}: ${item.metric} (${item.note})`).join(" ");
+      const brief = `Launch Social Cues using this customer-ready alpha as the first success story. Show how the tool helps a customer log in, connect accounts, generate platform-native variants, maintain approval control, attach media, analyze metrics, and turn honest signals into a repeatable growth system. Evidence so far: ${evidence || "evidence is still being built."}`;
+      const campaign = createCampaignFromIdea("Social Cues Self-Launch From Alpha Evidence", brief, "Launch product");
+      const flags = claimFlags(campaign.brief);
+      campaign.variants = platforms.map(platform => ({
+        id: uid(platform.id),
+        platform: platform.id,
+        status: "draft",
+        copy: platformCopy(platform, campaign),
+        tags: platform.tags,
+        bestTime: platform.bestTime,
+        fit: platform.fit,
+        connector: platform.connector,
+        disclosure: campaign.disclosure,
+        flags,
+        updatedAt: new Date().toISOString()
+      }));
+      saveModel("Created Social Cues self-launch campaign from evidence trail.");
+      jump("studio");
+    }
+
+    function handoffUrl() {
+      const campaign = activeCampaign();
+      const params = new URLSearchParams({
+        workspace: model.workspace.name,
+        campaign: campaign?.id || "",
+        view: "studio",
+        mode: "handoff"
+      });
+      return `${location.origin}${location.pathname}#${params.toString()}`;
+    }
+
+    function createHandoff() {
+      model.handoff = model.handoff || {};
+      model.handoff.lastLink = handoffUrl();
+      saveModel("Created phone/desktop handoff link.");
+    }
+
+    function copyHandoff() {
+      const link = model.handoff?.lastLink || handoffUrl();
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(link);
+        saveModel("Copied handoff link.");
+      } else {
+        $("#handoffLinkInput").select();
+        document.execCommand("copy");
+      }
+    }
+
+    function exportHandoff() {
+      const campaign = activeCampaign();
+      exportJson("Social Cues-handoff-packet.json", {
+        exportedAt: new Date().toISOString(),
+        link: model.handoff?.lastLink || handoffUrl(),
+        workspace: model.workspace,
+        profile: model.profile,
+        campaign,
+        proof: model.proof || []
+      });
+    }
+
+    function platformName(id) {
+      return platforms.find(p => p.id === id)?.name || id;
+    }
+
+    function platformById(id) {
+      return platforms.find(p => p.id === id);
+    }
+
+    function statusClass(status) {
+      if (status === "published") return "published";
+      if (status === "queued") return "approved";
+      if (status === "approved") return "approved";
+      if (status === "needs revision") return "revision";
+      return "draft";
+    }
+
+    function exportJson(filename, data) {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function exportModel() {
+      exportJson("Social Cues-alpha-model.json", model);
+    }
+
+    function exportContent() {
+      const campaign = activeCampaign();
+      exportJson("Social Cues-alpha-content-bundle.json", {
+        exportedAt: new Date().toISOString(),
+        workspace: model.workspace,
+        profile: model.profile,
+        proof: model.proof || [],
+        campaign,
+        approvedOrPublished: campaign?.variants.filter(v => v.status === "approved" || v.status === "published") || []
+      });
+    }
+
+    function importModel(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const imported = JSON.parse(reader.result);
+          if (!Array.isArray(imported.campaigns)) throw new Error("Missing campaigns");
+          model = { ...clone(defaultModel), ...imported };
+          saveModel("Imported model file.");
+        } catch (error) {
+          alert("That file does not look like a Social Cues model.");
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function saveProfile() {
+      model.profile = {
+        operator: $("#operatorInput").value,
+        outcome: $("#outcomeInput").value,
+        display: $("#displayInput").value,
+        automation: $("#automationInput").value
+      };
+      saveModel("Saved operator profile.");
+    }
+
+    function saveBaseline() {
+      model.baseline = {
+        audience: Number($("#audienceInput").value || 0),
+        avgViews: Number($("#viewsInput").value || 0),
+        engagement: Number($("#engagementInput").value || 0),
+        cadence: Number($("#cadenceInput").value || 0)
+      };
+      saveModel("Saved page baseline.");
+    }
+
+    function saveSecurity() {
+      model.security = {
+        session: $("#sessionInput").value,
+        stepUp: $("#stepUpInput").value
+      };
+      saveModel("Saved security posture.");
+    }
+
+    function saveTheme() {
+      model.settings = {
+        ...(model.settings || {}),
+        theme: $("#themeInput").value
+      };
+      applyTheme();
+      saveModel("Saved appearance.");
+    }
+
+    function connectAccount(platform) {
+      if (SERVER_MODE && platform === "threads") {
+        window.location.href = "/api/oauth/threads/start";
+        return;
+      }
+      if (SERVER_MODE && platform === "x") {
+        window.location.href = "/api/oauth/x/start";
+        return;
+      }
+      if (SERVER_MODE && ["instagram", "facebook"].includes(platform)) {
+        window.location.href = `/api/oauth/meta/start?platform=${encodeURIComponent(platform)}`;
+        return;
+      }
+      if (SERVER_MODE) {
+        alert(`${platformName(platform)} needs a real provider OAuth integration before Social Cues can mark it connected.`);
+        return;
+      }
+      model.connectedAccounts = model.connectedAccounts || clone(defaultModel.connectedAccounts);
+      const account = model.connectedAccounts.find(item => item.platform === platform);
+      if (!account) return;
+      account.status = "not connected";
+      account.connectedAt = null;
+      saveModel(`${account.name} needs provider OAuth before it can connect.`);
+    }
+
+    function disconnectAccount(platform) {
+      const account = (model.connectedAccounts || []).find(item => item.platform === platform);
+      if (!account) return;
+      account.status = "not connected";
+      account.connectedAt = null;
+      saveModel(`Disconnected ${account.name}.`);
+    }
+
+    function saveOnboarding() {
+      model.onboarding = {
+        complete: true,
+        bio: clean($("#bioInput").value),
+        purpose: clean($("#purposeInput").value),
+        offer: clean($("#offerInput").value),
+        audience: clean($("#audienceDescInput").value)
+      };
+      model.workspace.purpose = model.onboarding.purpose || model.workspace.purpose;
+      saveModel("Completed meet-and-greet onboarding.");
+      jump("accounts");
+    }
+
+    async function compileAnalytics() {
+      if (SERVER_MODE) {
+        try {
+          const response = await fetch("/api/analyze", { method: "POST" });
+          if (response.ok) {
+            const body = await response.json();
+            const serverMetrics = body.analytics?.metrics || [];
+            if (serverMetrics.length && serverMetrics.every(metric => metric.source && metric.kind)) {
+              model.analytics = body.analytics || model.analytics;
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
+              render();
+              jump("growth");
+              return;
+            }
+          }
+        } catch {
+          // Local fallback below keeps the app usable if the server is unavailable.
+        }
+      }
+      const accounts = model.connectedAccounts || [];
+      const connected = accounts.filter(isRealConnectedAccount);
+      const metaAccounts = accounts.filter(account => account.oauthProvider === "meta" || ["meta", "facebook", "instagram"].includes(account.platform));
+      const metaIdentity = metaAccounts.find(account => account.platform === "meta" && isRealConnectedAccount(account));
+      const pageCount = Number(model.metaConnection?.pageCount || metaAccounts.filter(account => account.platform === "facebook" && isRealConnectedAccount(account)).length);
+      const instagramCount = metaAccounts.filter(account => account.platform === "instagram" && isRealConnectedAccount(account)).length;
+      const readyLanes = model.metaConnection ? 5 : 0;
+      const base = model.baseline || defaultModel.baseline;
+      model.analytics = {
+        lastCompiledAt: new Date().toISOString(),
+        status: "Compiled locally from current account state, Meta connection records, and clearly labeled manual baseline estimates.",
+        metrics: [
+          { label: "Meta identity", value: metaIdentity?.name || model.metaConnection?.userName || "Not connected", source: "Current Social Cues model from Meta OAuth", kind: metaIdentity || model.metaConnection?.userName ? "live" : "blocked", signal: metaIdentity || model.metaConnection?.userName ? "Meta login returned an identity and the server model retained it." : "Meta login is not connected in the current model." },
+          { label: "Meta Pages", value: String(pageCount), source: "Current Meta connection page count", kind: pageCount ? "live" : "blocked", signal: pageCount ? "Facebook Page assets are available." : "No Facebook Pages are available, so Page analytics cannot be called live yet." },
+          { label: "Instagram assets", value: String(instagramCount), source: "Current Meta-connected Instagram account records", kind: instagramCount ? "live" : "blocked", signal: instagramCount ? "Instagram professional assets are available." : "No Instagram professional asset is available; this still needs permissions and linked professional account discovery." },
+          { label: "Meta ready lanes", value: `${readyLanes}/18`, source: "Current Meta integration state", kind: "computed", signal: readyLanes ? "Core OAuth/readiness is online; the rest remains gated by permissions, review, or assets." : "Meta readiness has not been compiled by the server yet." },
+          { label: "Connected account cards", value: `${connected.length}/${accounts.length}`, source: "Browser local account state", kind: "computed", signal: "Counts cards marked connected or logged in; it does not mean live analytics are available." },
+          { label: "Manual audience estimate", value: Number(base.audience || 0).toLocaleString(), source: "Manual baseline input", kind: "manual", signal: "User-entered planning number, not live platform data." },
+          { label: "Manual avg. views", value: Number(base.avgViews || 0).toLocaleString(), source: "Manual baseline input", kind: "manual", signal: "User-entered planning number, not live platform data." },
+          { label: "Manual engagement", value: `${base.engagement || 0}%`, source: "Manual baseline input", kind: "manual", signal: "User-entered estimate; live engagement needs platform analytics access." },
+          { label: "Manual cadence", value: `${base.cadence || 0}/week`, source: "Manual baseline input", kind: "manual", signal: "User-entered posting rhythm for planning." }
+        ],
+        sourceBreakdown: [
+          { source: "Current Social Cues model from Meta OAuth", status: metaIdentity || model.metaConnection?.userName ? "Live login record present" : "No live login record", data: metaIdentity || model.metaConnection?.userName ? `Identity returned: ${metaIdentity?.name || model.metaConnection.userName}.` : "No connected Meta identity in the current model." },
+          { source: "Current Meta connection page count", status: pageCount ? "Pages available" : "No Pages returned", data: `${pageCount} Facebook Page record(s) in the current model.` },
+          { source: "Current Meta-connected Instagram account records", status: instagramCount ? "Instagram assets available" : "No Instagram assets returned", data: `${instagramCount} Instagram professional account record(s) in the current model.` },
+          { source: "Browser local account state", status: "Computed locally", data: `${connected.length} account card(s) marked connected or logged in.` },
+          { source: "Manual baseline input", status: "Manual estimate", data: `Audience ${Number(base.audience || 0).toLocaleString()}, views ${Number(base.avgViews || 0).toLocaleString()}, engagement ${base.engagement || 0}%, cadence ${base.cadence || 0}/week.` }
+        ],
+        translatedAnalysis: [
+          metaIdentity || model.metaConnection?.userName ? `Meta login is real: Social Cues can identify ${metaIdentity?.name || model.metaConnection.userName}.` : "Meta login is not connected in the current model.",
+          pageCount ? `${pageCount} Facebook Page asset(s) are available for Page analysis.` : "Meta returned zero Facebook Pages. That is why audience, views, and engagement cannot honestly be called live Meta data yet.",
+          instagramCount ? `${instagramCount} Instagram professional asset(s) are available.` : "Instagram analytics are still gated because no linked professional Instagram account was returned.",
+          "Manual baseline numbers are preserved for planning, but labeled so they cannot be mistaken for live growth data.",
+          "Next unlock: get a Page or Instagram professional asset returned by Meta, then request the missing analytics and publishing permissions."
+        ]
+      };
+      saveModel("Compiled command-center analytics.");
+      jump("growth");
+    }
+
+    function mediaSuggestion(platformId, campaign) {
+      const map = {
+        tiktok: "Vertical 9:16 founder clip with quick captions, app screen cuts, and a bold first-frame hook.",
+        instagram: "Reel cover plus 9:16 demo clip or carousel: problem, system, result, invitation.",
+        youtube: "Thumbnail with Social Cues cockpit visual, strong contrast, and a title-safe composition.",
+        facebook: "Warm founder/workspace image or simple walkthrough clip for trust and clarity.",
+        x: "Clean product screenshot or proof-card graphic that can stand alone in the feed.",
+        shopify: "Product/offer visual with UTM campaign context and simple conversion CTA."
+      };
+      return map[platformId] || `Media that demonstrates ${campaign?.title || "the campaign"} clearly.`;
+    }
+
+    function generatedMediaDataUrl(platformId, campaign) {
+      const p = platformById(platformId) || { name: platformId, accent: "#28d7ee" };
+      const title = `${p.name} media concept`;
+      const subtitle = mediaSuggestion(platformId, campaign).slice(0, 110);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675"><defs><linearGradient id="g" x1="0" x2="1"><stop stop-color="#28d7ee"/><stop offset="1" stop-color="${p.accent || "#ff386b"}"/></linearGradient></defs><rect width="1200" height="675" fill="#07090d"/><rect x="54" y="54" width="1092" height="567" rx="36" fill="url(#g)" opacity=".22"/><circle cx="960" cy="150" r="82" fill="${p.accent || "#ff386b"}" opacity=".85"/><text x="86" y="170" fill="#f8fafc" font-family="Arial, sans-serif" font-size="58" font-weight="800">${escapeHtml(title)}</text><text x="86" y="248" fill="#dbeafe" font-family="Arial, sans-serif" font-size="30">${escapeHtml(campaign?.title || "Social Cues campaign")}</text><foreignObject x="86" y="310" width="820" height="210"><div xmlns="http://www.w3.org/1999/xhtml" style="font-family:Arial,sans-serif;color:#f8fafc;font-size:34px;line-height:1.25">${escapeHtml(subtitle)}</div></foreignObject><text x="86" y="585" fill="#93dd55" font-family="Arial, sans-serif" font-size="34" font-weight="800">Generated concept - replace or refine in Canva/Sora</text></svg>`;
+      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    }
+
+    function generateMedia(id, provider = "Social Cues") {
+      const campaign = activeCampaign();
+      const variant = campaign?.variants.find(v => v.id === id);
+      if (!variant) return;
+      variant.media = {
+        type: "generated",
+        provider,
+        name: `${provider} ${platformName(variant.platform)} concept`,
+        url: generatedMediaDataUrl(variant.platform, campaign),
+        suggestion: mediaSuggestion(variant.platform, campaign),
+        createdAt: new Date().toISOString()
+      };
+      saveModel(`${provider} media concept generated for ${platformName(variant.platform)}.`);
+    }
+
+    function attachMedia(id, input) {
+      const file = input.files?.[0];
+      if (!file) return;
+      const campaign = activeCampaign();
+      const variant = campaign?.variants.find(v => v.id === id);
+      if (!variant) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        variant.media = {
+          type: file.type.startsWith("video/") ? "video" : "image",
+          provider: "Upload",
+          name: file.name,
+          url: reader.result,
+          suggestion: mediaSuggestion(variant.platform, campaign),
+          createdAt: new Date().toISOString()
+        };
+        saveModel(`Attached media to ${platformName(variant.platform)}.`);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function saveIntegrations() {
+      model.integrations = {
+        openai: $("#openaiStatusInput").value,
+        publishingQueue: $("#queueStatusInput").value,
+        shopify: $("#shopifyStatusInput").value,
+        canva: $("#canvaStatusInput").value,
+        sora: $("#soraStatusInput").value,
+        publishingPath: $("#publishingPathInput").value
+      };
+      saveModel("Saved integration readiness.");
+    }
+
+    function addAction() {
+      const title = clean($("#actionTitleInput").value);
+      if (!title) {
+        alert("Add an action title first.");
+        return;
+      }
+      model.actions = model.actions || [];
+      model.actions.unshift({
+        id: uid("act"),
+        type: $("#actionTypeInput").value,
+        priority: $("#actionPriorityInput").value,
+        status: "active",
+        title,
+        signal: clean($("#actionSignalInput").value) || "Signal not defined yet.",
+        createdAt: new Date().toISOString()
+      });
+      $("#actionTitleInput").value = "";
+      $("#actionSignalInput").value = "";
+      saveModel(`Added action: ${title}.`);
+    }
+
+    function seedActions() {
+      model.actions = model.actions || [];
+      const existing = new Set(model.actions.map(item => item.title));
+      actionSeeds.forEach(([type, priority, title, signal]) => {
+        if (!existing.has(title)) {
+          model.actions.push({ id: uid("act"), type, priority, status: "active", title, signal, createdAt: new Date().toISOString() });
+        }
+      });
+      saveModel("Seeded next-move action list.");
+    }
+
+    function setActionStatus(id, status) {
+      const action = (model.actions || []).find(item => item.id === id);
+      if (!action) return;
+      action.status = status;
+      action.updatedAt = new Date().toISOString();
+      if (status === "won") {
+        model.proof = model.proof || [];
+        model.proof.unshift({
+          id: uid("proof"),
+          type: action.type,
+          metric: action.title,
+          note: action.signal,
+          createdAt: new Date().toISOString()
+        });
+      }
+      saveModel(`Action marked ${status}: ${action.title}.`);
+    }
+
+    function exportActions() {
+      exportJson("Social Cues-action-lab.json", {
+        exportedAt: new Date().toISOString(),
+        workspace: model.workspace,
+        actions: model.actions || [],
+        proof: model.proof || []
+      });
+    }
+
+    function exportIntegrationConfig() {
+      exportJson("Social Cues-integration-readiness.json", {
+        exportedAt: new Date().toISOString(),
+        workspace: model.workspace,
+        integrations: model.integrations,
+        meta: metaState,
+        stack: integrationStack
+      });
+    }
+
+    async function refreshMetaState() {
+      if (!SERVER_MODE) {
+        metaState = { loading: false, error: "Server mode required for SCv2 Meta surfaces.", capabilities: [], accounts: [], metaConnection: null };
+        renderMetaSurfaces();
+        return;
+      }
+      metaState = { ...metaState, loading: true, error: "" };
+      renderMetaSurfaces();
+      try {
+        const healthResponse = await fetch("/api/meta/health", { method: "POST" });
+        const assets = healthResponse.ok
+          ? await healthResponse.json()
+          : await fetch("/api/meta/assets", { cache: "no-store" }).then(response => response.json());
+        const blockers = assets.health?.blockers || assets.metaHealth?.blockers || assets.metaConnection?.blockers || [];
+        const freshMetaState = {
+          loading: false,
+          error: assets.ok ? "" : "Meta status returned an error.",
+          accounts: assets.accounts || [],
+          metaConnection: assets.metaConnection || null,
+          health: assets.health || assets.metaHealth || (blockers.length ? { blockers } : null),
+          capabilities: assets.capabilities || []
+        };
+        await syncModelFromServer("");
+        metaState = freshMetaState;
+      } catch (error) {
+        metaState = { loading: false, error: error.message, capabilities: [], accounts: [], metaConnection: null };
+      }
+      renderMetaSurfaces();
+      renderRightRail();
+    }
+
+    function baselineInsight() {
+      const b = model.baseline;
+      const viewRate = b.audience ? Math.round((b.avgViews / b.audience) * 100) : 0;
+      const cadenceNote = b.cadence < 3 ? "cadence is probably too light" : b.cadence > 10 ? "cadence may need tighter quality control" : "cadence looks workable";
+      const engagementNote = b.engagement < 3 ? "engagement needs stronger hooks and comment prompts" : b.engagement < 7 ? "engagement is workable; test sharper CTAs" : "engagement is a strength to compound";
+      return `Approx. view rate: ${viewRate}%. ${cadenceNote}; ${engagementNote}.`;
+    }
+
+    function campaignMeta(campaign) {
+      const total = campaign?.variants.length || 0;
+      const approved = campaign?.variants.filter(v => v.status === "approved").length || 0;
+      const published = campaign?.variants.filter(v => v.status === "queued" || v.status === "published").length || 0;
+      return `${total} variants - ${approved} approved - ${published} published`;
+    }
+
+    function renderCampaignList() {
+      $("#campaignList").innerHTML = model.campaigns.length ? model.campaigns.map(c => `
+        <button class="campaign-button ${c.id === model.activeCampaignId ? "active" : ""}" onclick="selectCampaign('${c.id}')">
+          <strong>${escapeHtml(c.title)}</strong>
+          <span>${campaignMeta(c)}</span>
+        </button>
+      `).join("") : `<div class="empty">No campaigns yet.</div>`;
+    }
+
+    function renderForms() {
+      const campaign = activeCampaign();
+      if (campaign) {
+        $("#campaignTitleInput").value = campaign.title;
+        $("#briefInput").value = campaign.brief;
+        $("#goalInput").value = campaign.goal;
+        $("#toneInput").value = campaign.tone;
+        $("#disclosureInput").value = campaign.disclosure;
+        $("#riskInput").value = campaign.riskPosture;
+      }
+      $("#operatorInput").value = model.profile.operator;
+      $("#outcomeInput").value = model.profile.outcome;
+      $("#displayInput").value = model.profile.display;
+      $("#automationInput").value = model.profile.automation;
+      $("#audienceInput").value = model.baseline.audience;
+      $("#viewsInput").value = model.baseline.avgViews;
+      $("#engagementInput").value = model.baseline.engagement;
+      $("#cadenceInput").value = model.baseline.cadence;
+      $("#sessionInput").value = model.security.session;
+      $("#stepUpInput").value = model.security.stepUp;
+      $("#themeInput").value = model.settings?.theme || "auto";
+      $("#openaiStatusInput").value = model.integrations?.openai || "Needed";
+      $("#queueStatusInput").value = model.integrations?.publishingQueue || "Needed";
+      $("#shopifyStatusInput").value = model.integrations?.shopify || "Needed";
+      $("#canvaStatusInput").value = model.integrations?.canva || "Needed";
+      $("#soraStatusInput").value = model.integrations?.sora || "Needed";
+      $("#publishingPathInput").value = model.integrations?.publishingPath || "Social Cues Queue first";
+      applyTheme();
+    }
+
+    function renderMetrics() {
+      const variants = model.campaigns.flatMap(c => c.variants || []);
+      $("#metricCampaigns").textContent = model.campaigns.length;
+      $("#metricDrafts").textContent = variants.filter(v => v.status === "draft" || v.status === "needs revision").length;
+      $("#metricApproved").textContent = variants.filter(v => v.status === "approved").length;
+      $("#metricPublished").textContent = variants.filter(v => v.status === "queued" || v.status === "published").length;
+    }
+
+    function renderOnboarding() {
+      $("#bioInput").value = model.onboarding?.bio || "";
+      $("#purposeInput").value = model.onboarding?.purpose || "";
+      $("#offerInput").value = model.onboarding?.offer || "";
+      $("#audienceDescInput").value = model.onboarding?.audience || "";
+      const steps = [
+        ["Meet", model.onboarding?.complete ? "Bio and purpose saved." : "Tell Social Cues who this workspace serves."],
+        ["Connect", `${(model.connectedAccounts || []).filter(isRealConnectedAccount).length} accounts connected.`],
+        ["Analyze", model.analytics?.lastCompiledAt ? `Compiled ${new Date(model.analytics.lastCompiledAt).toLocaleString()}.` : "Compile baseline and account status."],
+        ["Create", "Generate posts with media suggestions, upload, Canva, or Sora concepts."]
+      ];
+      $("#onboardingSteps").innerHTML = steps.map(([title, body], index) => `
+        <article class="variant" style="--accent:${index % 2 ? "#ff386b" : "#28d7ee"}">
+          <div class="variant-head"><div><h3>${title}</h3><p>${body}</p></div><span class="pill approved">step ${index + 1}</span></div>
+        </article>
+      `).join("");
+    }
+
+    function renderDashboard() {
+      const campaign = activeCampaign();
+      $("#workspaceLabel").textContent = `${model.workspace.name} workspace`;
+      $("#activeCampaignTitle").textContent = campaign?.title || "No campaign";
+      $("#activeCampaignMeta").textContent = campaign ? `${campaign.goal} - ${campaign.tone} - ${campaignMeta(campaign)}` : "Create or select a campaign to begin.";
+      $("#storageNotice").innerHTML = `Stored locally as <strong>${STORAGE_KEY}</strong>. Last update: ${model.updatedAt ? new Date(model.updatedAt).toLocaleString() : "just now"}.`;
+      const needs = model.campaigns.flatMap(c => (c.variants || []).filter(v => v.status === "draft" || v.status === "needs revision").map(v => ({ ...v, campaignTitle: c.title }))).slice(0, 5);
+      $("#dashboardQueue").innerHTML = needs.length ? needs.map(v => miniCard(v, v.campaignTitle)).join("") : `<div class="empty">No draft work waiting. Generate variants or approve the current campaign.</div>`;
+      $("#profileSummary").textContent = `${model.profile.operator} - ${model.profile.outcome} - ${model.profile.display} - ${model.profile.automation}`;
+      const analyticsHtml = (model.analytics?.metrics || []).map(metric => `<span class="tag">${escapeHtml(metric.label)}: ${escapeHtml(metric.value)} - ${escapeHtml(metric.kind || "signal")} - ${escapeHtml(metric.source || "source pending")}</span>`).join("");
+      if (analyticsHtml) $("#storageNotice").innerHTML += `<div class="tags">${analyticsHtml}</div>`;
+    }
+
+    function renderAuth() {
+      const screen = $("#loginScreen");
+      if (!model.currentUser) {
+        screen.classList.remove("hidden");
+        $("#loginNameInput").value = model.workspace.owner || "Cory Barton";
+        $("#loginWorkspaceInput").value = model.workspace.name || "Social Cues Alpha";
+      } else {
+        screen.classList.add("hidden");
+      }
+    }
+
+    function miniCard(v, label) {
+      const p = platformById(v.platform);
+      return `<div class="variant" style="--accent:${p.accent}">
+        <div class="variant-head">
+          <div>
+            <h3>${p.name}</h3>
+            <p>${label}</p>
+          </div>
+          <span class="pill ${statusClass(v.status)}">${v.status}</span>
+        </div>
+        <p>${escapeHtml(v.copy || "").slice(0, 170)}${(v.copy || "").length > 170 ? "..." : ""}</p>
+      </div>`;
+    }
+
+    function variantCard(v) {
+      const p = platformById(v.platform);
+      const flags = v.flags?.length ? `<div class="tags">${v.flags.map(flag => `<span class="tag">${escapeHtml(flag)}</span>`).join("")}</div>` : "";
+      const campaign = activeCampaign();
+      const media = v.media;
+      const mediaHtml = media ? `<div class="media-preview">${media.type === "video" ? `<video src="${media.url}" controls></video>` : `<img src="${media.url}" alt="${escapeHtml(media.name)}">`}<div class="media-copy">${escapeHtml(media.provider)} - ${escapeHtml(media.name)}<br>${escapeHtml(media.suggestion || mediaSuggestion(v.platform, campaign))}</div></div>` : `<div class="notice">${escapeHtml(mediaSuggestion(v.platform, campaign))}</div>`;
+      return `<article class="variant" style="--accent:${p.accent}">
+        <div class="variant-head">
+          <div>
+            <h3>${p.name}</h3>
+            <p>${p.fit} - ${v.bestTime} - ${v.connector}</p>
+          </div>
+          <span class="pill ${statusClass(v.status)}">${v.status}</span>
+        </div>
+        <textarea data-copy="${v.id}" oninput="syncCopy('${v.id}')">${escapeHtml(v.copy)}</textarea>
+        ${mediaHtml}
+        ${flags}
+        <div class="tags">
+          ${v.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
+          <span class="tag">${escapeHtml(disclosureNote(activeCampaign()))}</span>
+        </div>
+        <div class="variant-tools">
+          <button onclick="setStatus('${v.id}','approved')">Approve</button>
+          <button onclick="strengthen('${v.id}')">Strengthen</button>
+          <button onclick="setStatus('${v.id}','draft')">Draft</button>
+          <button onclick="setStatus('${v.id}','queued')">Queue</button>
+        </div>
+        <div class="variant-tools">
+          <button onclick="document.querySelector('[data-media-input=&quot;${v.id}&quot;]').click()">Upload media</button>
+          <button onclick="generateMedia('${v.id}','Social Cues')">Generate concept</button>
+          <button onclick="generateMedia('${v.id}','Canva')">Canva concept</button>
+          <button onclick="generateMedia('${v.id}','Sora')">Sora prompt</button>
+        </div>
+        <input class="file-input" data-media-input="${v.id}" type="file" accept="image/*,video/*" onchange="attachMedia('${v.id}', this)">
+      </article>`;
+    }
+
+    function renderVariants() {
+      const campaign = activeCampaign();
+      const html = campaign?.variants.length ? campaign.variants.map(variantCard).join("") : `<div class="empty">Generate variants for the active campaign.</div>`;
+      $("#variantList").innerHTML = html;
+      $("#approvalList").innerHTML = campaign?.variants.length ? campaign.variants.map(variantCard).join("") : `<div class="empty">No variants to approve yet.</div>`;
+    }
+
+    function renderRules() {
+      $("#rulesBox").innerHTML = platforms.map(platform => `
+        <article class="variant" style="--accent:${platform.accent}">
+          <div class="variant-head">
+            <div>
+              <h3>${platform.name}</h3>
+              <p>${escapeHtml(platformRule(platform))}</p>
+            </div>
+            <span class="pill">${escapeHtml(platform.bestTime)}</span>
+          </div>
+          <div class="tags">
+            <span class="tag">${escapeHtml(platform.connector)}</span>
+            <span class="tag">${escapeHtml(platform.fit)}</span>
+            ${platform.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
+          </div>
+        </article>
+      `).join("");
+    }
+
+    function renderCalendar() {
+      const items = model.campaigns.flatMap(c => (c.variants || []).filter(v => ["approved", "queued", "published"].includes(v.status)).map(v => ({ ...v, campaignTitle: c.title })));
+      $("#calendarList").innerHTML = items.length ? items.map(v => {
+        const p = platformById(v.platform);
+        return `<article class="variant" style="--accent:${p.accent}">
+          <div class="variant-head">
+            <div>
+              <h3>${p.name} - ${v.bestTime}</h3>
+              <p>${escapeHtml(v.campaignTitle)}${v.publishedAt ? ` - published ${new Date(v.publishedAt).toLocaleString()}` : ""}</p>
+            </div>
+            <span class="pill ${statusClass(v.status)}">${v.status}</span>
+          </div>
+          <p>${escapeHtml(v.copy).slice(0, 260)}${v.copy.length > 260 ? "..." : ""}</p>
+        </article>`;
+      }).join("") : `<div class="empty">Approved content will appear here.</div>`;
+    }
+
+    function renderGrowth() {
+      const analytics = model.analytics || {};
+      const metrics = analytics.metrics || [];
+      const translated = analytics.translatedAnalysis || [];
+      const sources = analytics.sourceBreakdown || [];
+      if (metrics.length) {
+        const kindAccent = {
+          live: "#93dd55",
+          computed: "#28d7ee",
+          manual: "#f6bd4a",
+          blocked: "#ff386b"
+        };
+        const metricHtml = metrics.map(metric => `
+          <article class="variant" style="--accent:${kindAccent[metric.kind] || "#64a9ff"}">
+            <div class="variant-head">
+              <div>
+                <h3>${escapeHtml(metric.label)}: ${escapeHtml(metric.value)}</h3>
+                <p>${escapeHtml(metric.source || "Source pending")}</p>
+              </div>
+              <span class="pill ${metric.kind === "live" ? "published" : metric.kind === "blocked" ? "revision" : "approved"}">${escapeHtml(metric.kind || "signal")}</span>
+            </div>
+            <p>${escapeHtml(metric.signal || "")}</p>
+          </article>
+        `).join("");
+        const analysisHtml = translated.length ? `
+          <article class="variant" style="--accent:#28d7ee">
+            <div class="variant-head">
+              <div>
+                <h3>Translated analysis</h3>
+                <p>${escapeHtml(analytics.status || "Latest growth readout")}</p>
+              </div>
+              <span class="pill approved">readout</span>
+            </div>
+            <div class="stack">
+              ${translated.map(line => `<p>${escapeHtml(line)}</p>`).join("")}
+            </div>
+          </article>
+        ` : "";
+        const sourceHtml = sources.length ? `
+          <article class="variant" style="--accent:#f6bd4a">
+            <div class="variant-head">
+              <div>
+                <h3>Sources pulled</h3>
+                <p>Exactly where the growth numbers came from.</p>
+              </div>
+              <span class="pill approved">sources</span>
+            </div>
+            <div class="stack">
+              ${sources.map(item => `<p><strong>${escapeHtml(item.source)}</strong> - ${escapeHtml(item.status)}. ${escapeHtml(item.data)}</p>`).join("")}
+            </div>
+          </article>
+        ` : "";
+        $("#growthList").innerHTML = metricHtml + analysisHtml + sourceHtml;
+      } else {
+        $("#growthList").innerHTML = growthPlan.map(([title, body, accent]) => `
+          <article class="variant" style="--accent:${accent}">
+            <div class="variant-head">
+              <div>
+                <h3>${title}</h3>
+                <p>${body}</p>
+              </div>
+              <span class="pill approved">engine</span>
+            </div>
+          </article>
+        `).join("");
+      }
+      $("#baselineInsight").textContent = baselineInsight();
+    }
+
+    function renderActionLab() {
+      const actions = model.actions || [];
+      $("#actionList").innerHTML = actions.length ? actions.map(action => {
+        const accent = action.priority === "High" ? "#ff386b" : action.priority === "Medium" ? "#f6bd4a" : "#64a9ff";
+        return `<article class="variant" style="--accent:${accent}">
+          <div class="variant-head">
+            <div>
+              <h3>${escapeHtml(action.title)}</h3>
+              <p>${escapeHtml(action.type)} - ${escapeHtml(action.priority)} priority - ${escapeHtml(action.status)}</p>
+            </div>
+            <span class="pill ${action.status === "won" ? "published" : action.status === "blocked" ? "revision" : "approved"}">${escapeHtml(action.status)}</span>
+          </div>
+          <p>${escapeHtml(action.signal)}</p>
+          <div class="variant-tools">
+            <button onclick="setActionStatus('${action.id}','active')">Active</button>
+            <button onclick="setActionStatus('${action.id}','won')">Won</button>
+            <button onclick="setActionStatus('${action.id}','blocked')">Blocked</button>
+            <button onclick="setActionStatus('${action.id}','dropped')">Drop</button>
+          </div>
+        </article>`;
+      }).join("") : `<div class="empty">No actions yet. Seed next moves or add one manually.</div>`;
+
+      const investigations = actions.filter(item => ["Inquiry", "Investigation", "Build task", "Sales task"].includes(item.type)).slice(0, 6);
+      $("#inquiryList").innerHTML = investigations.length ? investigations.map(item => miniAction(item)).join("") : `<div class="empty">No inquiries or investigations yet.</div>`;
+    }
+
+    function miniAction(action) {
+      return `<article class="variant" style="--accent:#28d7ee">
+        <div class="variant-head">
+          <div>
+            <h3>${escapeHtml(action.title)}</h3>
+            <p>${escapeHtml(action.type)} - ${escapeHtml(action.status)}</p>
+          </div>
+          <span class="pill approved">${escapeHtml(action.priority)}</span>
+        </div>
+        <p>${escapeHtml(action.signal)}</p>
+      </article>`;
+    }
+
+    function renderProof() {
+      if (!$("#proofList") || !$("#selfLaunchList")) return;
+      const proof = model.proof || [];
+      $("#proofList").innerHTML = proof.length ? proof.map(item => `
+        <article class="variant" style="--accent:#28d7ee">
+          <div class="variant-head">
+            <div>
+              <h3>${escapeHtml(item.metric)}</h3>
+              <p>${escapeHtml(item.type)} - ${new Date(item.createdAt).toLocaleString()}</p>
+            </div>
+            <span class="pill approved">receipt</span>
+          </div>
+          <p>${escapeHtml(item.note)}</p>
+        </article>
+      `).join("") : `<div class="empty">Evidence is captured from wins, actions, and exports.</div>`;
+
+      const steps = [
+        ["Story one", "Use Social Cues to launch Social Cues and document the before/after."],
+        ["Proof capture", "Save metrics, screenshots, time saved, campaign wins, and customer signals."],
+        ["Story two", "Use those receipts to launch Social Cues as the tool that produced the result."],
+        ["Sales assets", "Turn the proof ledger into posts, landing copy, onboarding examples, and demo scripts."]
+      ];
+      $("#selfLaunchList").innerHTML = steps.map(([title, body], index) => `
+        <article class="variant" style="--accent:${index % 2 ? "#ff386b" : "#93dd55"}">
+          <div class="variant-head">
+            <div>
+              <h3>${title}</h3>
+              <p>${body}</p>
+            </div>
+            <span class="pill approved">loop ${index + 1}</span>
+          </div>
+        </article>
+      `).join("");
+    }
+
+    function renderDevices() {
+      const campaign = activeCampaign();
+      const link = model.handoff?.lastLink || handoffUrl();
+      $("#handoffLinkInput").value = link;
+      const flows = [
+        ["Phone capture", "Capture raw ideas, quick proof points, voice notes later, screenshots later, and approve small edits on the move.", "#28d7ee"],
+        ["Desktop strategy", "Use desktop for campaign planning, long-form editing, platform comparison, exports, and launch-room review.", "#93dd55"],
+        ["Shared workspace", "Future backend keeps profile, campaigns, approvals, proof ledger, and device sessions synced across both.", "#f6bd4a"],
+        ["Deep links", `Current campaign: ${campaign?.title || "none"}. Future links open this exact campaign and view on phone or desktop.`, "#ff386b"],
+        ["Security", "Keep me logged in on trusted devices, but re-auth before publish, account changes, exports, or billing.", "#a88cff"]
+      ];
+      $("#deviceFlowList").innerHTML = flows.map(([title, body, accent]) => `
+        <article class="variant" style="--accent:${accent}">
+          <div class="variant-head">
+            <div>
+              <h3>${title}</h3>
+              <p>${body}</p>
+            </div>
+            <span class="pill approved">handoff</span>
+          </div>
+        </article>
+      `).join("");
+    }
+
+    function renderIntegrations() {
+      const readiness = model.integrations || defaultModel.integrations;
+      const statusFor = id => id === "native" ? readiness.publishingPath : readiness[id] || "Needed";
+      $("#integrationList").innerHTML = integrationStack.map(item => `
+        <article class="variant" style="--accent:${item.accent}">
+          <div class="variant-head">
+            <div>
+              <h3>${item.name}</h3>
+              <p>${item.role}</p>
+            </div>
+            <span class="pill ${statusFor(item.id).includes("Connected") ? "published" : statusFor(item.id).includes("ready") ? "approved" : "draft"}">${statusFor(item.id)}</span>
+          </div>
+          <div class="tags">
+            <span class="tag">${item.backend}</span>
+            <span class="tag">${item.firstUse}</span>
+          </div>
+        </article>
+      `).join("");
+      renderMetaSurfaces();
+    }
+
+    function renderMetaSurfaces() {
+      const capList = $("#metaCapabilityList");
+      const assetList = $("#metaAssetList");
+      if (!capList || !assetList) return;
+      if (metaState.loading) {
+        capList.innerHTML = `<div class="empty">Refreshing SCv2 Meta status...</div>`;
+        assetList.innerHTML = `<div class="empty">Checking connected assets...</div>`;
+        return;
+      }
+      if (metaState.error) {
+        capList.innerHTML = `<div class="empty">${escapeHtml(metaState.error)}</div>`;
+      } else {
+        const accounts = metaState.accounts || [];
+        const hasFacebookAsset = accounts.some(account => account.platform === "facebook" && isRealConnectedAccount(account));
+        const hasInstagramAsset = accounts.some(account => account.platform === "instagram" && isRealConnectedAccount(account));
+        const hasThreadsAsset = accounts.some(account => account.platform === "threads" && isRealConnectedAccount(account));
+        const assetRequired = {
+          facebook_pages_connect: ["Facebook Page asset", hasFacebookAsset],
+          facebook_pages_publish: ["Facebook Page asset", hasFacebookAsset],
+          facebook_pages_insights: ["Facebook Page asset", hasFacebookAsset],
+          lead_ads: ["Facebook Page asset", hasFacebookAsset],
+          instagram_connect: ["Instagram professional asset", hasInstagramAsset],
+          instagram_publish: ["Instagram professional asset", hasInstagramAsset],
+          instagram_insights: ["Instagram professional asset", hasInstagramAsset],
+          threads_connect: ["Threads account asset", hasThreadsAsset],
+          threads_publish: ["Threads account asset", hasThreadsAsset],
+          threads_insights: ["Threads account asset", hasThreadsAsset]
+        };
+        const capabilities = (metaState.capabilities || []).map(item => {
+          const required = assetRequired[item.id];
+          if (!required || required[1]) return item;
+          return {
+            ...item,
+            ready: false,
+            status: `needs ${required[0]}`,
+            missingScopes: [...(item.missingScopes || []), required[0]]
+          };
+        });
+        const blockers = metaState.health?.blockers || metaState.metaConnection?.blockers || [];
+        const nextActions = metaState.health?.nextActions || metaState.metaConnection?.nextActions || [];
+        const blockerHtml = blockers.length ? `
+          <article class="variant" style="--accent:#ff386b">
+            <div class="variant-head">
+              <div>
+                <h3>Meta blockers</h3>
+                <p>These are the live conditions preventing full Meta readiness.</p>
+              </div>
+              <span class="pill revision">${blockers.length}</span>
+            </div>
+            <div class="stack">${blockers.map(item => `<p>${escapeHtml(item)}</p>`).join("")}</div>
+          </article>
+        ` : "";
+        const nextActionHtml = nextActions.length ? `
+          <article class="variant" style="--accent:#28d7ee">
+            <div class="variant-head">
+              <div>
+                <h3>Meta next actions</h3>
+                <p>Social Cues can prove login now; these are the remaining asset-selection steps.</p>
+              </div>
+              <span class="pill approved">${nextActions.length}</span>
+            </div>
+            <div class="stack">${nextActions.map(item => `<p>${escapeHtml(item)}</p>`).join("")}</div>
+          </article>
+        ` : "";
+        capList.innerHTML = blockerHtml + nextActionHtml + (capabilities.length ? capabilities.map(item => {
+          const missing = [...(item.missingScopes || []), ...(item.missingEnv || [])];
+          const pill = item.ready ? "published" : missing.length ? "revision" : "draft";
+          return `<article class="variant" style="--accent:${item.ready ? "#93dd55" : "#f6bd4a"}">
+            <div class="variant-head">
+              <div>
+                <h3>${escapeHtml(item.name)}</h3>
+                <p>${escapeHtml(item.endpoint || "")} ${item.method ? `- ${escapeHtml(item.method)}` : ""}</p>
+              </div>
+              <span class="pill ${pill}">${escapeHtml(item.status || "planned")}</span>
+            </div>
+            <div class="tags">
+              <span class="tag">${escapeHtml(item.lane || "Meta")}</span>
+              <span class="tag">${escapeHtml(item.phase || "planned")}</span>
+              ${missing.map(value => `<span class="tag">${escapeHtml(value)}</span>`).join("")}
+            </div>
+          </article>`;
+        }).join("") : `<div class="empty">No Meta capability data loaded yet.</div>`);
+      }
+      const accounts = metaState.accounts || [];
+      assetList.innerHTML = accounts.length ? accounts.map(account => {
+        const connected = isRealConnectedAccount(account);
+        return `
+        <article class="variant" style="--accent:${connected ? "#93dd55" : "#f6bd4a"}">
+          <div class="variant-head">
+            <div>
+              <h3>${escapeHtml(account.name || account.platform)}</h3>
+              <p>${escapeHtml(account.handle || account.providerAccountId || "Meta asset")} - ${escapeHtml(account.platform)}</p>
+            </div>
+            <span class="pill ${connected ? "published" : "draft"}">${connected ? "connected" : escapeHtml(account.status || "unknown")}</span>
+          </div>
+          <div class="tags">
+            <span class="tag">token: ${account.tokenStored ? "stored server-side" : "not stored"}</span>
+            <span class="tag">asset id: ${account.providerAccountId ? "yes" : "no"}</span>
+            ${(account.scopes || []).map(scope => `<span class="tag">${escapeHtml(scope)}</span>`).join("")}
+          </div>
+        </article>
+      `;
+      }).join("") : `<div class="empty">No Meta assets discovered yet. Connect Facebook or refresh after OAuth.</div>`;
+    }
+
+    function renderBilling() {
+      const billing = model.billing || defaultModel.billing;
+      $("#billingStatusInput").value = billing.status || "Not configured";
+      $("#selectedPlanInput").value = billing.selectedPlan || "Founder Audit - $99";
+      $("#paymentLinkInput").value = billing.paymentLink || "";
+      $("#planList").innerHTML = (billing.offers || defaultModel.billing.offers).map((offer, index) => `
+        <article class="variant" style="--accent:${index % 2 ? "#ff386b" : "#28d7ee"}">
+          <div class="variant-head">
+            <div>
+              <h3>${escapeHtml(offer.name)} - ${escapeHtml(offer.price)}</h3>
+              <p>${escapeHtml(offer.description)}</p>
+            </div>
+            <span class="pill approved">offer</span>
+          </div>
+        </article>
+      `).join("");
+    }
+
+    function saveBilling() {
+      model.billing = {
+        ...(model.billing || defaultModel.billing),
+        status: $("#billingStatusInput").value,
+        selectedPlan: $("#selectedPlanInput").value,
+        paymentLink: clean($("#paymentLinkInput").value)
+      };
+      saveModel("Saved billing setup.");
+    }
+
+    function createCheckout() {
+      const billing = model.billing || defaultModel.billing;
+      const selectedPlan = $("#selectedPlanInput").value || billing.selectedPlan;
+      const paymentLink = clean($("#paymentLinkInput").value);
+      if (paymentLink) {
+        window.open(paymentLink, "_blank");
+        return;
+      }
+      alert(`Stripe is not connected yet. Fast path: create a Stripe Payment Link for ${selectedPlan}, paste it here, then customers can pay from Billing.`);
+    }
+
+    function openCheckout() {
+      const link = clean($("#paymentLinkInput").value);
+      if (!link) {
+        alert("Paste a Stripe Payment Link or Checkout URL first.");
+        return;
+      }
+      window.open(link, "_blank");
+    }
+
+    function renderAccounts() {
+      const accounts = model.connectedAccounts || clone(defaultModel.connectedAccounts);
+      const realPlatforms = new Set(accounts.filter(isRealConnectedAccount).map(account => account.platform));
+      const displayAccounts = accounts.filter(account => {
+        if (account.platform === "meta") return true;
+        if (!isRealConnectedAccount(account) && realPlatforms.has(account.platform)) return false;
+        return true;
+      });
+      const identityAccounts = displayAccounts.filter(account => account.platform === "meta" || (account.platform === "x" && isRealConnectedAccount(account)));
+      const managedAssets = displayAccounts.filter(account => account.platform !== "meta" && isRealConnectedAccount(account) && !identityAccounts.includes(account));
+      const setupAccounts = displayAccounts.filter(account => !isRealConnectedAccount(account) && account.platform !== "meta");
+      const card = (account, role = "") => {
+        const platform = platformById(account.platform);
+        const accent = account.platform === "meta" ? "#28d7ee" : platform?.accent || "#f6bd4a";
+        const connected = isRealConnectedAccount(account);
+        const pending = ["oauth code received", "oauth pending secret"].includes(String(account.status || "").toLowerCase());
+        const note = account.loginNote || account.connectionEvidence || (pending ? "OAuth started, but token exchange is not complete." : "Ready for secure OAuth connection");
+        const canConnect = SERVER_MODE ? ["facebook", "instagram", "threads", "x"].includes(account.platform) : false;
+        return `<article class="variant" style="--accent:${accent}">
+          <div class="variant-head">
+            <div>
+              <h3>${escapeHtml(account.name)}</h3>
+              <p>${role ? `${escapeHtml(role)} - ` : ""}${connected ? `${escapeHtml(account.handle || account.name)} - connected ${account.connectedAt ? new Date(account.connectedAt).toLocaleString() : ""}` : escapeHtml(note)}</p>
+            </div>
+            <span class="pill ${connected ? "published" : pending ? "approved" : "draft"}">${connected ? "connected" : pending ? "pending" : "not connected"}</span>
+          </div>
+          <div class="variant-tools">
+            <button onclick="connectAccount('${account.platform}')" ${canConnect ? "" : "disabled"}>${connected ? "Reconnect" : "Connect"}</button>
+            <button onclick="disconnectAccount('${account.platform}')" ${connected ? "" : "disabled"}>Disconnect</button>
+            <button disabled>${canConnect ? "OAuth route" : "provider pending"}</button>
+            <button disabled>${hasStoredToken(account) ? "token stored" : "no token"}</button>
+          </div>
+        </article>`;
+      };
+      const section = (title, body, empty) => `
+        <div class="notice" style="margin-bottom:10px"><strong>${escapeHtml(title)}</strong></div>
+        ${body.length ? body.join("") : `<div class="empty">${escapeHtml(empty)}</div>`}
+      `;
+      $("#socialAccountList").innerHTML = [
+        section("Login identities", identityAccounts.map(account => card(account, account.platform === "meta" ? "Meta user identity" : "X user identity")), "No provider identities connected yet."),
+        section("Managed publishing assets", managedAssets.map(account => card(account, account.platform === "facebook" ? "Facebook Page asset" : "Managed social asset")), "No managed Page, professional account, or channel asset connected yet."),
+        section("Setup needed", setupAccounts.map(account => card(account)), "No remaining provider setup rows.")
+      ].join("");
+    }
+
+    function connectedAccountForPlatform(platform) {
+      const accounts = [...(metaState.accounts || []), ...(model.connectedAccounts || [])];
+      return accounts.find(account => account.platform === platform && isRealConnectedAccount(account))
+        || accounts.find(account => account.platform === platform && account.status === "connected")
+        || null;
+    }
+
+    function metaCapabilitiesForLane(lane) {
+      return (metaState.capabilities || []).filter(item => String(item.lane || "").toLowerCase() === lane);
+    }
+
+    function capabilityById(id) {
+      return (metaState.capabilities || []).find(item => item.id === id) || null;
+    }
+
+    function providerReadiness(platform) {
+      const account = connectedAccountForPlatform(platform.id);
+      if (platform.id === "x") {
+        if (account && isRealConnectedAccount(account)) {
+          return {
+            label: "connected",
+            pill: "published",
+            detail: `${account.handle || account.name || "X account"} is authenticated. Draft and dry-run posting can use the stored token.`,
+            tags: ["OAuth 2.0", "token stored", ...(account.scopes || []).slice(0, 3)]
+          };
+        }
+        return {
+          label: model.integrations?.x?.includes("connected") ? "verify token" : "needs OAuth",
+          pill: "draft",
+          detail: "Connect X from Accounts so Social Cues can store the user token and enable approved posting.",
+          tags: ["OAuth route", "/api/oauth/x/start"]
+        };
+      }
+
+      if (platform.id === "facebook") {
+        const publish = capabilityById("facebook_pages_publish");
+        const insights = capabilityById("facebook_pages_insights");
+        if (account && isRealConnectedAccount(account)) {
+          const publishReady = Boolean(publish?.ready);
+          const insightsReady = !insights || Boolean(insights.ready);
+          return {
+            label: publishReady ? "ready" : "partly ready",
+            pill: publishReady ? "published" : "approved",
+            detail: publishReady
+              ? `${account.name || "Facebook Page"} is connected for Page analytics and approved publishing.`
+              : `${account.name || "Facebook Page"} is connected. Analytics can run now; live Page publishing still needs pages_manage_posts review.`,
+            tags: [
+              account.handle || account.providerAccountId || "Page asset",
+              insightsReady ? "analytics ready" : "analytics gated",
+              publishReady ? "publishing ready" : "pages_manage_posts needed"
+            ]
+          };
+        }
+        return {
+          label: metaState.metaConnection?.tokenStored ? "needs Page" : "needs login",
+          pill: "revision",
+          detail: metaState.metaConnection?.tokenStored
+            ? "Meta login is stored, but no managed Facebook Page asset is available to the app yet."
+            : "Connect Meta and select a Page so Social Cues can discover managed assets.",
+          tags: ["Meta Pages API", "Page asset required"]
+        };
+      }
+
+      if (platform.id === "instagram") {
+        if (account && isRealConnectedAccount(account)) {
+          return {
+            label: "connected",
+            pill: "published",
+            detail: `${account.name || "Instagram"} is connected as a professional asset through Meta.`,
+            tags: ["Meta Instagram API", "professional account", "token stored"]
+          };
+        }
+        const facebook = connectedAccountForPlatform("facebook");
+        return {
+          label: facebook ? "needs IG asset" : "needs Meta",
+          pill: "revision",
+          detail: facebook
+            ? "Link an Instagram professional account to the connected Facebook Page, then reauthorize Instagram permissions."
+            : "Meta must return a Page before Instagram business assets can be discovered.",
+          tags: ["instagram_basic", "instagram_content_publish"]
+        };
+      }
+
+      if (platform.id === "threads") {
+        if (account && isRealConnectedAccount(account)) {
+          return {
+            label: "connected",
+            pill: "published",
+            detail: `${account.handle || account.name || "Threads"} is authenticated for Threads-specific work.`,
+            tags: ["Threads API", "token stored"]
+          };
+        }
+        const threadsCaps = metaCapabilitiesForLane("threads");
+        return {
+          label: threadsCaps.some(item => item.ready) ? "partly ready" : "needs OAuth",
+          pill: "draft",
+          detail: "Threads still needs its own account authorization and approved Threads permissions before it can publish or report insights.",
+          tags: ["threads_basic", "threads_content_publish"]
+        };
+      }
+
+      if (account && isRealConnectedAccount(account)) {
+        return {
+          label: "connected",
+          pill: "published",
+          detail: `${account.handle || account.name || platform.name} is connected and has stored provider evidence.`,
+          tags: ["token stored", account.providerAccountId || "provider account"]
+        };
+      }
+
+      return {
+        label: "planned",
+        pill: "draft",
+        detail: `${platform.connector} is not wired to a live OAuth/token flow yet.`,
+        tags: [platform.fit, "no live token"]
+      };
+    }
+
+    function renderRightRail() {
+      const approved = model.campaigns.flatMap(c => (c.variants || []).filter(v => ["approved", "queued", "published"].includes(v.status)).map(v => ({ ...v, campaignTitle: c.title }))).slice(0, 6);
+      $("#launchRoom").innerHTML = approved.length ? approved.map(v => miniCard(v, v.campaignTitle)).join("") : `<div class="empty">Approve variants to fill the launch room.</div>`;
+      $("#connectorList").innerHTML = platforms.map(p => {
+        const readiness = providerReadiness(p);
+        return `
+        <div class="variant" style="--accent:${p.accent}">
+          <div class="variant-head">
+            <div>
+              <h3>${escapeHtml(p.name)}</h3>
+              <p>${escapeHtml(readiness.detail)}</p>
+            </div>
+            <span class="pill ${readiness.pill}">${escapeHtml(readiness.label)}</span>
+          </div>
+          <div class="tags">
+            <span class="tag">${escapeHtml(p.connector)}</span>
+            ${readiness.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
+          </div>
+        </div>
+      `;
+      }).join("");
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    function selectCampaign(id) {
+      model.activeCampaignId = id;
+      saveModel("Selected campaign.");
+    }
+
+    function jump(view) {
+      $$("#nav button").forEach(b => b.classList.toggle("active", b.dataset.view === view));
+      $$(".section").forEach(s => s.classList.toggle("active", s.id === view));
+    }
+
+    function render() {
+      applyTheme();
+      renderAuth();
+      renderCampaignList();
+      renderForms();
+      renderMetrics();
+      renderOnboarding();
+      renderDashboard();
+      renderRules();
+      renderVariants();
+      renderCalendar();
+      renderGrowth();
+      renderActionLab();
+      renderProof();
+      renderDevices();
+      renderAccounts();
+      renderIntegrations();
+      renderBilling();
+      renderRightRail();
+    }
+
+    $("#newCampaign").addEventListener("click", createCampaign);
+    $("#loginButton").addEventListener("click", loginUser);
+    $("#completeOnboarding").addEventListener("click", saveOnboarding);
+    $("#logoutButton").addEventListener("click", logoutUser);
+    $("#compileAnalytics").addEventListener("click", compileAnalytics);
+    $("#newCampaignSmall").addEventListener("click", createCampaign);
+    $("#saveCampaign").addEventListener("click", saveCampaignFromForm);
+    $("#generateVariants").addEventListener("click", generateVariants);
+    $("#publishApproved").addEventListener("click", publishApproved);
+    $("#saveProfile").addEventListener("click", saveProfile);
+    $("#saveBaseline").addEventListener("click", saveBaseline);
+    $("#saveSecurity").addEventListener("click", saveSecurity);
+    $("#saveTheme").addEventListener("click", saveTheme);
+    $("#themeInput").addEventListener("change", () => {
+      model.settings = { ...(model.settings || {}), theme: $("#themeInput").value };
+      applyTheme();
+    });
+    $("#saveIntegrations").addEventListener("click", saveIntegrations);
+    $("#exportIntegrationConfig").addEventListener("click", exportIntegrationConfig);
+    $("#refreshMeta").addEventListener("click", refreshMetaState);
+    $("#addAction").addEventListener("click", addAction);
+    $("#seedActions").addEventListener("click", seedActions);
+    $("#exportActions").addEventListener("click", exportActions);
+    const addProofButton = $("#addProof");
+    if (addProofButton) addProofButton.addEventListener("click", addProof);
+    const createSelfLaunchButton = $("#createSelfLaunch");
+    if (createSelfLaunchButton) createSelfLaunchButton.addEventListener("click", createSelfLaunchCampaign);
+    $("#saveBilling").addEventListener("click", saveBilling);
+    $("#createCheckout").addEventListener("click", createCheckout);
+    $("#openCheckout").addEventListener("click", openCheckout);
+    $("#createHandoff").addEventListener("click", createHandoff);
+    $("#copyHandoff").addEventListener("click", copyHandoff);
+    $("#exportHandoff").addEventListener("click", exportHandoff);
+    $("#exportModel").addEventListener("click", exportModel);
+    $("#exportModelDash").addEventListener("click", exportModel);
+    $("#exportContent").addEventListener("click", exportContent);
+    $("#saveDisk").addEventListener("click", () => saveToDisk().catch(error => alert(error.message)));
+    $("#loadDisk").addEventListener("click", () => loadFromDisk().catch(error => alert(error.message)));
+    $("#downloadContentDash").addEventListener("click", exportContent);
+    $("#importModelButton").addEventListener("click", () => $("#importModelInput").click());
+    $("#importModelInput").addEventListener("change", e => e.target.files[0] && importModel(e.target.files[0]));
+    $("#resetAll").addEventListener("click", () => {
+      if (!confirm("Reset the local Social Cues Alpha model? Export first if you want to keep it.")) return;
+      localStorage.removeItem(STORAGE_KEY);
+      model = clone(defaultModel);
+      saveModel("Reset local model.");
+    });
+
+    $$("#nav button").forEach(button => button.addEventListener("click", () => jump(button.dataset.view)));
+    $$("[data-jump]").forEach(button => button.addEventListener("click", () => jump(button.dataset.jump)));
+    if (window.matchMedia) {
+      window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
+        if ((model.settings?.theme || "auto") === "auto") applyTheme();
+      });
+    }
+
+    window.selectCampaign = selectCampaign;
+    window.setStatus = setStatus;
+    window.strengthen = strengthen;
+    window.syncCopy = syncCopy;
+    window.setActionStatus = setActionStatus;
+    window.connectAccount = connectAccount;
+    window.disconnectAccount = disconnectAccount;
+    window.generateMedia = generateMedia;
+    window.attachMedia = attachMedia;
+
+    if (!localStorage.getItem(STORAGE_KEY)) {
+      const first = defaultModel.campaigns[0];
+      first.variants = platforms.map(platform => ({
+        id: uid(platform.id),
+        platform: platform.id,
+        status: "draft",
+        copy: platformCopy(platform, first),
+        tags: platform.tags,
+        bestTime: platform.bestTime,
+        fit: platform.fit,
+        connector: platform.connector,
+        disclosure: first.disclosure,
+        flags: claimFlags(first.brief),
+        updatedAt: new Date().toISOString()
+      }));
+      model = clone(defaultModel);
+      model.campaigns[0] = first;
+      saveModel("Initialized Social Cues alpha model.");
+    } else {
+      render();
+    }
+    syncModelFromServer("Synced account changes from server.").then(() => refreshMetaState());
+
+    if ("serviceWorker" in navigator && SERVER_MODE) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+  </script>
+</body>
+</html>
