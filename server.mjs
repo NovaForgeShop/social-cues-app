@@ -1235,6 +1235,9 @@ function buildGrowthAnalytics(model) {
   ];
 
   return {
+    const icon192Path = path.join(__dirname, "sc-icon-192.png");
+const icon512Path = path.join(__dirname, "sc-icon-512.png");<title>Social Cues Meta Connection</title><meta name="description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta property="og:type" content="website"><meta property="og:site_name" content="Social Cues"><meta property="og:title" content="Social Cues Meta Connection"><meta property="og:description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta property="og:image" content="${brandHomeUrl}/sc-icon-512.png"><meta property="og:image:width" content="512"><meta property="og:image:height" content="512"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="Social Cues Meta Connection"><meta name="twitter:description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta name="twitter:image" content="${brandHomeUrl}/sc-icon-512.png"><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/sc-icon-192.png"><style>
+const icon1024Path = path.join(__dirname, "sc-icon-1024.png");
     lastCompiledAt: new Date().toISOString(),
     status: "Compiled from live Meta OAuth signals, Social Cues account state, and clearly labeled manual baseline estimates.",
     summary: {
