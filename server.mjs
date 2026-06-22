@@ -18,9 +18,6 @@ const seedPath = existsSync(localSeedPath) ? localSeedPath : parentSeedPath;
 const manifestPath = path.join(__dirname, "manifest.webmanifest");
 const serviceWorkerPath = path.join(__dirname, "sw.js");
 const iconPath = path.join(__dirname, "icon.svg");
-const icon192Path = path.join(__dirname, "sc-icon-192.png");
-const icon512Path = path.join(__dirname, "sc-icon-512.png");
-const icon1024Path = path.join(__dirname, "sc-icon-1024.png");
 
 async function loadEnvFile() {
   const envPath = path.join(__dirname, ".env");
@@ -1312,7 +1309,7 @@ async function connectMetaAssets(model, code) {
 }
 
 function html(res, status, body) {
-  return text(res, status, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Social Cues Meta Connection</title><meta name="description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta property="og:type" content="website"><meta property="og:site_name" content="Social Cues"><meta property="og:title" content="Social Cues Meta Connection"><meta property="og:description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta property="og:image" content="${brandHomeUrl}/sc-icon-512.png"><meta property="og:image:width" content="512"><meta property="og:image:height" content="512"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="Social Cues Meta Connection"><meta name="twitter:description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta name="twitter:image" content="${brandHomeUrl}/sc-icon-512.png"><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/sc-icon-192.png"><style>body{font-family:Inter,Segoe UI,sans-serif;max-width:720px;margin:48px auto;padding:0 18px;line-height:1.5;background:#07090d;color:#f8fafc}a{color:#28d7ee}.box{border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:18px;background:#10131a}</style></head><body><div class="box">${body}</div></body></html>`, "text/html; charset=utf-8");
+  return text(res, status, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Social Cues Meta Connection</title><meta name="description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta property="og:type" content="website"><meta property="og:site_name" content="Social Cues"><meta property="og:title" content="Social Cues Meta Connection"><meta property="og:description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta property="og:image" content="${brandHomeUrl}/icon.svg"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="Social Cues Meta Connection"><meta name="twitter:description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta name="twitter:image" content="${brandHomeUrl}/icon.svg"><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/icon.svg"><style>body{font-family:Inter,Segoe UI,sans-serif;max-width:720px;margin:48px auto;padding:0 18px;line-height:1.5;background:#07090d;color:#f8fafc}a{color:#28d7ee}.box{border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:18px;background:#10131a}</style></head><body><div class="box">${body}</div></body></html>`, "text/html; charset=utf-8");
 }
 
 function privacyPolicyHtml() {
@@ -1543,18 +1540,6 @@ async function route(req, res) {
 
   if (url.pathname === "/icon.svg") {
     return text(res, 200, await readFile(iconPath, "utf8"), "image/svg+xml; charset=utf-8");
-  }
-
-  if (url.pathname === "/sc-icon-512.png") {
-    return text(res, 200, await readFile(icon512Path), "image/png");
-  }
-
-  if (url.pathname === "/sc-icon-192.png") {
-    return text(res, 200, await readFile(icon192Path), "image/png");
-  }
-
-  if (url.pathname === "/sc-icon-1024.png") {
-    return text(res, 200, await readFile(icon1024Path), "image/png");
   }
 
   if (url.pathname === "/health") {
