@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+data/
+*.log
+server.err.log
+server.out.log
+node_modules/
