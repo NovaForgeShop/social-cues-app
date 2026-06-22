@@ -1,0 +1,118 @@
+{
+  "version": "0.2.0-local",
+  "currentUser": null,
+  "workspace": {
+    "name": "Social Cues Alpha",
+    "owner": "Alpha User",
+    "purpose": "Launch Social Cues as a customer-ready social command center"
+  },
+  "onboarding": {
+    "complete": false,
+    "bio": "This workspace is testing Social Cues as an end-user customer.",
+    "purpose": "Use Social Cues to launch itself with a repeatable social growth engine, customer-ready onboarding, media planning, account connections, and revenue path.",
+    "offer": "Social Cues alpha",
+    "audience": "Creators, small businesses, agencies, and ecommerce operators"
+  },
+  "profile": {
+    "operator": "Founder",
+    "outcome": "Build demand",
+    "display": "Command center",
+    "automation": "Approval-first"
+  },
+  "security": {
+    "session": "Keep me logged in",
+    "stepUp": "Re-auth before publish/account changes"
+  },
+  "settings": {
+    "theme": "auto"
+  },
+  "baseline": {
+    "audience": 0,
+    "avgViews": 0,
+    "engagement": 0,
+    "cadence": 0
+  },
+  "activeCampaignId": "camp-Social Cues-self-launch",
+  "campaigns": [
+    {
+      "id": "camp-Social Cues-self-launch",
+      "title": "Social Cues Customer-Ready Alpha Launch",
+      "brief": "Launch Social Cues as the social command center for creators, small businesses, agencies, and ecommerce operators. Show how it helps a customer log in, connect social accounts, analyze metrics, generate platform-native campaigns, attach or generate media, approve content, and turn results into a repeatable growth system.",
+      "goal": "Build demand",
+      "tone": "Sharp and useful",
+      "disclosure": "Founder or employee post",
+      "riskPosture": "Balanced growth",
+      "variants": []
+    }
+  ],
+  "billing": {
+    "status": "Not configured",
+    "selectedPlan": "Founder Audit - $99",
+    "paymentLink": "",
+    "checkoutMode": "payment-link-first",
+    "offers": [
+      { "name": "Founder Audit", "price": "$99", "description": "Diagnose one underperforming page and deliver a first campaign plan." },
+      { "name": "Campaign Build", "price": "$299", "description": "Build a 30-day platform-native launch campaign." },
+      { "name": "Managed Proof Sprint", "price": "$499", "description": "Run a proof sprint with content, metrics, and next moves." },
+      { "name": "Social Cues Pro", "price": "$49/mo", "description": "Self-serve workspace for campaigns, approvals, media, and analytics." }
+    ]
+  },
+  "proof": [
+    {
+      "id": "proof-seed-1",
+      "type": "Workflow saved",
+      "metric": "Prototype to usable local run",
+      "note": "Social Cues moved from visual prototype into a persistent customer-ready alpha with onboarding, accounts, campaigns, approvals, media, billing, exports, and growth diagnosis."
+    }
+  ],
+  "handoff": {
+    "lastLink": ""
+  },
+  "integrations": {
+    "openai": "Needed",
+    "publishingQueue": "Supabase queue ready",
+    "shopify": "Needed",
+    "canva": "Needed",
+    "sora": "Needed",
+    "publishingPath": "Social Cues Queue first"
+  },
+  "analytics": {
+    "lastCompiledAt": null,
+    "status": "Waiting for connected accounts",
+    "metrics": []
+  },
+  "connectedAccounts": [
+    { "id": "acct-tiktok", "platform": "tiktok", "name": "TikTok", "handle": "", "status": "not connected", "connectedAt": null },
+    { "id": "acct-instagram", "platform": "instagram", "name": "Instagram", "handle": "", "status": "not connected", "connectedAt": null },
+    { "id": "acct-threads", "platform": "threads", "name": "Threads", "handle": "", "status": "not connected", "connectedAt": null },
+    { "id": "acct-youtube", "platform": "youtube", "name": "YouTube", "handle": "", "status": "not connected", "connectedAt": null },
+    { "id": "acct-facebook", "platform": "facebook", "name": "Facebook Page", "handle": "", "status": "not connected", "connectedAt": null },
+    { "id": "acct-x", "platform": "x", "name": "X", "handle": "", "status": "not connected", "connectedAt": null },
+    { "id": "acct-shopify", "platform": "shopify", "name": "Shopify", "handle": "", "status": "not connected", "connectedAt": null },
+    { "id": "acct-canva", "platform": "canva", "name": "Canva", "handle": "", "status": "not connected", "connectedAt": null },
+    { "id": "acct-sora", "platform": "sora", "name": "Sora", "handle": "", "status": "not connected", "connectedAt": null }
+  ],
+  "actions": [
+    {
+      "id": "act-seed-1",
+      "type": "Experiment",
+      "priority": "High",
+      "status": "active",
+      "title": "Run Social Cues self-launch alpha sprint",
+      "signal": "At least one campaign shipped, evidence captured, and one reusable launch insight captured."
+    },
+    {
+      "id": "act-seed-2",
+      "type": "Investigation",
+      "priority": "High",
+      "status": "active",
+      "title": "Map direct publishing developer accounts",
+      "signal": "Prepare TikTok, Meta, YouTube, and X app requirements for approval-first scheduling."
+    }
+  ],
+  "activity": [
+    {
+      "message": "Seed model stored on disk for Social Cues alpha test runs."
+    }
+  ]
+}
