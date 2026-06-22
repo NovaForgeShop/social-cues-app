@@ -1308,8 +1308,10 @@ async function connectMetaAssets(model, code) {
   return discovered;
 }
 
-function html(res, status, body) {
-  return text(res, status, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Social Cues Meta Connection</title><meta name="description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta property="og:type" content="website"><meta property="og:site_name" content="Social Cues"><meta property="og:title" content="Social Cues Meta Connection"><meta property="og:description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta property="og:image" content="${brandHomeUrl}/icon.svg"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="Social Cues Meta Connection"><meta name="twitter:description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta name="twitter:image" content="${brandHomeUrl}/icon.svg"><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/icon.svg"><style>body{font-family:Inter,Segoe UI,sans-serif;max-width:720px;margin:48px auto;padding:0 18px;line-height:1.5;background:#07090d;color:#f8fafc}a{color:#28d7ee}.box{border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:18px;background:#10131a}</style></head><body><div class="box">${body}</div></body></html>`, "text/html; charset=utf-8");
+function html(res, status, body, canonicalPath = "/") {
+  const canonicalUrl = `${brandHomeUrl}${canonicalPath}`;
+  const fbAppMeta = metaAppId ? `<meta property="fb:app_id" content="${metaAppId}">` : "";
+  return text(res, status, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Social Cues Meta Connection</title><meta name="description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta property="og:url" content="${canonicalUrl}"><meta property="og:type" content="website"><meta property="og:site_name" content="Social Cues"><meta property="og:title" content="Social Cues Meta Connection"><meta property="og:description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta property="og:image" content="${brandHomeUrl}/icon.svg">${fbAppMeta}<meta name="twitter:card" content="summary"><meta name="twitter:title" content="Social Cues Meta Connection"><meta name="twitter:description" content="Social Cues helps users plan, approve, schedule, and analyze social media campaigns."><meta name="twitter:image" content="${brandHomeUrl}/icon.svg"><link rel="canonical" href="${canonicalUrl}"><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/icon.svg"><style>body{font-family:Inter,Segoe UI,sans-serif;max-width:720px;margin:48px auto;padding:0 18px;line-height:1.5;background:#07090d;color:#f8fafc}a{color:#28d7ee}.box{border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:18px;background:#10131a}</style></head><body><div class="box">${body}</div></body></html>`, "text/html; charset=utf-8");
 }
 
 function privacyPolicyHtml() {
@@ -1523,11 +1525,11 @@ async function route(req, res) {
   }
 
   if (url.pathname === "/privacy" || url.pathname === "/privacy-policy") {
-    return html(res, 200, privacyPolicyHtml());
+    return html(res, 200, privacyPolicyHtml(), "/privacy");
   }
 
   if (url.pathname === "/terms" || url.pathname === "/terms-of-service") {
-    return html(res, 200, termsOfServiceHtml());
+    return html(res, 200, termsOfServiceHtml(), "/terms");
   }
 
   if (url.pathname === "/manifest.webmanifest") {
