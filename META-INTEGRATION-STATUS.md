@@ -1,6 +1,6 @@
 # Social Cues Meta Integration Status
 
-Last verified: 2026-06-20
+Last verified: 2026-06-22
 
 ## Working Now
 
@@ -18,7 +18,7 @@ Last verified: 2026-06-20
 - The open launcher now points users to the server-connected app first. The direct HTML file is marked as offline drafting only.
 - Meta oEmbed Read is added as use case 19 for front-end previews of public Facebook and Instagram pages, posts, and videos.
 - `/api/meta/oembed` now exposes readiness, supported public embed kinds, and validated public-URL embed reads through Meta.
-- Meta Basic settings now show `arbkgucejiovqakwvibw.supabase.co` in App Domains, matching the configured privacy and data-deletion callback host.
+- Meta Basic settings now show `socialcuesapp.com` in App Domains, contact email `mr.barton@socialcuesapp.com`, Website platform `https://socialcuesapp.com`, Privacy Policy `https://socialcuesapp.com/privacy`, Terms `https://socialcuesapp.com/terms`, and User Data Deletion Callback `https://socialcuesapp.com/api/meta/data-deletion`.
 - A Social Cues Terms of Service route now exists at `/terms` and is included in the Meta review pack as `${META_PUBLIC_APP_URL}/terms`.
 - Meta's oEmbed customize page shows Meta oEmbed Read as `Ready for testing`; Threads oEmbed Read is available with an `Add` action but has not been enabled from the dashboard yet.
 - Access Token Debugger confirms the current token is a valid Social Cues user token with `pages_show_list`, `pages_read_engagement`, and `public_profile`; granular scopes apply to all objects.
@@ -28,8 +28,8 @@ Last verified: 2026-06-20
 - ChatGPT and Claude review agreed the next checks are Page access in Business Suite, `/me/businesses` with `business_management`, and a full remove/re-authorize flow if the Page picker was skipped.
 - User confirmed this is not a Business Page path; the default Meta login no longer requests `business_management`.
 - Social Cues now exposes `/api/meta/diagnostic-agent` so the app can state the Page-vs-profile blocker, oEmbed fallback, and paid infrastructure needs without repeating the same dead end.
-- Meta Sharing Debugger was used on the public privacy URL and returned a concrete hosting issue: HTTP `400` plus old bridge Open Graph metadata.
-- Replacement Supabase Edge Function source now exists locally at `supabase/functions/meta-oauth-callback/index.ts`, but deployment is not complete because the Supabase connector returned a tool/resource mismatch and the Supabase CLI is not installed.
+- Meta Sharing Debugger was used on `https://socialcuesapp.com/privacy`; Meta scraped it successfully with HTTP `200` and Social Cues Open Graph metadata. The remaining warning was a missing explicit `og:image`, now addressed in `server.mjs`.
+- X Developer app authentication settings were updated to `https://socialcuesapp.com/api/oauth/x/callback`, `https://socialcuesapp.com`, `https://socialcuesapp.com/terms`, and `https://socialcuesapp.com/privacy`.
 
 ## Blocked By Meta State
 
@@ -37,7 +37,6 @@ Last verified: 2026-06-20
 - Instagram professional asset discovery: no linked Instagram professional asset was returned.
 - The next likely Meta-side action is Page/account selection or Page admin verification during reauthorization, because the token is valid and has Page read permissions but Meta still returns zero Page assets.
 - If there is no Facebook Page, code cannot make a personal profile appear in `/me/accounts`; the next product action is creating/connecting a Page or using oEmbed/profile-preview fallback features.
-- Public Supabase Edge Function deployment is blocked until the connector/CLI deploy path works.
 - Facebook publishing remains blocked until a real Page asset and `pages_manage_posts` are available.
 - Facebook Page analytics remains blocked until a real Page asset is available.
 - Instagram analytics/publishing remain blocked until a professional Instagram asset and required permissions are available.
@@ -51,7 +50,7 @@ Last verified: 2026-06-20
 - Do not claim the app is fully production-ready until the user-visible server process is running the corrected backend.
 - Do not use the direct standalone HTML file to judge Meta integration; it cannot perform OAuth callbacks or read live provider APIs.
 - Do not treat oEmbed Read as account analytics or publishing. It is for public front-end embeds/metadata only.
-- Do not put a Terms URL into Meta Basic settings until the public Supabase `/terms` path is verified reachable from a normal browser/network. Chrome reported `ERR_BLOCKED_BY_CLIENT` and direct workspace fetch could not verify the Supabase function URL.
+- Do not treat the old Supabase bridge URLs as production settings. The production app settings should use `https://socialcuesapp.com`.
 
 ## Verification Commands
 
