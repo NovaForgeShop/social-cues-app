@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "functions": {
+    "api/server.mjs": {
+      "maxDuration": 30
+    }
+  },
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/api/server.mjs"
+    }
+  ]
+}
