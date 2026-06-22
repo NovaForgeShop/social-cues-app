@@ -7,8 +7,8 @@ This is the working handoff for connecting your existing Meta developer app to S
 Add these values to `outputs/Social Cues-testable-app/.env`:
 
 ```text
-PUBLIC_APP_URL=http://127.0.0.1:4177
-META_PUBLIC_APP_URL=https://arbkgucejiovqakwvibw.supabase.co/functions/v1/meta-oauth-callback
+PUBLIC_APP_URL=https://socialcuesapp.com
+META_PUBLIC_APP_URL=https://socialcuesapp.com
 BRAND_DOMAIN=socialcuesapp.com
 BRAND_HOME_URL=https://socialcuesapp.com
 SUPPORT_EMAIL=mr.barton@socialcuesapp.com
@@ -24,11 +24,11 @@ Keep `META_APP_SECRET` only in `.env` or hosting secrets. Do not paste it into c
 Add these OAuth redirect URIs in the Meta developer dashboard:
 
 ```text
-https://arbkgucejiovqakwvibw.supabase.co/functions/v1/meta-oauth-callback/api/oauth/meta/callback
-http://127.0.0.1:4177/api/oauth/threads/callback
+https://socialcuesapp.com/api/oauth/meta/callback
+https://socialcuesapp.com/api/oauth/threads/callback
 ```
 
-The Meta callback uses the Supabase HTTPS bridge because Facebook Login rejects plain local HTTP callbacks. The Threads callback is separate because Social Cues treats Threads as its own adapter.
+The production callbacks use the Vercel-hosted Social Cues domain because Facebook Login and Threads require HTTPS redirect targets.
 
 ## Basic Settings Security
 
@@ -36,21 +36,20 @@ In Meta App Settings > Basic, set App Domains to:
 
 ```text
 socialcuesapp.com
-arbkgucejiovqakwvibw.supabase.co
 ```
 
-Use only domains, with no `https://` and no path. `socialcuesapp.com` is the customer-facing brand domain. `arbkgucejiovqakwvibw.supabase.co` remains required while the OAuth callback, privacy policy, terms, and data deletion callback are served through the Supabase HTTPS bridge.
+Use only domains, with no `https://` and no path.
 
 In Meta App Settings > Basic, set Privacy Policy URL to:
 
 ```text
-https://arbkgucejiovqakwvibw.supabase.co/functions/v1/meta-oauth-callback/privacy
+https://socialcuesapp.com/privacy
 ```
 
 In Meta App Settings > Basic, set Terms of Service URL to:
 
 ```text
-https://arbkgucejiovqakwvibw.supabase.co/functions/v1/meta-oauth-callback/terms
+https://socialcuesapp.com/terms
 ```
 
 Set the contact email to:
@@ -62,7 +61,7 @@ mr.barton@socialcuesapp.com
 In Meta App Settings > Basic, set User Data Deletion Callback URL to:
 
 ```text
-https://arbkgucejiovqakwvibw.supabase.co/functions/v1/meta-oauth-callback/api/meta/data-deletion
+https://socialcuesapp.com/api/meta/data-deletion
 ```
 
 Social Cues verifies Meta's `signed_request`, records the deletion request, disconnects Meta-linked accounts, and returns Meta's required confirmation URL/code response.
