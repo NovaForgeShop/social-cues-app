@@ -3358,7 +3358,7 @@ async function automationStatusPayload(model = {}, session = null) {
     },
     truthNote: workerState.ready
       ? "The Supabase job ledger and secured worker dispatcher are active. Publishing remains approval-first; media rendering is active only when the isolated renderer is configured."
-      : "The durable worker migration has not been applied yet. Manual runs remain available, but unattended execution is not active.",
+      : "Automatic worker status is unavailable for this workspace. Manual controls remain available while Social Cues checks the secured worker ledger.",
     lanes: [
       {
         id: "publishing",

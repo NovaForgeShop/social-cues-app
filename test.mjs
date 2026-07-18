@@ -1462,7 +1462,7 @@ try {
     headers: { Authorization: `Bearer ${login.session.token}` }
   });
   if (!automationStatus.ok || !automationStatus.lanes?.some(row => row.id === "publishing") || !automationStatus.capabilities?.some(row => row.id === "analyze")) throw new Error("customer automation center did not expose background lanes and capability truth");
-  if (automationStatus.summary?.automaticWorkers !== 0 || !/durable worker migration has not been applied/i.test(automationStatus.truthNote || "")) throw new Error("local automation center must distinguish unapplied worker storage from a live dispatcher");
+  if (automationStatus.summary?.automaticWorkers !== 0 || !/automatic worker status is unavailable/i.test(automationStatus.truthNote || "")) throw new Error("local automation center must distinguish unavailable worker status from a live dispatcher");
   const publishCapability = automationStatus.capabilities.find(row => row.id === "publish");
   if (publishCapability?.providers?.some(name => ["Shopify", "Twitch", "Etsy", "Canva"].includes(name))) throw new Error("automation center must not describe context or creative-handoff providers as live publishers");
 

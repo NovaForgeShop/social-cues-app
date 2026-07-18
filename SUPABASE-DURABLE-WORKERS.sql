@@ -51,6 +51,7 @@ alter table public.worker_jobs enable row level security;
 alter table public.worker_runs enable row level security;
 
 revoke all on table public.worker_jobs, public.worker_runs from public, anon, authenticated;
+grant select, insert, update, delete on table public.worker_jobs, public.worker_runs to service_role;
 drop policy if exists "worker jobs are service role only" on public.worker_jobs;
 create policy "worker jobs are service role only" on public.worker_jobs
   for all to anon, authenticated using (false) with check (false);

@@ -295,7 +295,7 @@ test('25-step Social Cues tester loop reaches the workstation and checks safe fu
     await page.locator('[data-workspace-feature][value="automation"]').check();
     await page.locator('#saveWorkspaceFeatures').click();
     await page.locator('#mobileViewSelect').selectOption('automation');
-    await expect(page.locator('#automationTruthNote')).toContainText('durable worker migration');
+    await expect(page.locator('#automationTruthNote')).toContainText('Automatic worker status is unavailable');
     await expect(page.locator('[data-automation-lane="publishing"]')).toBeVisible();
     await expect(page.locator('#capabilityCenterList')).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
