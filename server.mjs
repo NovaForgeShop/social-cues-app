@@ -4,6 +4,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -143,6 +144,10 @@ const metaPublicAppUrl = (process.env.META_PUBLIC_APP_URL || publicAppUrl).repla
 const brandDomain = process.env.BRAND_DOMAIN || "socialcuesapp.com";
 const brandHomeUrl = (process.env.BRAND_HOME_URL || `https://${brandDomain}`).replace(/\/$/, "");
 const supportEmail = process.env.SUPPORT_EMAIL || "mr.barton@socialcuesapp.com";
+const adminEmails = new Set(String(process.env.SOCIAL_CUES_ADMIN_EMAILS || "")
+  .split(",")
+  .map(value => value.trim().toLowerCase())
+  .filter(Boolean));
 const resendApiKey = process.env.RESEND_API_KEY || "";
 const smtpHost = process.env.SMTP_HOST || process.env.SUPABASE_SMTP_HOST || (resendApiKey ? "smtp.resend.com" : "");
 const smtpPort = process.env.SMTP_PORT || process.env.SUPABASE_SMTP_PORT || (resendApiKey ? "587" : "");
@@ -229,7 +234,10 @@ const authProvider = process.env.AUTH_PROVIDER || (supabaseEnabled ? "supabase" 
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const mediaStorageBucket = process.env.MEDIA_STORAGE_BUCKET || "social-cues-media";
 const maxJsonBodyBytes = Number(process.env.MAX_JSON_BODY_BYTES || 1024 * 1024);
-const authSessionSecret = process.env.AUTH_SESSION_SECRET || process.env.OAUTH_TOKEN_ENCRYPTION_KEY || "social-cues-alpha-session-secret";
+const authSessionSecret = process.env.AUTH_SESSION_SECRET || process.env.OAUTH_TOKEN_ENCRYPTION_KEY || crypto.randomBytes(32).toString("base64url");
+const publicSignupEnabled = /^(1|true|yes)$/i.test(process.env.SOCIAL_CUES_PUBLIC_SIGNUP_ENABLED || "");
+const requestSecurityContext = new AsyncLocalStorage();
+const requestRateBuckets = new Map();
 let lastPersistence = { driver: supabaseEnabled ? "supabase" : "local-json", ok: true, message: "ready" };
 
 const promoCodeRecords = String(process.env.SOCIAL_CUES_PROMO_CODE_HASHES || "")
@@ -1570,7 +1578,20 @@ async function supabaseGetWorkspaceModel(user = {}, sharedModel = null) {
 async function modelForSession(session = null, sharedModel = null) {
   const base = sharedModel || await getModel();
   if (!session?.user) return base;
-  if (!supabaseEnabled) return base;
+  if (!supabaseEnabled) {
+    const scoped = cloneJson(base);
+    ensureUserWorkspace(scoped, session.user);
+    const workspaceId = workspaceIdForUser(session.user);
+    for (const key of workspaceScopedCollectionKeys) {
+      scoped[key] = (scoped[key] || []).filter(item => ownedByUser(item, session.user.id));
+    }
+    scoped.connectedAccounts = (scoped.connectedAccounts || []).filter(account => ownedByUser(account, session.user.id));
+    scoped.workspaces = (scoped.workspaces || []).filter(item => item.id === workspaceId && ownedByUser(item, session.user.id));
+    scoped.workspace = workspaceForUser(scoped, session.user);
+    scoped.currentUser = publicAppUser(session.user);
+    scoped.deviceSessions = (scoped.deviceSessions || []).filter(device => String(device.userId || "") === String(session.user.id));
+    return scoped;
+  }
   try {
     const workspaceModel = await supabaseGetWorkspaceModel(session.user, base);
     if (workspaceModel) return workspaceModel;
@@ -1580,7 +1601,7 @@ async function modelForSession(session = null, sharedModel = null) {
   return clientWorkspaceModelForUser(session.user, {}, base);
 }
 
-async function getModel() {
+async function getSharedModel() {
   let model;
   try {
     model = supabaseEnabled ? await supabaseGetModel() : await localGetModel();
@@ -1642,8 +1663,15 @@ async function getModel() {
   }
   if (sanitizeConnectedAccounts(model)) changed = true;
   if (hydrateMetaLoginStatus(model)) changed = true;
-  if (changed) await saveModel(model);
+  if (changed) await saveSharedModel(model);
   return model;
+}
+
+async function getModel() {
+  const sharedModel = await getSharedModel();
+  const context = requestSecurityContext.getStore();
+  if (!context?.workspaceScoped || !context.session?.user) return sharedModel;
+  return modelForSession(context.session, sharedModel);
 }
 
 function isConnectedStatus(status) {
@@ -1734,7 +1762,7 @@ function hydrateMetaLoginStatus(model) {
   return changed;
 }
 
-async function saveModel(model) {
+async function saveSharedModel(model) {
   try {
     return supabaseEnabled ? await supabaseSaveModel(model) : await localSaveModel(model);
   } catch (error) {
@@ -1743,15 +1771,27 @@ async function saveModel(model) {
   }
 }
 
+async function saveModel(model) {
+  const context = requestSecurityContext.getStore();
+  if (context?.workspaceScoped && context.session?.user) {
+    return saveModelForUser(model, context.session.user);
+  }
+  return saveSharedModel(model);
+}
+
 async function saveModelForUser(model, user = null) {
   if (user?.id && supabaseEnabled) {
     const workspaceModel = await workspaceModelForRegistryWrite(model, user);
     await mirrorWorkspaceModel(workspaceModel, user);
-    await saveModel(serverRegistryModel(model));
+    await saveSharedModel(serverRegistryModel(model));
     return workspaceModel;
   }
-  const saved = await saveModel(model);
-  if (user?.id) await mirrorWorkspaceModel(saved, user);
+  if (user?.id) {
+    const existing = await getSharedModel();
+    const merged = mergePublicModelUpdate(model, existing, user);
+    return saveSharedModel(merged);
+  }
+  const saved = await saveSharedModel(model);
   return saved;
 }
 
@@ -1763,8 +1803,13 @@ function responseHeaders(contentType) {
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "X-Permitted-Cross-Domain-Policies": "none",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "camera=(self), microphone=(self), geolocation=()",
+    ...(runtimeMode === "vercel" ? { "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload" } : {}),
     "Content-Security-Policy": [
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline' https://browser.sentry-cdn.com",
@@ -2801,6 +2846,7 @@ function publicAppUser(user) {
     name: user.name,
     email: user.email,
     role: user.role || "Owner",
+    admin: isAdminUser(user),
     createdAt: user.createdAt || null,
     lastLoginAt: user.lastLoginAt || user.loggedInAt || null,
     entitlement: publicEntitlement(user)
@@ -2930,6 +2976,9 @@ async function createAppAccount(model, input = {}) {
   if (enteredPromoCode && (!promo || promo.active === false)) {
     return { ok: false, status: 400, error: "That Social Cues promo code is not active." };
   }
+  if (!promo && !publicSignupEnabled) {
+    return { ok: false, status: 403, error: "Account creation currently requires an approved Social Cues invite code." };
+  }
   if (supabaseAuthEnabled()) {
     let auth;
     try {
@@ -3050,6 +3099,8 @@ function upsertDeviceSession(model, user, input = {}, token = crypto.randomBytes
 }
 
 async function sessionFromRequest(model, req) {
+  const context = requestSecurityContext.getStore();
+  if (context?.sessionResolved) return context.session || null;
   const token = bearerToken(req);
   if (!token) return null;
   const tokenHash = hashSecret(token);
@@ -3066,8 +3117,7 @@ async function sessionFromRequest(model, req) {
     } catch {
       const refreshToken = decryptedToken(device.refreshCredential);
       if (!refreshToken) {
-        device.lastSeenAt = new Date().toISOString();
-        return { user, device, token, rememberedDeviceFallback: true };
+        return null;
       }
       try {
         const refreshed = await refreshSupabasePasswordSession(refreshToken);
@@ -3109,13 +3159,163 @@ async function entitledSessionFromRequest(model, req) {
 }
 
 async function hostedWriteRequiresSession(req, model) {
-  if (bearerToken(req)) {
-    const session = await sessionFromRequest(model, req);
-    if (runtimeMode === "vercel" && !hasActiveAppAccess(session?.user)) return null;
-    return session;
-  }
-  if (runtimeMode !== "vercel") return true;
   return entitledSessionFromRequest(model, req);
+}
+
+function isAdminUser(user = {}) {
+  return adminEmails.has(normalizeEmail(user.email));
+}
+
+function requestCredentialSource(req) {
+  if (/^Bearer\s+\S+/i.test(String(req?.headers?.authorization || ""))) return "bearer";
+  if (/(?:^|;\s*)sc_session=/.test(String(req?.headers?.cookie || ""))) return "cookie";
+  return "none";
+}
+
+function requestClientKey(req) {
+  const forwarded = String(req?.headers?.["x-forwarded-for"] || "").split(",")[0].trim();
+  return forwarded || String(req?.headers?.["x-real-ip"] || req?.socket?.remoteAddress || "unknown");
+}
+
+function takeRateLimit(key, limit, windowMs) {
+  const now = Date.now();
+  if (requestRateBuckets.size > 5000) {
+    for (const [bucketKey, bucket] of requestRateBuckets) {
+      if (bucket.resetAt <= now) requestRateBuckets.delete(bucketKey);
+    }
+  }
+  const current = requestRateBuckets.get(key);
+  if (!current || current.resetAt <= now) {
+    requestRateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return { allowed: true, remaining: Math.max(0, limit - 1), resetAt: now + windowMs };
+  }
+  current.count += 1;
+  return { allowed: current.count <= limit, remaining: Math.max(0, limit - current.count), resetAt: current.resetAt };
+}
+
+function sameOriginRequest(req) {
+  const origin = String(req?.headers?.origin || "").trim();
+  if (!origin) return requestCredentialSource(req) !== "cookie" || runtimeMode !== "vercel";
+  const forwardedProto = String(req?.headers?.["x-forwarded-proto"] || "https").split(",")[0].trim() || "https";
+  const forwardedHost = String(req?.headers?.["x-forwarded-host"] || req?.headers?.host || "").split(",")[0].trim();
+  const requestOrigin = forwardedHost ? `${forwardedProto}://${forwardedHost}` : "";
+  const allowed = new Set([corsOrigin, new URL(brandHomeUrl).origin, requestOrigin].filter(Boolean));
+  return allowed.has(origin);
+}
+
+const publicApiRoutes = new Set([
+  "GET /api/observability/config",
+  "POST /api/observability/client-error",
+  "POST /api/auth/signup",
+  "POST /api/auth/login",
+  "GET /api/portal/readiness"
+]);
+
+const sessionApiRoutes = new Set([
+  "GET /api/auth/session",
+  "POST /api/auth/device/heartbeat",
+  "GET /api/devices",
+  "GET /api/auth/entitlement",
+  "POST /api/auth/logout",
+  "POST /api/billing/checkout"
+]);
+
+const adminApiRoutes = new Set([
+  "GET /api/observability/status",
+  "GET /api/oauth/tiktok/diagnostic",
+  "GET /api/oauth/tiktok/debug-start",
+  "GET /api/meta/diagnostic-agent",
+  "GET /api/supabase/status",
+  "GET /api/auth/readiness",
+  "GET /api/auth/smtp/readiness",
+  "GET /api/resend/readiness",
+  "GET /api/resend/status",
+  "GET /api/security/audit"
+]);
+
+function externalApiPolicy(pathname, method) {
+  if (method === "GET" && /^\/api\/oauth\/[a-z0-9-]+\/callback$/.test(pathname)) return "oauth-state";
+  const routeKey = `${method} ${pathname}`;
+  if ([
+    "GET /api/meta/data-deletion",
+    "POST /api/meta/data-deletion",
+    "GET /api/meta/data-deletion/status",
+    "GET /api/meta/webhook",
+    "POST /api/meta/webhook",
+    "POST /api/billing/webhook"
+  ].includes(routeKey)) return "signed-external";
+  return "";
+}
+
+function apiPermissionFor(pathname, method) {
+  const routeKey = `${method} ${pathname}`;
+  if (publicApiRoutes.has(routeKey)) return "public";
+  const external = externalApiPolicy(pathname, method);
+  if (external) return external;
+  if (sessionApiRoutes.has(routeKey)) return "session";
+  if (adminApiRoutes.has(routeKey)) return "admin";
+  return "active-workspace";
+}
+
+function workspaceWriteAllowed(user = {}) {
+  if (isAdminUser(user)) return true;
+  return ["owner", "operator", "editor"].includes(String(user.role || "owner").trim().toLowerCase());
+}
+
+async function authorizeApiRequest(req, res, url) {
+  if (!url.pathname.startsWith("/api/")) return true;
+  const context = requestSecurityContext.getStore();
+  const permission = apiPermissionFor(url.pathname, req.method);
+  if (context) context.permission = permission;
+
+  const rateProfile = ["/api/auth/login", "/api/auth/signup"].includes(url.pathname)
+    ? { limit: 10, windowMs: 15 * 60 * 1000 }
+    : url.pathname === "/api/observability/client-error"
+      ? { limit: 30, windowMs: 60 * 1000 }
+    : /\/(publish|upload|generate|analyze|actions)(?:\/|$)/.test(url.pathname)
+      ? { limit: 60, windowMs: 60 * 1000 }
+      : { limit: 300, windowMs: 60 * 1000 };
+  const rate = takeRateLimit(`${requestClientKey(req)}:${url.pathname}`, rateProfile.limit, rateProfile.windowMs);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", String(Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000))));
+    return Boolean(json(res, 429, { ok: false, error: "Too many requests. Try again shortly." }));
+  }
+
+  const unsafeMethod = !["GET", "HEAD", "OPTIONS"].includes(req.method);
+  if (unsafeMethod && !["oauth-state", "signed-external"].includes(permission) && !sameOriginRequest(req)) {
+    return Boolean(json(res, 403, { ok: false, error: "Cross-origin request rejected." }));
+  }
+
+  if (["public", "oauth-state", "signed-external"].includes(permission)) return true;
+
+  const sharedModel = await getSharedModel();
+  const session = await sessionFromRequest(sharedModel, req);
+  if (context) {
+    context.session = session;
+    context.sessionResolved = true;
+    context.workspaceScoped = permission === "active-workspace";
+  }
+  if (!session?.user) {
+    json(res, 401, { ok: false, error: "Authentication required." });
+    return false;
+  }
+  if (session.refreshed) {
+    await saveSharedModel(sharedModel);
+    setCookie(res, sessionCookieValue(session.token, session.device.expiresAt));
+  }
+  if (permission === "admin" && !isAdminUser(session.user)) {
+    json(res, 403, { ok: false, error: "Administrator permission required." });
+    return false;
+  }
+  if (permission === "active-workspace" && !hasActiveAppAccess(session.user)) {
+    appAccessRequiredResponse(res);
+    return false;
+  }
+  if (permission === "active-workspace" && unsafeMethod && !workspaceWriteAllowed(session.user)) {
+    json(res, 403, { ok: false, error: "Workspace write permission required." });
+    return false;
+  }
+  return true;
 }
 
 function workspaceIdForUser(user = {}) {
@@ -3147,8 +3347,8 @@ function hasOwnerMarker(item) {
 
 function stampWorkspaceOwnership(item, user = {}, workspaceId = workspaceIdForUser(user)) {
   if (!item || typeof item !== "object") return item;
-  if (!item.ownerUserId) item.ownerUserId = user.id || "alpha";
-  if (!item.workspaceId) item.workspaceId = workspaceId;
+  item.ownerUserId = user.id || "alpha";
+  item.workspaceId = workspaceId;
   return item;
 }
 
@@ -3276,14 +3476,7 @@ function publicModel(model, session = null) {
     safe.metaHealth.assetSync.synced = safe.metaHealth.assetSync.synced.map(publicAccount);
   }
   delete safe.oauthStates;
-  if (Array.isArray(safe.metaDeletionRequests)) {
-    safe.metaDeletionRequests = safe.metaDeletionRequests.map(item => ({
-      confirmationCode: item.confirmationCode,
-      receivedAt: item.receivedAt,
-      completed: Boolean(item.completed),
-      statusUrl: item.statusUrl
-    }));
-  }
+  delete safe.metaDeletionRequests;
   return safe;
 }
 
@@ -3311,6 +3504,19 @@ function mergeServerOnlyAccountFields(incoming, existing) {
   return merged;
 }
 
+function mergePublicAccountUpdate(incoming, existing) {
+  const merged = { ...incoming };
+  for (const key of ["credential", "refreshCredential", "token", "accessToken", "refreshToken", "oauthCode", "tokenType", "tokenExpiresAt"]) {
+    delete merged[key];
+    if (existing?.[key]) merged[key] = existing[key];
+  }
+  for (const key of ["providerAccountId", "oauthProvider", "scopes"]) delete merged[key];
+  if (existing?.providerAccountId) merged.providerAccountId = existing.providerAccountId;
+  if (existing?.oauthProvider) merged.oauthProvider = existing.oauthProvider;
+  if (existing?.scopes?.length) merged.scopes = existing.scopes;
+  return merged;
+}
+
 function mergeOwnedArray(key, merged, existing, user, workspaceId) {
   if (!Array.isArray(merged[key])) return;
   const incomingOwned = merged[key].map(item => stampWorkspaceOwnership(item, user, workspaceId));
@@ -3325,12 +3531,13 @@ function mergePublicModelUpdate(incoming, existing, user = null) {
   const workspaceId = user ? workspaceIdForUser(user) : "";
   if (Array.isArray(merged.connectedAccounts)) {
     const existingAccounts = existing.connectedAccounts || [];
+    const existingOwnedAccounts = user ? existingAccounts.filter(item => ownedByUser(item, user.id)) : existingAccounts;
     const incomingAccounts = merged.connectedAccounts.map(account => {
       const ownedAccount = user ? stampWorkspaceOwnership(account, user, workspaceId) : account;
-      const match = existingAccounts.find(item => item.id === ownedAccount.id)
-        || existingAccounts.find(item => item.platform === ownedAccount.platform && item.providerAccountId && item.providerAccountId === ownedAccount.providerAccountId)
-        || existingAccounts.find(item => item.platform === ownedAccount.platform && !item.providerAccountId && !ownedAccount.providerAccountId && (!user || ownedByUser(item, user.id)));
-      return mergeServerOnlyAccountFields(ownedAccount, match);
+      const match = existingOwnedAccounts.find(item => item.id === ownedAccount.id)
+        || existingOwnedAccounts.find(item => item.platform === ownedAccount.platform && item.providerAccountId && item.providerAccountId === ownedAccount.providerAccountId)
+        || existingOwnedAccounts.find(item => item.platform === ownedAccount.platform && !item.providerAccountId && !ownedAccount.providerAccountId);
+      return mergePublicAccountUpdate(ownedAccount, match);
     });
     merged.connectedAccounts = user
       ? [
@@ -4269,7 +4476,7 @@ function portalPageHtml() {
     function renderDevices(devices=[]){$("deviceList").innerHTML=devices.length?devices.map(d=>'<div class="status-row"><div><strong>'+escapeHtml(d.name||"Device")+'</strong><br><span>'+escapeHtml(d.kind||"device")+' - '+escapeHtml(d.lastSeenAt?new Date(d.lastSeenAt).toLocaleString():"not seen yet")+'</span></div><span class="pill">'+(d.active?"remembered":"signed out")+'</span></div>').join(""):'<div class="notice">No remembered devices yet.</div>'}
     function renderAlerts(items){$("alertList").innerHTML=items.map(item=>'<div class="status-row"><div><strong>'+escapeHtml(item.label)+'</strong><br><span>'+escapeHtml(item.detail)+'</span></div><span class="pill">'+escapeHtml(item.status)+'</span></div>').join("")}
     function accessDetail(entitlement){if(!entitlement?.active)return"Pay with Stripe or use an active promo code during account creation.";if(entitlement.source==="promo-code"){const until=entitlement.expiresAt?new Date(entitlement.expiresAt).toLocaleDateString():"120 days";return"Promo code "+entitlement.promoCode+" gives highest-tier full access through "+until+". App fee and subscription gate are satisfied for the test window."}return(entitlement.selectedPlan||"Highest-tier paid access")+" active. App fee and subscription gate are satisfied."}
-    async function refreshPortal(){let entitlement=null;try{const session=await api("/api/auth/session");renderSignedIn(session);renderDevices(session.devices||[]);entitlement=session.entitlement||null;try{entitlement=(await api("/api/auth/entitlement")).entitlement||entitlement}catch{}}catch{}const [authReady,smtp,billing,media,integrations]=await Promise.all([fetch("/api/auth/readiness").then(r=>r.json()),fetch("/api/auth/smtp/readiness").then(r=>r.json()),fetch("/api/billing/readiness").then(r=>r.json()),fetch("/api/media/storage/readiness").then(r=>r.json()),fetch("/api/integrations/readiness").then(r=>r.json())]);const discord=(integrations.coreServices||[]).find(s=>s.id==="discord");renderAlerts([{label:"Access",status:entitlement?.active?"full access":"payment needed",detail:accessDetail(entitlement)},{label:"Supabase Auth",status:authReady.alphaLocalFallback?"needs setup":"ready",detail:authReady.sessionStorage||authReady.provider},{label:"Custom SMTP",status:smtp.ready?"ready":"needed",detail:smtp.ready?"SMTP credentials are present; confirm they are saved in Supabase Auth settings.":"Needed for production signup email: "+(smtp.missingEnv||[]).join(", ")},{label:"Stripe checkout",status:billing.ready?"ready":"needed",detail:billing.mode||"billing not configured"},{label:"Media storage",status:media.ready?"ready":"needed",detail:media.provider||"storage"},{label:"Discord alerts",status:discord?.ready?"ready":"needed",detail:discord?.missingEnv?.length?discord.missingEnv.join(", "):"community alerts configured"}]);if(entitlement?.active&&pageParams.get("stay")!=="1")location.replace("/app")}
+    async function refreshPortal(){let entitlement=null;try{const session=await api("/api/auth/session");renderSignedIn(session);renderDevices(session.devices||[]);entitlement=session.entitlement||null;try{entitlement=(await api("/api/auth/entitlement")).entitlement||entitlement}catch{}}catch{}const readiness=await fetch("/api/portal/readiness",{cache:"no-store"}).then(r=>r.json());renderAlerts([{label:"Access",status:entitlement?.active?"full access":"payment needed",detail:accessDetail(entitlement)},{label:"Account security",status:readiness.auth?.ready?"ready":"setup in progress",detail:readiness.auth?.ready?"Secure account authentication is active.":"Account authentication is being configured."},{label:"Email verification",status:readiness.email?.ready?"ready":"setup in progress",detail:readiness.email?.ready?"Verification email delivery is active.":"Verification email delivery is being configured."},{label:"Stripe checkout",status:readiness.billing?.ready?"ready":"setup in progress",detail:readiness.billing?.ready?"Secure checkout is available.":"Checkout is being configured."},{label:"Media storage",status:readiness.media?.ready?"ready":"setup in progress",detail:readiness.media?.ready?"Private media storage is available.":"Media storage is being configured."},{label:"Account alerts",status:readiness.alerts?.ready?"ready":"setup in progress",detail:readiness.alerts?.ready?"Account alert delivery is active.":"Account alerts are being configured."}]);if(entitlement?.active&&pageParams.get("stay")!=="1")location.replace("/app")}
     function escapeHtml(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[c]))}
     async function openApp(){try{if(localStorage.getItem(tokenKey))await api("/api/auth/session");location.href="/app"}catch(error){$("authNotice").textContent="Log in again before opening the command center.";setCreateMode(false)}}
     $("loginBtn").addEventListener("click",()=>auth("login"));$("createBtn").addEventListener("click",()=>auth("create"));document.querySelectorAll(".openAppBtn").forEach(btn=>btn.addEventListener("click",openApp));$("logoutBtn").addEventListener("click",async()=>{await api("/api/auth/logout",{method:"POST"}).catch(()=>{});localStorage.removeItem(tokenKey);location.reload()});$("copyAppLink").addEventListener("click",async()=>{await navigator.clipboard.writeText(location.origin+"/app");alert("App link copied.")});$("portalCheckout").addEventListener("click",async()=>{const data=await api("/api/billing/checkout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({selectedPlan:"Social Cues highest tier"})});if(data.url)location.href=data.url});setCreateMode(createMode);const inviteCode=pageParams.get("promo")||pageParams.get("code")||"";if(inviteCode)$("promoInput").value=inviteCode.toUpperCase();refreshPortal();
@@ -4320,6 +4527,7 @@ function lockedAppPreviewHtml() {
 }
 
 function requestPublicBaseUrl(req, configured = publicAppUrl) {
+  if (process.env.VERCEL) return (configured || brandHomeUrl).replace(/\/$/, "");
   const forwardedHost = String(req?.headers?.["x-forwarded-host"] || "").split(",")[0].trim();
   const hostHeader = String(req?.headers?.host || "").trim();
   const hostValue = forwardedHost || hostHeader;
@@ -4328,7 +4536,6 @@ function requestPublicBaseUrl(req, configured = publicAppUrl) {
     const proto = forwardedProto || (process.env.VERCEL ? "https" : "http");
     return `${proto}://${hostValue}`.replace(/\/$/, "");
   }
-  if (process.env.VERCEL) return brandHomeUrl;
   const configuredUrl = configured.replace(/\/$/, "");
   const configuredHost = (() => {
     try {
@@ -4356,7 +4563,7 @@ function metaDataDeletionStatusUri(code, req) {
 }
 
 function createOAuthState(model, provider, platform, extra = {}) {
-  const state = Buffer.from(JSON.stringify({ provider, platform, nonce: uid("state") })).toString("base64url");
+  const state = crypto.randomBytes(32).toString("base64url");
   model.oauthStates = (model.oauthStates || []).filter(item => Date.parse(item.expiresAt || "") > Date.now()).slice(-20);
   model.oauthStates.push({
     state,
@@ -4380,8 +4587,7 @@ function consumeOAuthState(model, provider, state) {
 
 async function oauthStartSession(model, req) {
   const session = await sessionFromRequest(model, req);
-  if (runtimeMode === "vercel" && !session) return null;
-  if (runtimeMode === "vercel" && !hasActiveAppAccess(session?.user)) return null;
+  if (!session || !hasActiveAppAccess(session.user)) return null;
   if (session?.user) {
     ensureUserWorkspace(model, session.user);
     await ensureWorkspaceBootstrap(model, session.user);
@@ -4801,6 +5007,7 @@ async function route(req, res) {
   if (req.method === "OPTIONS") return json(res, 200, { ok: true });
 
   const url = new URL(req.url, `http://${req.headers.host}`);
+  if (url.pathname.startsWith("/api/") && !(await authorizeApiRequest(req, res, url))) return;
 
   if (url.pathname === "/") {
     return text(res, 200, landingPageHtml(), "text/html; charset=utf-8");
@@ -4932,6 +5139,18 @@ async function route(req, res) {
       sourceContextEnabled: sentrySourceContextEnabled,
       browserCdnUrl: sentryDsn ? sentryBrowserCdnUrl : null,
       tracesSampleRate: sentryTracesSampleRate
+    });
+  }
+
+  if (url.pathname === "/api/portal/readiness" && req.method === "GET") {
+    const smtp = authSmtpReadiness();
+    return json(res, 200, {
+      ok: true,
+      auth: { ready: supabaseAuthEnabled(), provider: authProvider },
+      email: { ready: smtp.ready && smtp.supabaseDashboardApplied },
+      billing: { ready: Boolean(stripeSecretKey && (stripePriceFounderAudit || stripePriceCampaignBuild || stripePriceProMonthly)) },
+      media: { ready: mediaStorageReady() },
+      alerts: { ready: Boolean(discordClientId && discordClientSecret) }
     });
   }
 
@@ -5310,7 +5529,7 @@ async function route(req, res) {
       return json(res, 400, { ok: false, error: error.message });
     }
 
-    const confirmationCode = uid("meta-delete");
+    const confirmationCode = `meta-delete-${crypto.randomBytes(18).toString("base64url")}`;
     const model = await getModel();
     model.metaDeletionRequests = model.metaDeletionRequests || [];
     model.metaDeletionRequests.push({
@@ -5501,7 +5720,7 @@ async function route(req, res) {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state") || "";
     if (error) {
-      return html(res, 200, `<h1>Threads connection stopped</h1><p>${error}</p><p><a href="/app">Back to Social Cues</a></p>`);
+      return html(res, 200, `<h1>Threads connection stopped</h1><p>${escapeHtml(error)}</p><p><a href="/app">Back to Social Cues</a></p>`);
     }
     if (!code) {
       return html(res, 200, `<h1>No Threads code received</h1><p>Threads did not return an authorization code.</p><p><a href="/app">Back to Social Cues</a></p>`);
@@ -5569,7 +5788,7 @@ async function route(req, res) {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state") || "";
     if (error) {
-      return html(res, 200, `<h1>X connection stopped</h1><p>${error}</p><p><a href="/app">Back to Social Cues</a></p>`);
+      return html(res, 200, `<h1>X connection stopped</h1><p>${escapeHtml(error)}</p><p><a href="/app">Back to Social Cues</a></p>`);
     }
     if (!code) {
       return html(res, 200, `<h1>No X code received</h1><p>X did not return an authorization code.</p><p><a href="/app">Back to Social Cues</a></p>`);
@@ -5652,7 +5871,7 @@ async function route(req, res) {
     });
     if (error) {
       oauthRuntimeLog("tiktok", "callback_provider_error", { returnedError: error });
-      return html(res, 200, `<h1>TikTok connection stopped</h1><p>${error}</p><p><a href="/app">Back to Social Cues</a></p>`);
+      return html(res, 200, `<h1>TikTok connection stopped</h1><p>${escapeHtml(error)}</p><p><a href="/app">Back to Social Cues</a></p>`);
     }
     if (!code) {
       oauthRuntimeLog("tiktok", "callback_missing_code", { hasState: Boolean(state) });
@@ -5745,7 +5964,7 @@ async function route(req, res) {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state") || "";
     if (error) {
-      return html(res, 200, `<h1>Pinterest connection stopped</h1><p>${error}</p><p><a href="/app">Back to Social Cues</a></p>`);
+      return html(res, 200, `<h1>Pinterest connection stopped</h1><p>${escapeHtml(error)}</p><p><a href="/app">Back to Social Cues</a></p>`);
     }
     if (!code) {
       return html(res, 200, `<h1>No Pinterest code received</h1><p>Pinterest did not return an authorization code.</p><p><a href="/app">Back to Social Cues</a></p>`);
@@ -5816,7 +6035,7 @@ async function route(req, res) {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state") || "";
     if (error) {
-      return html(res, 200, `<h1>Etsy connection stopped</h1><p>${error}</p><p><a href="/app">Back to Social Cues</a></p>`);
+      return html(res, 200, `<h1>Etsy connection stopped</h1><p>${escapeHtml(error)}</p><p><a href="/app">Back to Social Cues</a></p>`);
     }
     if (!code) {
       return html(res, 200, `<h1>No Etsy code received</h1><p>Etsy did not return an authorization code.</p><p><a href="/app">Back to Social Cues</a></p>`);
@@ -5892,7 +6111,7 @@ async function route(req, res) {
     const state = url.searchParams.get("state") || "";
     const shop = normalizeShopifyShop(url.searchParams.get("shop") || shopifyShopDomain);
     if (error) {
-      return html(res, 200, `<h1>Shopify connection stopped</h1><p>${error}</p><p><a href="/app">Back to Social Cues</a></p>`);
+      return html(res, 200, `<h1>Shopify connection stopped</h1><p>${escapeHtml(error)}</p><p><a href="/app">Back to Social Cues</a></p>`);
     }
     if (!code || !shop) {
       return html(res, 200, `<h1>Shopify callback incomplete</h1><p>Shopify did not return both an authorization code and a valid shop domain.</p><p><a href="/app">Back to Social Cues</a></p>`);
@@ -5963,7 +6182,7 @@ async function route(req, res) {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state") || "";
     if (error) {
-      return html(res, 200, `<h1>Twitch connection stopped</h1><p>${error}</p><p><a href="/app">Back to Social Cues</a></p>`);
+      return html(res, 200, `<h1>Twitch connection stopped</h1><p>${escapeHtml(error)}</p><p><a href="/app">Back to Social Cues</a></p>`);
     }
     if (!code) {
       return html(res, 200, `<h1>No Twitch code received</h1><p>Twitch did not return an authorization code.</p><p><a href="/app">Back to Social Cues</a></p>`);
@@ -6033,7 +6252,7 @@ async function route(req, res) {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state") || "";
     if (error) {
-      return html(res, 200, `<h1>Canva connection stopped</h1><p>${error}</p><p><a href="/app">Back to Social Cues</a></p>`);
+      return html(res, 200, `<h1>Canva connection stopped</h1><p>${escapeHtml(error)}</p><p><a href="/app">Back to Social Cues</a></p>`);
     }
     if (!code) {
       return html(res, 200, `<h1>No Canva code received</h1><p>Canva did not return an authorization code.</p><p><a href="/app">Back to Social Cues</a></p>`);
@@ -6102,7 +6321,7 @@ async function route(req, res) {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state") || "";
     if (error) {
-      return html(res, 200, `<h1>YouTube connection stopped</h1><p>${error}</p><p><a href="/app">Back to Social Cues</a></p>`);
+      return html(res, 200, `<h1>YouTube connection stopped</h1><p>${escapeHtml(error)}</p><p><a href="/app">Back to Social Cues</a></p>`);
     }
     if (!code) {
       return html(res, 200, `<h1>No YouTube code received</h1><p>Google did not return an authorization code.</p><p><a href="/app">Back to Social Cues</a></p>`);
@@ -6174,7 +6393,7 @@ async function route(req, res) {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state") || "";
     if (error) {
-      return html(res, 200, `<h1>Meta connection stopped</h1><p>${error}</p><p><a href="/app">Back to Social Cues</a></p>`);
+      return html(res, 200, `<h1>Meta connection stopped</h1><p>${escapeHtml(error)}</p><p><a href="/app">Back to Social Cues</a></p>`);
     }
     if (!code) {
       return html(res, 200, `<h1>No Meta code received</h1><p>Meta did not return an authorization code.</p><p><a href="/app">Back to Social Cues</a></p>`);
@@ -6245,7 +6464,7 @@ async function route(req, res) {
         ? "Supabase Auth access tokens identify users; Social Cues stores only HMAC-hashed remembered-device bindings."
         : "Alpha fallback stores HMAC-hashed device sessions; plaintext tokens are returned once at login only.",
       nextSwitch: supabaseAuthEnabled()
-        ? (smtp.ready && smtp.supabaseDashboardApplied ? "Add refresh-token rotation, account recovery UX, login alerts, and rate limits before public customer launch." : smtp.ready ? "Confirm SMTP is saved in Supabase Auth settings, then add refresh-token rotation, email verification policy, and account recovery UX before public customer launch." : "Configure Supabase custom SMTP before public customer signup.")
+        ? (smtp.ready && smtp.supabaseDashboardApplied ? "Complete account recovery UX and login alerts before public customer launch; server authorization and request rate limits are active." : smtp.ready ? "Confirm SMTP is saved in Supabase Auth settings, then complete email verification policy and account recovery UX before public customer launch." : "Configure Supabase custom SMTP before public customer signup.")
         : "Configure Supabase Auth keys so server APIs can validate Supabase access tokens instead of alpha device tokens.",
       missingEnv: [...["SUPABASE_URL"].filter(name => !envPresent(name)), ...missingSupabasePublicAuthEnv(), ...smtp.missingEnv]
     });
@@ -6263,16 +6482,17 @@ async function route(req, res) {
     const smtp = authSmtpReadiness();
     const tokenEncryption = oauthTokenEncryptionReadiness();
     const publicModelHidesUsers = true;
-    const workspaceIsolation = runtimeMode === "vercel"
-      ? "hosted routes require a valid session; public responses are owner-filtered and signed-in workspace snapshots mirror to Supabase workspace_models without secret token material."
-      : "local alpha mode allows unsigned reads for development only.";
-    const productionNeedsSecret = runtimeMode === "vercel" && authSessionSecret === "social-cues-alpha-session-secret";
+    const workspaceIsolation = "All protected API routes require a valid server session and load a request-scoped owner workspace before reading provider accounts, tokens, campaigns, actions, media, or analytics.";
+    const productionNeedsSecret = runtimeMode === "vercel" && !(process.env.AUTH_SESSION_SECRET || process.env.OAUTH_TOKEN_ENCRYPTION_KEY);
     return json(res, 200, {
       ok: true,
       runtimeMode,
       headers: {
         cacheControl: "no-store",
         contentSniffing: "blocked",
+        framing: "denied",
+        crossOriginIsolation: "same-origin opener and resource policy",
+        strictTransportSecurity: runtimeMode === "vercel",
         referrerPolicy: "strict-origin-when-cross-origin",
         permissionsPolicy: "camera and microphone limited to this app"
       },
@@ -6284,6 +6504,12 @@ async function route(req, res) {
         sessionHashesUseServerSecret: supabaseAuthEnabled() || !productionNeedsSecret,
         publicUserListHidden: publicModelHidesUsers,
         workspaceIsolation,
+        defaultDenyApiPolicy: true,
+        cookieWriteOriginChecks: true,
+        requestRateLimits: true,
+        adminAllowlistConfigured: adminEmails.size > 0,
+        inviteOnlySignup: !publicSignupEnabled,
+        globalAdminRoleDerivedFromServerEmailAllowlistOnly: true,
         workspaceModelMirror: supabaseEnabled ? "active when the signed-in user has a Supabase UUID id" : "disabled until Supabase server storage is configured",
         oauthOwnerBinding: "Provider connect URLs are created through an authenticated endpoint and OAuth callbacks stamp connected accounts with ownerUserId/workspaceId from validated state.",
         missingEnv: [
@@ -6291,6 +6517,7 @@ async function route(req, res) {
           ...missingSupabasePublicAuthEnv(),
           ...smtp.missingEnv,
           ...(productionNeedsSecret ? ["AUTH_SESSION_SECRET"] : []),
+          ...(adminEmails.size ? [] : ["SOCIAL_CUES_ADMIN_EMAILS"]),
           ...tokenEncryption.missingEnv
         ]
       },
@@ -6312,6 +6539,7 @@ async function route(req, res) {
         ...(authProvider === "supabase" && !smtp.ready ? ["Supabase custom SMTP is not configured for production signup email."] : []),
         ...(!mediaStorageReady() ? ["Media storage is not ready for real uploads yet."] : []),
         ...(productionNeedsSecret ? ["Production needs AUTH_SESSION_SECRET before account launch."] : []),
+        ...(!adminEmails.size ? ["Configure SOCIAL_CUES_ADMIN_EMAILS before enabling internal diagnostics."] : []),
         ...(!tokenEncryption.productionReady ? ["Production needs OAUTH_TOKEN_ENCRYPTION_KEY so provider tokens do not depend on fallback key material."] : []),
         "app_state.primary is now a server registry for auth, billing, OAuth state, and device sessions; signed-in client workspace content loads from per-user workspace_models."
       ]
@@ -6427,6 +6655,7 @@ async function route(req, res) {
     const token = created.providerSession?.access_token || crypto.randomBytes(32).toString("base64url");
     const device = upsertDeviceSession(model, user, input.device || input, token, created.providerSession);
     setCurrentUser(model, user);
+    await saveSharedModel(model);
     const workspaceModel = await clientWorkspaceModelForUser(user, input, model);
     await saveModelForUser(workspaceModel, user);
     setCookie(res, sessionCookieValue(token, device.expiresAt));
@@ -6442,6 +6671,7 @@ async function route(req, res) {
     const token = loggedIn.providerSession?.access_token || crypto.randomBytes(32).toString("base64url");
     const device = upsertDeviceSession(model, user, input.device || input, token, loggedIn.providerSession);
     setCurrentUser(model, user);
+    await saveSharedModel(model);
     const workspaceModel = hasActiveAppAccess(user) ? await modelForSession({ user }, model) : model;
     if (hasActiveAppAccess(user)) {
       ensureUserWorkspace(workspaceModel, user, input);
@@ -6462,6 +6692,7 @@ async function route(req, res) {
     const workspaceModel = hasActiveAppAccess(session.user) ? await modelForSession(session, model) : model;
     if (hasActiveAppAccess(session.user)) ensureUserWorkspace(workspaceModel, session.user);
     setCurrentUser(model, session.user);
+    await saveSharedModel(model);
     if (hasActiveAppAccess(session.user)) await saveModelForUser(workspaceModel, session.user);
     else await saveModel(model);
     setCookie(res, sessionCookieValue(session.token, session.device.expiresAt));
@@ -7956,14 +8187,17 @@ async function route(req, res) {
 await ensureModel();
 
 export default async function handler(req, res) {
-  return route(req, res).catch(error => {
+  return requestSecurityContext.run({ session: null, sessionResolved: false, workspaceScoped: false, permission: "none" }, () => route(req, res)).catch(error => {
+    const incidentId = crypto.randomUUID();
     captureSentryError(error, {
       surface: "server",
       method: req?.method,
-      route: safeSentryPath(req?.url)
+      route: safeSentryPath(req?.url),
+      incidentId
     });
+    console.error(JSON.stringify({ type: "social-cues-request-failed", incidentId, method: req?.method, route: safeSentryPath(req?.url) }));
     void flushSentry();
-    json(res, 500, { ok: false, error: error.message });
+    json(res, 500, { ok: false, error: "Internal server error.", incidentId });
   });
 }
 

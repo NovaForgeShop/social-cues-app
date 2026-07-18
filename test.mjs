@@ -1,11 +1,21 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
 const port = 4199;
 const base = `http://127.0.0.1:${port}`;
 const promoCodes = [crypto.randomBytes(18).toString("base64url"), crypto.randomBytes(18).toString("base64url")];
 const promoCodeHashes = promoCodes.map(code => crypto.createHash("sha256").update(code.toUpperCase()).digest("hex")).join(",");
+const accountEmail = `alpha-${Date.now()}@socialcuesapp.com`;
+const accountPassword = "test-password-2026";
+let defaultToken = "";
+const serverSource = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
+const declaredApiEndpoints = (serverSource.match(/url\.pathname\s*===\s*"\/api\//g) || []).length
+  + (serverSource.match(/url\.pathname\.startsWith\("\/api\//g) || []).length;
+if (declaredApiEndpoints < 100 || !serverSource.includes('url.pathname.startsWith("/api/") && !(await authorizeApiRequest(req, res, url))')) {
+  throw new Error("API endpoint authorization guard is missing or no longer covers the full route surface");
+}
 const server = spawn(process.execPath, ["server.mjs"], {
   cwd: new URL(".", import.meta.url),
   env: {
@@ -18,7 +28,9 @@ const server = spawn(process.execPath, ["server.mjs"], {
     VERCEL_DEPLOYMENT_ID: "dpl_social_cues_test",
     SENTRY_GITHUB_REPOSITORY: "NovaForgeShop/social-cues-app",
     SENTRY_SOURCE_CONTEXT_ENABLED: "true",
-    SOCIAL_CUES_PROMO_CODE_HASHES: promoCodeHashes
+    SOCIAL_CUES_PROMO_CODE_HASHES: promoCodeHashes,
+    SOCIAL_CUES_ADMIN_EMAILS: accountEmail,
+    SOCIAL_CUES_PUBLIC_SIGNUP_ENABLED: "true"
   },
   stdio: ["ignore", "pipe", "pipe"]
 });
@@ -28,7 +40,9 @@ server.stdout.on("data", chunk => { output += chunk; });
 server.stderr.on("data", chunk => { output += chunk; });
 
 async function request(path, options = {}) {
-  const response = await fetch(base + path, options);
+  const headers = new Headers(options.headers || {});
+  if (defaultToken && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${defaultToken}`);
+  const response = await fetch(base + path, { ...options, headers });
   const text = await response.text();
   let body;
   try {
@@ -40,14 +54,18 @@ async function request(path, options = {}) {
   return body;
 }
 
+async function authenticatedFetch(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (defaultToken && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${defaultToken}`);
+  return fetch(base + path, { ...options, headers });
+}
+
 try {
   await delay(700);
   const health = await request("/health");
   if (!health.ok) throw new Error("health not ok");
-
-  const observability = await request("/api/observability/status");
-  if (observability.release !== "dpl_social_cues_test" || observability.releaseTracking?.source !== "vercel-deployment") throw new Error("Sentry release fallback failed");
-  if (!observability.sourceMapping?.ready || observability.sourceMapping.repository !== "NovaForgeShop/social-cues-app") throw new Error("Sentry GitHub source context readiness failed");
+  const healthHeaders = await fetch(base + "/health");
+  if (healthHeaders.headers.get("x-frame-options") !== "DENY" || healthHeaders.headers.get("cross-origin-opener-policy") !== "same-origin") throw new Error("security response headers missing");
 
   const manifestResponse = await fetch(base + "/manifest.webmanifest");
   if (!manifestResponse.ok) throw new Error("manifest failed");
@@ -67,15 +85,20 @@ try {
   const termsResponse = await fetch(base + "/terms");
   if (!termsResponse.ok || !(await termsResponse.text()).includes("Social Cues Terms of Service")) throw new Error("terms route failed");
 
-  const model = await request("/api/model");
-  if (!model.workspace || !Array.isArray(model.campaigns)) throw new Error("bad model shape");
-  if (!Array.isArray(model.connectedAccounts)) throw new Error("bad accounts shape");
-  if (Object.prototype.hasOwnProperty.call(model, "authUsers")) throw new Error("model exposed auth user ledger");
-  if (JSON.stringify(model).includes('"token":') || JSON.stringify(model).includes('"accessToken":') || JSON.stringify(model).includes('"refreshToken":')) throw new Error("model leaked token material");
-  if (JSON.stringify(model).includes('"oauthStates"')) throw new Error("model leaked oauth state ledger");
+  const portalReadiness = await request("/api/portal/readiness");
+  if (!portalReadiness.ok || Object.prototype.hasOwnProperty.call(portalReadiness, "missingEnv")) throw new Error("public portal readiness leaked internal configuration");
 
-  const accountEmail = `alpha-${Date.now()}@socialcuesapp.com`;
-  const accountPassword = "test-password-2026";
+  const anonymousModelResponse = await fetch(base + "/api/model");
+  if (anonymousModelResponse.status !== 401) throw new Error("anonymous model read should be rejected");
+  const anonymousWriteResponse = await fetch(base + "/api/generate/platform-variants", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ campaign: {} })
+  });
+  if (anonymousWriteResponse.status !== 401) throw new Error("anonymous workspace write should be rejected");
+  const defaultDenyResponse = await fetch(base + "/api/future-unregistered-endpoint");
+  if (defaultDenyResponse.status !== 401) throw new Error("unregistered API endpoint did not fail closed");
+
   const signup = await request("/api/auth/signup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -83,6 +106,13 @@ try {
   });
   if (!signup.ok || signup.workspace.name !== "Social Cues Alpha" || !signup.session?.token) throw new Error("signup failed");
   if (signup.entitlement?.access !== "highest-tier-test" || signup.entitlement?.source !== "promo-code" || !signup.entitlement?.subscriptionPaid || !signup.entitlement?.appFeePaid) throw new Error("promo entitlement failed");
+  defaultToken = signup.session.token;
+
+  const observability = await request("/api/observability/status");
+  if (observability.release !== "dpl_social_cues_test" || observability.releaseTracking?.source !== "vercel-deployment") throw new Error("Sentry release fallback failed");
+  if (!observability.sourceMapping?.ready || observability.sourceMapping.repository !== "NovaForgeShop/social-cues-app") throw new Error("Sentry GitHub source context readiness failed");
+  const authenticatedUnknownResponse = await authenticatedFetch("/api/future-unregistered-endpoint");
+  if (authenticatedUnknownResponse.status !== 404) throw new Error("authenticated unknown endpoint should remain unavailable");
 
   const badLoginResponse = await fetch(base + "/api/auth/login", {
     method: "POST",
@@ -97,6 +127,7 @@ try {
     body: JSON.stringify({ name: "Alpha Tester", email: accountEmail, password: accountPassword, workspaceName: "Social Cues Alpha" })
   });
   if (!login.ok || login.workspace.name !== "Social Cues Alpha" || !login.session?.token) throw new Error("login failed");
+  defaultToken = login.session.token;
 
   const cookieLoginResponse = await fetch(base + "/api/auth/login", {
     method: "POST",
@@ -119,6 +150,12 @@ try {
   const firstUserModel = await request("/api/model", {
     headers: { Authorization: `Bearer ${login.session.token}` }
   });
+  const model = firstUserModel;
+  if (!model.workspace || !Array.isArray(model.campaigns) || !Array.isArray(model.connectedAccounts)) throw new Error("bad model shape");
+  if (Object.prototype.hasOwnProperty.call(model, "authUsers")) throw new Error("model exposed auth user ledger");
+  if (JSON.stringify(model).includes('"token":') || JSON.stringify(model).includes('"accessToken":') || JSON.stringify(model).includes('"refreshToken":')) throw new Error("model leaked token material");
+  if (JSON.stringify(model).includes('"oauthStates"')) throw new Error("model leaked oauth state ledger");
+  if (JSON.stringify(model).includes('"metaDeletionRequests"')) throw new Error("model leaked deletion request ledger");
   if (firstUserModel.currentUser?.email !== accountEmail) throw new Error("signed-in model returned the wrong first user");
   const firstUserCampaignIds = new Set((firstUserModel.campaigns || []).map(item => item.id));
   if (!firstUserCampaignIds.size) throw new Error("first user workspace did not create private starter campaign data");
@@ -137,16 +174,62 @@ try {
   if ((secondUserModel.campaigns || []).some(item => firstUserCampaignIds.has(item.id))) throw new Error("second user can see first user campaigns");
   if ((secondUserModel.connectedAccounts || []).some(item => item.ownerUserId === login.user.id)) throw new Error("second user can see first user accounts");
 
-  const generated = await request("/api/generate/platform-variants", {
+  const forgedAccountId = `forged-${Date.now()}`;
+  const forgedModel = {
+    ...firstUserModel,
+    connectedAccounts: [...(firstUserModel.connectedAccounts || []), {
+      id: forgedAccountId,
+      platform: "tiktok",
+      name: "Forged provider account",
+      status: "connected",
+      ownerUserId: secondSignup.user.id,
+      workspaceId: secondSignup.workspace.id,
+      providerAccountId: "forged-provider-id",
+      oauthProvider: "tiktok",
+      scopes: ["video.publish"],
+      credential: { value: "attacker-controlled" }
+    }]
+  };
+  const forgedSave = await request("/api/model", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    body: JSON.stringify(forgedModel)
+  });
+  const sanitizedForgedAccount = (forgedSave.connectedAccounts || []).find(item => item.id === forgedAccountId);
+  if (!sanitizedForgedAccount || sanitizedForgedAccount.ownerUserId !== login.user.id) throw new Error("server did not override client-supplied ownership");
+  if (sanitizedForgedAccount.connected || sanitizedForgedAccount.tokenStored || sanitizedForgedAccount.providerAccountId) throw new Error("server accepted client-supplied provider evidence");
+  const secondModelAfterForgery = await request("/api/model", {
+    headers: { Authorization: `Bearer ${secondSignup.session.token}` }
+  });
+  if ((secondModelAfterForgery.connectedAccounts || []).some(item => item.id === forgedAccountId)) throw new Error("forged account crossed into another workspace");
+
+  const unpaidEmail = `unpaid-${Date.now()}@socialcuesapp.com`;
+  const unpaidSignup = await request("/api/auth/signup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Unpaid Tester", email: unpaidEmail, password: accountPassword, workspaceName: "Unpaid Workspace" })
+  });
+  if (!unpaidSignup.ok || !unpaidSignup.session?.token || unpaidSignup.entitlement?.active) throw new Error("unpaid account setup failed");
+  const unpaidModelResponse = await fetch(base + "/api/model", {
+    headers: { Authorization: `Bearer ${unpaidSignup.session.token}` }
+  });
+  if (unpaidModelResponse.status !== 402) throw new Error("unpaid account crossed the app entitlement gate");
+
+  const nonAdminAuditResponse = await fetch(base + "/api/security/audit", {
+    headers: { Authorization: `Bearer ${secondSignup.session.token}` }
+  });
+  if (nonAdminAuditResponse.status !== 403) throw new Error("non-admin user reached an administrator endpoint");
+
+  const generated = await request("/api/generate/platform-variants", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
     body: JSON.stringify({ campaign: model.campaigns[0] })
   });
   if (!generated.ok || generated.variants.length < 6) throw new Error("generation failed");
 
   const queued = await request("/api/publish/social-cues/queue", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
     body: JSON.stringify({ variant: generated.variants[0] })
   });
   if (!queued.ok || queued.provider !== "social-cues-queue") throw new Error("queue failed");
@@ -173,6 +256,20 @@ try {
   });
   if (!won.ok || won.action.status !== "won") throw new Error("action update failed");
 
+  const crossWorkspaceActionResponse = await fetch(base + `/api/actions/${encodeURIComponent(action.action.id)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${secondSignup.session.token}` },
+    body: JSON.stringify({ status: "won" })
+  });
+  if (crossWorkspaceActionResponse.status !== 404) throw new Error("second workspace mutated an action it does not own");
+
+  const csrfActionResponse = await fetch(base + "/api/actions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: setCookie.split(";")[0], Origin: "https://attacker.invalid" },
+    body: JSON.stringify({ title: "Cross-site action" })
+  });
+  if (csrfActionResponse.status !== 403) throw new Error("cross-origin cookie write should be rejected");
+
   const actions = await request("/api/actions", {
     headers: { Authorization: `Bearer ${login.session.token}` }
   });
@@ -185,7 +282,7 @@ try {
   if (!metaStatus.ok || !metaStatus.redirectUri.includes("/api/oauth/meta/callback")) throw new Error("meta status failed");
   if (metaStatus.scopes.includes("business_management")) throw new Error("meta default login should not request business_management for non-business Page flow");
 
-  const metaStartResponse = await fetch(base + "/api/oauth/meta/start?platform=instagram", { redirect: "manual" });
+  const metaStartResponse = await authenticatedFetch("/api/oauth/meta/start?platform=instagram", { redirect: "manual" });
   if (![200, 302].includes(metaStartResponse.status)) throw new Error("meta start failed");
   if (metaStartResponse.status === 200) {
     const metaStartText = await metaStartResponse.text();
@@ -216,7 +313,7 @@ try {
   const twitchStatus = await request("/api/oauth/twitch/status");
   if (!twitchStatus.ok || !twitchStatus.redirectUri.includes("/api/oauth/twitch/callback") || !twitchStatus.scopes.includes("user:read:email")) throw new Error("twitch status failed");
 
-  const xStartResponse = await fetch(base + "/api/oauth/x/start", { redirect: "manual" });
+  const xStartResponse = await authenticatedFetch("/api/oauth/x/start", { redirect: "manual" });
   if (![200, 302].includes(xStartResponse.status)) throw new Error("x start failed");
   if (xStartResponse.status === 200) {
     const xStartText = await xStartResponse.text();
@@ -269,20 +366,20 @@ try {
   if (!metaInstagram.ok || !Array.isArray(metaInstagram.accounts) || !metaInstagram.gate) throw new Error("meta instagram accounts failed");
   if (metaInstagram.accounts.some(account => !account.connected || !account.tokenStored || !account.providerAccountId)) throw new Error("meta instagram returned placeholder assets");
 
-  const metaBusinessAssetsResponse = await fetch(base + "/api/meta/business/assets");
+  const metaBusinessAssetsResponse = await authenticatedFetch("/api/meta/business/assets");
   const metaBusinessAssets = await metaBusinessAssetsResponse.json();
   if (!(metaBusinessAssets.gate || metaBusinessAssets.useCase) || !Object.prototype.hasOwnProperty.call(metaBusinessAssets, "ok")) throw new Error("meta business diagnostic failed");
 
   const metaOembed = await request("/api/meta/oembed");
   if (!metaOembed.ok || !metaOembed.gate || metaOembed.requiresOwnedPage !== false || !metaOembed.supportedKinds.includes("instagram")) throw new Error("meta oEmbed readiness failed");
 
-  const badOembed = await fetch(base + "/api/meta/oembed?url=https%3A%2F%2Fexample.com%2Fpost");
+  const badOembed = await authenticatedFetch("/api/meta/oembed?url=https%3A%2F%2Fexample.com%2Fpost");
   if (badOembed.status !== 400) throw new Error("meta oEmbed should reject non-Meta URLs");
 
   const xAccount = await request("/api/x/account");
   if (!xAccount.ok || !Array.isArray(xAccount.scopes) || !xAccount.redirectUri.includes("/api/oauth/x/callback")) throw new Error("x account failed");
 
-  const xPostBlocked = await fetch(base + "/api/x/post", {
+  const xPostBlocked = await authenticatedFetch("/api/x/post", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text: "Social Cues X smoke test" })
@@ -341,6 +438,7 @@ try {
   const securityAudit = await request("/api/security/audit");
   if (!securityAudit.ok || !securityAudit.headers || !securityAudit.auth?.publicUserListHidden) throw new Error("security audit failed");
   if (!securityAudit.secrets?.oauthTokenEncryption || !securityAudit.auth?.workspaceModelMirror) throw new Error("security audit missed core hardening status");
+  if (!securityAudit.auth?.defaultDenyApiPolicy || !securityAudit.auth?.cookieWriteOriginChecks || !securityAudit.auth?.requestRateLimits || !securityAudit.auth?.adminAllowlistConfigured) throw new Error("security audit missed endpoint authorization controls");
 
   const mediaEditPlan = await request("/api/media/editor/plan", {
     method: "POST",
@@ -359,7 +457,7 @@ try {
   });
   if (!mediaAsset.ok || !mediaAsset.asset?.storagePath || mediaAsset.asset.createdBy !== login.user.id) throw new Error("media asset reservation failed");
 
-  const manualConnectResponse = await fetch(base + "/api/accounts/tiktok", {
+  const manualConnectResponse = await authenticatedFetch("/api/accounts/tiktok", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status: "connected", handle: "@should-not-connect" })

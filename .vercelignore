@@ -25,3 +25,12 @@ vercel-deploy-isolated.ps1
 /blob-report/
 /playwright/
 /.ms-playwright/
+/*.md
+/*.sql
+/*.cmd
+/*.ps1
+/.env.example
+/test.mjs
+/playwright.config.ts
+/tests/
+/scripts/
