@@ -6,6 +6,12 @@
   "start_url": "/app",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
+  "categories": ["business", "productivity", "social"],
+  "prefer_related_applications": false,
   "background_color": "#08080f",
   "theme_color": "#08080f",
   "orientation": "any",

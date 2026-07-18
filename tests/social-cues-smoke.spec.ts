@@ -2,9 +2,14 @@ import { expect, test } from '@playwright/test';
 
 test('private workstation is gated without an active session', async ({ page }) => {
   await page.goto('/app');
-  await expect(page.getByRole('heading', { name: /No app access without an active account/i })).toBeVisible();
-  await expect(page.getByText(/workstations are private/i)).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Log in' }).first()).toBeVisible();
+  if (process.env.E2E_USE_LOCAL_SERVER) {
+    await expect(page.locator('#loginScreen')).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Log in to Social Cues/i })).toBeVisible();
+  } else {
+    await expect(page.getByRole('heading', { name: /No app access without an active account/i })).toBeVisible();
+    await expect(page.getByText(/workstations are private/i)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Log in' }).first()).toBeVisible();
+  }
 });
 
 test('TikTok OAuth status is sandbox configured', async ({ request }) => {

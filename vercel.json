@@ -2,9 +2,17 @@
   "version": 2,
   "functions": {
     "api/server.mjs": {
-      "maxDuration": 30
+      "maxDuration": 300,
+      "includeFiles": "{social-cues-app.html,icon.svg,manifest.webmanifest,sw.js,favicon.png,apple-touch-icon.png,sc-icon-192.png,sc-icon-512.png,sc-icon-1024.png,social-cues-coming-soon.png,public/**}",
+      "excludeFiles": "{reddit-devvit/**,data/**,outputs/**,server.corrupt-*,*.md}"
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron/workers",
+      "schedule": "* * * * *"
+    }
+  ],
   "routes": [
     {
       "src": "/(.*)",

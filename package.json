@@ -6,15 +6,27 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node test.mjs",
-    "test:e2e": "set PLAYWRIGHT_BROWSERS_PATH=.ms-playwright&& playwright test",
+    "test:e2e": "playwright test",
+    "test:tester-loop": "node scripts/run-tester-loop.mjs",
+    "test:local-audit": "node scripts/run-tester-loop.mjs tests/social-cues-button-audit.spec.ts tests/social-cues-tester-loop.spec.ts",
+    "test:mobile": "set E2E_PROJECTS=mobile-chrome,mobile-safari&& node scripts/run-tester-loop.mjs tests/social-cues-mobile-shell.spec.ts",
     "smtp:check": "node scripts/configure-supabase-smtp.mjs",
-    "smtp:apply": "node scripts/configure-supabase-smtp.mjs --apply"
+    "smtp:apply": "node scripts/configure-supabase-smtp.mjs --apply",
+    "vercel:env:audit": "node scripts/sync-vercel-env.mjs --dry-run",
+    "vercel:env:sync": "node scripts/sync-vercel-env.mjs",
+    "render:coming-soon": "remotion render remotion/index.ts SocialCuesComingSoon outputs/social-cues-coming-soon-remotion.mp4 --overwrite",
+    "render:still": "remotion still remotion/index.ts SocialCuesComingSoon outputs/social-cues-coming-soon-remotion.png --frame=75 --overwrite"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
     "@types/node": "^26.0.1"
   },
   "dependencies": {
-    "@sentry/node": "^10.66.0"
+    "@remotion/cli": "^4.0.484",
+    "@remotion/renderer": "^4.0.484",
+    "@sentry/node": "^10.66.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "remotion": "^4.0.484"
   }
 }

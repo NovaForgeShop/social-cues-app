@@ -21,6 +21,8 @@ vercel-deploy-isolated.ps1
 /audit-gui-*/
 /PROMO-CODES-TEST-ACCOUNTS.md
 /test-results/
+/outputs/
+/.tmp/
 /playwright-report/
 /blob-report/
 /playwright/

@@ -134,7 +134,7 @@ create table if not exists public.billing_customers (
 create table if not exists public.billing_entitlements (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
-  user_id uuid,
+  user_id uuid not null,
   source text not null default 'unknown',
   access text not null default 'unpaid',
   status text not null default 'inactive',
@@ -145,6 +145,16 @@ create table if not exists public.billing_entitlements (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+delete from public.billing_entitlements older
+using public.billing_entitlements newer
+where older.workspace_id = newer.workspace_id
+  and older.user_id = newer.user_id
+  and (older.updated_at, older.created_at, older.id) < (newer.updated_at, newer.created_at, newer.id);
+
+alter table public.billing_entitlements alter column user_id set not null;
+create unique index if not exists billing_entitlements_workspace_user_uidx
+  on public.billing_entitlements(workspace_id, user_id);
 
 alter table public.app_state enable row level security;
 alter table public.workspace_models enable row level security;
@@ -158,6 +168,14 @@ alter table public.media_assets enable row level security;
 alter table public.action_items enable row level security;
 alter table public.billing_customers enable row level security;
 alter table public.billing_entitlements enable row level security;
+
+revoke all on table public.app_state from public, anon, authenticated;
+drop policy if exists "server registry is service role only" on public.app_state;
+create policy "server registry is service role only"
+  on public.app_state for all
+  to anon, authenticated
+  using (false)
+  with check (false);
 
 create policy "profiles can read own profile"
   on public.profiles for select
@@ -354,6 +372,11 @@ create index if not exists scheduled_posts_workspace_idx on public.scheduled_pos
 create index if not exists scheduled_posts_due_idx on public.scheduled_posts(status, scheduled_for);
 create index if not exists media_workspace_idx on public.media_assets(workspace_id);
 create index if not exists actions_workspace_idx on public.action_items(workspace_id);
+create index if not exists profiles_workspace_idx on public.profiles(workspace_id);
+create index if not exists billing_customers_workspace_idx on public.billing_customers(workspace_id);
+create index if not exists device_sessions_workspace_idx on public.device_sessions(workspace_id);
+create index if not exists scheduled_posts_campaign_idx on public.scheduled_posts(campaign_id);
+create index if not exists scheduled_posts_variant_idx on public.scheduled_posts(content_variant_id);
 
 -- Supabase Storage bucket for user-uploaded raw media and generated derivatives.
 -- Object paths should start with the authenticated user's UUID when uploaded directly from the browser.
