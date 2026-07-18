@@ -5,6 +5,16 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node test.mjs"
+    "test": "node test.mjs",
+    "test:e2e": "set PLAYWRIGHT_BROWSERS_PATH=.ms-playwright&& playwright test",
+    "smtp:check": "node scripts/configure-supabase-smtp.mjs",
+    "smtp:apply": "node scripts/configure-supabase-smtp.mjs --apply"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^26.0.1"
+  },
+  "dependencies": {
+    "@sentry/node": "^10.66.0"
   }
 }

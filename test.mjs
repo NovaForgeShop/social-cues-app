@@ -1,11 +1,25 @@
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
 const port = 4199;
 const base = `http://127.0.0.1:${port}`;
+const promoCodes = [crypto.randomBytes(18).toString("base64url"), crypto.randomBytes(18).toString("base64url")];
+const promoCodeHashes = promoCodes.map(code => crypto.createHash("sha256").update(code.toUpperCase()).digest("hex")).join(",");
 const server = spawn(process.execPath, ["server.mjs"], {
   cwd: new URL(".", import.meta.url),
-  env: { ...process.env, PORT: String(port) },
+  env: {
+    ...process.env,
+    PORT: String(port),
+    AUTH_PROVIDER: "alpha-local",
+    SUPABASE_ENABLED: "false",
+    SENTRY_DSN: "",
+    SENTRY_RELEASE: "",
+    VERCEL_DEPLOYMENT_ID: "dpl_social_cues_test",
+    SENTRY_GITHUB_REPOSITORY: "NovaForgeShop/social-cues-app",
+    SENTRY_SOURCE_CONTEXT_ENABLED: "true",
+    SOCIAL_CUES_PROMO_CODE_HASHES: promoCodeHashes
+  },
   stdio: ["ignore", "pipe", "pipe"]
 });
 
@@ -31,6 +45,10 @@ try {
   const health = await request("/health");
   if (!health.ok) throw new Error("health not ok");
 
+  const observability = await request("/api/observability/status");
+  if (observability.release !== "dpl_social_cues_test" || observability.releaseTracking?.source !== "vercel-deployment") throw new Error("Sentry release fallback failed");
+  if (!observability.sourceMapping?.ready || observability.sourceMapping.repository !== "NovaForgeShop/social-cues-app") throw new Error("Sentry GitHub source context readiness failed");
+
   const manifestResponse = await fetch(base + "/manifest.webmanifest");
   if (!manifestResponse.ok) throw new Error("manifest failed");
   const manifest = await manifestResponse.json();
@@ -38,6 +56,13 @@ try {
 
   const iconResponse = await fetch(base + "/icon.svg");
   if (!iconResponse.ok) throw new Error("icon failed");
+  for (const iconPath of ["/sc-icon-192.png", "/sc-icon-512.png", "/apple-touch-icon.png", "/favicon.png"]) {
+    const pngResponse = await fetch(base + iconPath);
+    const pngBuffer = Buffer.from(await pngResponse.arrayBuffer());
+    if (!pngResponse.ok || pngResponse.headers.get("content-type") !== "image/png" || pngBuffer.length < 100 || pngBuffer[0] !== 0x89 || pngBuffer[1] !== 0x50) {
+      throw new Error(`${iconPath} png icon failed`);
+    }
+  }
 
   const termsResponse = await fetch(base + "/terms");
   if (!termsResponse.ok || !(await termsResponse.text()).includes("Social Cues Terms of Service")) throw new Error("terms route failed");
@@ -45,15 +70,72 @@ try {
   const model = await request("/api/model");
   if (!model.workspace || !Array.isArray(model.campaigns)) throw new Error("bad model shape");
   if (!Array.isArray(model.connectedAccounts)) throw new Error("bad accounts shape");
+  if (Object.prototype.hasOwnProperty.call(model, "authUsers")) throw new Error("model exposed auth user ledger");
   if (JSON.stringify(model).includes('"token":') || JSON.stringify(model).includes('"accessToken":') || JSON.stringify(model).includes('"refreshToken":')) throw new Error("model leaked token material");
   if (JSON.stringify(model).includes('"oauthStates"')) throw new Error("model leaked oauth state ledger");
+
+  const accountEmail = `alpha-${Date.now()}@socialcuesapp.com`;
+  const accountPassword = "test-password-2026";
+  const signup = await request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Alpha Tester", email: accountEmail, password: accountPassword, promoCode: promoCodes[0], workspaceName: "Social Cues Alpha" })
+  });
+  if (!signup.ok || signup.workspace.name !== "Social Cues Alpha" || !signup.session?.token) throw new Error("signup failed");
+  if (signup.entitlement?.access !== "highest-tier-test" || signup.entitlement?.source !== "promo-code" || !signup.entitlement?.subscriptionPaid || !signup.entitlement?.appFeePaid) throw new Error("promo entitlement failed");
+
+  const badLoginResponse = await fetch(base + "/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: accountEmail, password: "wrong-password" })
+  });
+  if (badLoginResponse.status !== 401) throw new Error("bad login should be rejected");
 
   const login = await request("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "Alpha Tester", email: "alpha@test.local", workspaceName: "Social Cues Alpha" })
+    body: JSON.stringify({ name: "Alpha Tester", email: accountEmail, password: accountPassword, workspaceName: "Social Cues Alpha" })
   });
-  if (!login.ok || login.workspace.name !== "Social Cues Alpha") throw new Error("login failed");
+  if (!login.ok || login.workspace.name !== "Social Cues Alpha" || !login.session?.token) throw new Error("login failed");
+
+  const cookieLoginResponse = await fetch(base + "/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Alpha Tester", email: accountEmail, password: accountPassword })
+  });
+  const setCookie = cookieLoginResponse.headers.get("set-cookie") || "";
+  if (!cookieLoginResponse.ok || !setCookie.includes("sc_session=") || !setCookie.includes("HttpOnly")) throw new Error("login did not set secure session cookie");
+  const cookieModelResponse = await fetch(base + "/api/model", {
+    headers: { Cookie: setCookie.split(";")[0] }
+  });
+  const cookieModel = await cookieModelResponse.json();
+  if (!cookieModelResponse.ok || cookieModel.currentUser?.email !== accountEmail) throw new Error("session cookie did not load signed-in model");
+
+  const workspaceModelStatus = await request("/api/workspace/model/status", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
+  if (!workspaceModelStatus.ok || !Object.prototype.hasOwnProperty.call(workspaceModelStatus, "mirrored")) throw new Error("workspace model status failed");
+
+  const firstUserModel = await request("/api/model", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
+  if (firstUserModel.currentUser?.email !== accountEmail) throw new Error("signed-in model returned the wrong first user");
+  const firstUserCampaignIds = new Set((firstUserModel.campaigns || []).map(item => item.id));
+  if (!firstUserCampaignIds.size) throw new Error("first user workspace did not create private starter campaign data");
+
+  const secondEmail = `alpha-second-${Date.now()}@socialcuesapp.com`;
+  const secondSignup = await request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Second Tester", email: secondEmail, password: accountPassword, promoCode: promoCodes[1], workspaceName: "Second Workspace" })
+  });
+  if (!secondSignup.ok || !secondSignup.session?.token) throw new Error("second signup failed");
+  const secondUserModel = await request("/api/model", {
+    headers: { Authorization: `Bearer ${secondSignup.session.token}` }
+  });
+  if (secondUserModel.currentUser?.email !== secondEmail) throw new Error("signed-in model returned the wrong second user");
+  if ((secondUserModel.campaigns || []).some(item => firstUserCampaignIds.has(item.id))) throw new Error("second user can see first user campaigns");
+  if ((secondUserModel.connectedAccounts || []).some(item => item.ownerUserId === login.user.id)) throw new Error("second user can see first user accounts");
 
   const generated = await request("/api/generate/platform-variants", {
     method: "POST",
@@ -72,26 +154,28 @@ try {
 
   const proof = await request("/api/proof", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
     body: JSON.stringify({ type: "Test", metric: "API smoke test", note: "Automated local validation." })
   });
   if (!proof.ok) throw new Error("proof failed");
 
   const action = await request("/api/actions", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
     body: JSON.stringify({ type: "Experiment", priority: "High", title: "Smoke-test action", signal: "API accepts action creation." })
   });
   if (!action.ok || !action.action.id) throw new Error("action create failed");
 
   const won = await request(`/api/actions/${encodeURIComponent(action.action.id)}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
     body: JSON.stringify({ status: "won" })
   });
   if (!won.ok || won.action.status !== "won") throw new Error("action update failed");
 
-  const actions = await request("/api/actions");
+  const actions = await request("/api/actions", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
   if (!actions.ok || !Array.isArray(actions.actions)) throw new Error("action list failed");
 
   const readiness = await request("/api/integrations/readiness");
@@ -116,6 +200,21 @@ try {
 
   const xStatus = await request("/api/oauth/x/status");
   if (!xStatus.ok || !xStatus.redirectUri.includes("/api/oauth/x/callback") || !xStatus.scopes.includes("tweet.write")) throw new Error("x status failed");
+
+  const pinterestStatus = await request("/api/oauth/pinterest/status");
+  if (!pinterestStatus.ok || !pinterestStatus.redirectUri.includes("/api/oauth/pinterest/callback") || !pinterestStatus.scopes.includes("pins:write")) throw new Error("pinterest status failed");
+
+  const canvaStatus = await request("/api/oauth/canva/status");
+  if (!canvaStatus.ok || !canvaStatus.redirectUri.includes("/api/oauth/canva/callback") || !canvaStatus.scopes.includes("design:meta:read")) throw new Error("canva status failed");
+
+  const shopifyStatus = await request("/api/oauth/shopify/status");
+  if (!shopifyStatus.ok || !shopifyStatus.redirectUri.includes("/api/oauth/shopify/callback") || !shopifyStatus.scopes.includes("read_products")) throw new Error("shopify status failed");
+
+  const etsyStatus = await request("/api/oauth/etsy/status");
+  if (!etsyStatus.ok || !etsyStatus.redirectUri.includes("/api/oauth/etsy/callback") || !etsyStatus.scopes.includes("listings_r")) throw new Error("etsy status failed");
+
+  const twitchStatus = await request("/api/oauth/twitch/status");
+  if (!twitchStatus.ok || !twitchStatus.redirectUri.includes("/api/oauth/twitch/callback") || !twitchStatus.scopes.includes("user:read:email")) throw new Error("twitch status failed");
 
   const xStartResponse = await fetch(base + "/api/oauth/x/start", { redirect: "manual" });
   if (![200, 302].includes(xStartResponse.status)) throw new Error("x start failed");
@@ -211,6 +310,55 @@ try {
   });
   if (!checkout.ok) throw new Error("billing checkout failed");
 
+  const coreReadiness = await request("/api/integrations/readiness");
+  if (!coreReadiness.ok || !Array.isArray(coreReadiness.coreServices)) throw new Error("integration readiness failed");
+  if (!coreReadiness.envRequired.includes("PINTEREST_APP_ID") || !coreReadiness.envRequired.includes("CANVA_CLIENT_ID") || !coreReadiness.envRequired.includes("SHOPIFY_CLIENT_ID") || !coreReadiness.envRequired.includes("RESEND_API_KEY")) throw new Error("provider env readiness missing expanded providers");
+  for (const id of ["openai", "stripe", "discord", "resend", "media_editor"]) {
+    if (!coreReadiness.coreServices.some(service => service.id === id)) throw new Error(`missing ${id} readiness`);
+  }
+
+  const openaiReady = await request("/api/openai/readiness");
+  if (!openaiReady.ok || !openaiReady.serverSideOnly) throw new Error("openai readiness failed");
+
+  const discordReady = await request("/api/discord/readiness");
+  if (!discordReady.ok || !discordReady.redirectUri.includes("/api/oauth/discord/callback")) throw new Error("discord readiness failed");
+
+  const resendReady = await request("/api/resend/readiness");
+  if (!resendReady.ok || !resendReady.smtp || !Array.isArray(resendReady.missingEnv)) throw new Error("resend readiness failed");
+
+  const billingReady = await request("/api/billing/readiness");
+  if (!billingReady.ok || !billingReady.mode) throw new Error("billing readiness failed");
+
+  const mediaEditorReady = await request("/api/media/editor/readiness");
+  if (!mediaEditorReady.ok || !Array.isArray(mediaEditorReady.outputs)) throw new Error("media editor readiness failed");
+
+  const authReady = await request("/api/auth/readiness");
+  if (!authReady.ok || !authReady.sessionStorage.includes("HMAC")) throw new Error("auth readiness failed");
+
+  const storageReady = await request("/api/media/storage/readiness");
+  if (!storageReady.ok || !storageReady.bucket || !Array.isArray(storageReady.missingEnv)) throw new Error("media storage readiness failed");
+
+  const securityAudit = await request("/api/security/audit");
+  if (!securityAudit.ok || !securityAudit.headers || !securityAudit.auth?.publicUserListHidden) throw new Error("security audit failed");
+  if (!securityAudit.secrets?.oauthTokenEncryption || !securityAudit.auth?.workspaceModelMirror) throw new Error("security audit missed core hardening status");
+
+  const mediaEditPlan = await request("/api/media/editor/plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sourceName: "raw-test.mp4", brief: "Social Cues launch" })
+  });
+  if (!mediaEditPlan.ok || !mediaEditPlan.plan?.outputs?.length || !mediaEditPlan.serverRequirement) throw new Error("media editor plan failed");
+
+  const mediaAsset = await request("/api/media/assets", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${login.session.token}`
+    },
+    body: JSON.stringify({ fileName: "raw-test.mp4", kind: "video", title: "Raw smoke clip" })
+  });
+  if (!mediaAsset.ok || !mediaAsset.asset?.storagePath || mediaAsset.asset.createdBy !== login.user.id) throw new Error("media asset reservation failed");
+
   const manualConnectResponse = await fetch(base + "/api/accounts/tiktok", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -218,7 +366,16 @@ try {
   });
   if (manualConnectResponse.status !== 409) throw new Error("manual account connect should be blocked");
 
-  const accounts = await request("/api/accounts");
+  const disconnectResponse = await request("/api/accounts/tiktok", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    body: JSON.stringify({ disconnect: true, disabled: true, status: "not connected" })
+  });
+  if (!disconnectResponse.ok || disconnectResponse.account.connected || disconnectResponse.account.tokenStored) throw new Error("disconnect should clear account evidence");
+
+  const accounts = await request("/api/accounts", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
   if (!accounts.ok || !accounts.accounts.some(account => account.platform === "tiktok")) throw new Error("accounts list failed");
   if (JSON.stringify(accounts.accounts).includes('"token"')) throw new Error("accounts leaked token material");
   const tiktok = accounts.accounts.find(account => account.platform === "tiktok");

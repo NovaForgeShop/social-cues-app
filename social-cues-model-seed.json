@@ -2,15 +2,15 @@
   "version": "0.2.0-local",
   "currentUser": null,
   "workspace": {
-    "name": "Social Cues Alpha",
-    "owner": "Alpha User",
+    "name": "Social Cues",
+    "owner": "Social Cues User",
     "purpose": "Launch Social Cues as a customer-ready social command center"
   },
   "onboarding": {
     "complete": false,
     "bio": "This workspace is testing Social Cues as an end-user customer.",
     "purpose": "Use Social Cues to launch itself with a repeatable social growth engine, customer-ready onboarding, media planning, account connections, and revenue path.",
-    "offer": "Social Cues alpha",
+    "offer": "Social Cues",
     "audience": "Creators, small businesses, agencies, and ecommerce operators"
   },
   "profile": {
@@ -36,7 +36,7 @@
   "campaigns": [
     {
       "id": "camp-Social Cues-self-launch",
-      "title": "Social Cues Customer-Ready Alpha Launch",
+      "title": "Social Cues Customer-Ready Launch",
       "brief": "Launch Social Cues as the social command center for creators, small businesses, agencies, and ecommerce operators. Show how it helps a customer log in, connect social accounts, analyze metrics, generate platform-native campaigns, attach or generate media, approve content, and turn results into a repeatable growth system.",
       "goal": "Build demand",
       "tone": "Sharp and useful",
@@ -62,7 +62,7 @@
       "id": "proof-seed-1",
       "type": "Workflow saved",
       "metric": "Prototype to usable local run",
-      "note": "Social Cues moved from visual prototype into a persistent customer-ready alpha with onboarding, accounts, campaigns, approvals, media, billing, exports, and growth diagnosis."
+      "note": "Social Cues moved from visual prototype into a persistent customer-ready command center with onboarding, accounts, campaigns, approvals, media, billing, exports, and growth diagnosis."
     }
   ],
   "handoff": {
@@ -70,10 +70,15 @@
   },
   "integrations": {
     "openai": "Needed",
+    "resend": "Needed for signup email",
     "publishingQueue": "Supabase queue ready",
-    "shopify": "Needed",
-    "canva": "Needed",
-    "sora": "Needed",
+    "shopify": "Partner app setup pending",
+    "etsy": "Developer app setup pending",
+    "linkedin": "Approval-gated backlog",
+    "snapchat": "Approval-gated backlog",
+    "twitch": "Developer app setup pending",
+    "pinterest": "Developer app pending",
+    "canva": "MFA / developer integration pending",
     "publishingPath": "Social Cues Queue first"
   },
   "analytics": {
@@ -88,9 +93,8 @@
     { "id": "acct-youtube", "platform": "youtube", "name": "YouTube", "handle": "", "status": "not connected", "connectedAt": null },
     { "id": "acct-facebook", "platform": "facebook", "name": "Facebook Page", "handle": "", "status": "not connected", "connectedAt": null },
     { "id": "acct-x", "platform": "x", "name": "X", "handle": "", "status": "not connected", "connectedAt": null },
-    { "id": "acct-shopify", "platform": "shopify", "name": "Shopify", "handle": "", "status": "not connected", "connectedAt": null },
-    { "id": "acct-canva", "platform": "canva", "name": "Canva", "handle": "", "status": "not connected", "connectedAt": null },
-    { "id": "acct-sora", "platform": "sora", "name": "Sora", "handle": "", "status": "not connected", "connectedAt": null }
+    { "id": "acct-pinterest", "platform": "pinterest", "name": "Pinterest", "handle": "", "status": "not connected", "connectedAt": null },
+    { "id": "acct-canva", "platform": "canva", "name": "Canva", "handle": "", "status": "not connected", "connectedAt": null }
   ],
   "actions": [
     {
@@ -98,7 +102,7 @@
       "type": "Experiment",
       "priority": "High",
       "status": "active",
-      "title": "Run Social Cues self-launch alpha sprint",
+      "title": "Run Social Cues self-launch sprint",
       "signal": "At least one campaign shipped, evidence captured, and one reusable launch insight captured."
     },
     {
@@ -112,7 +116,7 @@
   ],
   "activity": [
     {
-      "message": "Seed model stored on disk for Social Cues alpha test runs."
+      "message": "Seed model stored on disk for Social Cues test runs."
     }
   ]
 }

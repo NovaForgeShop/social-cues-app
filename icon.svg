@@ -1,21 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Social Cues logo">
-  <defs>
-    <linearGradient id="g" x1="88" y1="72" x2="424" y2="430" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#28d7ee"/>
-      <stop offset=".52" stop-color="#93dd55"/>
-      <stop offset="1" stop-color="#ff386b"/>
-    </linearGradient>
-    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="12" result="blur"/>
-      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.16 0 0 0 0 0.84 0 0 0 0 0.93 0 0 0 .35 0"/>
-      <feMerge>
-        <feMergeNode/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-  </defs>
-  <rect width="512" height="512" rx="112" fill="#07090d"/>
-  <path d="M116 134c34-34 93-40 139-10l-38 54c-24-14-52-12-67 4-13 14-9 29 8 38 19 10 48 10 75 20 50 18 73 55 62 101-17 69-111 91-178 47l35-58c31 20 73 18 85-6 8-17-4-29-28-36-24-7-55-8-81-23-47-27-49-86-12-127Z" fill="url(#g)" filter="url(#glow)"/>
-  <path d="M334 124c35 0 62 10 83 28l-36 55c-15-12-31-18-49-18-41 0-70 31-70 68s29 67 70 67c20 0 38-7 53-21l36 54c-23 22-53 33-89 33-82 0-142-56-142-133 0-78 60-133 144-133Z" fill="#f8fafc" opacity=".92"/>
-  <circle cx="386" cy="363" r="36" fill="#93dd55"/>
+  <rect width="512" height="512" rx="112" fill="#08080f"/>
+  <rect x="42" y="42" width="428" height="428" rx="92" fill="#0f0f1a" stroke="#ff2d78" stroke-width="5" stroke-opacity=".42"/>
+  <g stroke="#ff2d78" stroke-width="6" stroke-linecap="round" opacity=".32">
+    <path d="M158 158 256 256 354 158"/>
+    <path d="M158 354 256 256 354 354"/>
+    <path d="M158 256h196"/>
+    <path d="M256 158v196"/>
+  </g>
+  <g fill="#ff2d78">
+    <circle cx="158" cy="158" r="25" opacity=".35"/>
+    <circle cx="256" cy="158" r="25" opacity=".65"/>
+    <circle cx="354" cy="158" r="25" opacity=".25"/>
+    <circle cx="158" cy="256" r="25" opacity=".70"/>
+    <circle cx="256" cy="256" r="49"/>
+    <circle cx="354" cy="256" r="25" opacity=".50"/>
+    <circle cx="158" cy="354" r="25" opacity=".20"/>
+    <circle cx="256" cy="354" r="25" opacity=".45"/>
+    <circle cx="354" cy="354" r="25" opacity=".75"/>
+  </g>
+  <circle cx="256" cy="256" r="84" fill="none" stroke="#ff2d78" stroke-width="3" stroke-opacity=".18"/>
 </svg>

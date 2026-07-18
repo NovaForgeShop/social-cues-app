@@ -10,3 +10,21 @@ server.err.log
 server.out.log
 .vercel/
 .DS_Store
+.appdata/
+.local-appdata/
+.localappdata/
+.npm-cache/
+.vercel-cli-home/
+.vercel-data/
+.xdg-data/
+.vercel-login.job
+/audit-gui-*/
+/PROMO-CODES-TEST-ACCOUNTS.md
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+/.ms-playwright/

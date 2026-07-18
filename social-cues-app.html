@@ -3,29 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#07090d">
+  <meta name="theme-color" content="#08080f">
   <link rel="manifest" href="/manifest.webmanifest">
-  <title>Social Cues Alpha</title>
+  <link rel="icon" href="/favicon.png" type="image/png">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <title>Social Cues</title>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #07090d;
-      --surface: #10131a;
-      --surface-2: #171b24;
-      --panel-bg: rgba(16,19,26,.84);
-      --sidebar-bg: rgba(6,8,12,.72);
+      --bg: #08080f;
+      --surface: #0f0f1a;
+      --surface-2: #1a1a2e;
+      --panel-bg: rgba(15,15,26,.88);
+      --sidebar-bg: rgba(8,8,15,.78);
       --control-bg: rgba(255,255,255,.06);
       --subtle-bg: rgba(255,255,255,.045);
       --button-bg: rgba(255,255,255,.075);
-      --line: rgba(255,255,255,.1);
-      --text: #f8fafc;
-      --muted: rgba(248,250,252,.62);
-      --label: rgba(248,250,252,.44);
+      --line: rgba(255,45,120,.18);
+      --text: #ffffff;
+      --muted: rgba(255,255,255,.52);
+      --label: rgba(255,255,255,.45);
       --chip-text: rgba(255,255,255,.78);
       --notice-text: rgba(248,250,252,.76);
-      --cyan: #28d7ee;
-      --pink: #ff386b;
-      --lime: #93dd55;
+      --signal: #ff2d78;
+      --signal-deep: #cc0055;
+      --signal-ghost: rgba(255,45,120,.10);
+      --signal-glow: rgba(255,45,120,.25);
+      --cyan: #ff2d78;
+      --pink: #ff2d78;
+      --lime: #00e5a0;
       --amber: #f6bd4a;
       --blue: #64a9ff;
       --violet: #a88cff;
@@ -62,11 +69,11 @@
     body {
       margin: 0;
       background:
-        linear-gradient(135deg, rgba(127,127,127,.08) 0 1px, transparent 1px 13px),
-        radial-gradient(circle at 12% -5%, rgba(40,215,238,.18), transparent 28rem),
-        radial-gradient(circle at 92% 8%, rgba(255,56,107,.16), transparent 26rem),
-        radial-gradient(circle at 60% 100%, rgba(147,221,85,.08), transparent 30rem),
+        linear-gradient(rgba(255,45,120,.12) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,45,120,.12) 1px, transparent 1px),
+        radial-gradient(circle at 80% 8%, rgba(255,45,120,.16), transparent 28rem),
         var(--bg);
+      background-size: 56px 56px, 56px 56px, auto, auto;
       color: var(--text);
     }
 
@@ -112,13 +119,22 @@
       height: 42px;
       border-radius: 10px;
       display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
       place-items: center;
-      background: linear-gradient(135deg, var(--cyan), var(--pink));
-      color: var(--ink);
-      font-weight: 950;
-      letter-spacing: 0;
-      font-size: 14px;
+      padding: 8px;
+      background: var(--surface);
+      border: 1px solid rgba(255,45,120,.38);
+      box-shadow: 0 0 28px rgba(255,45,120,.14);
     }
+    .mark span {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--signal);
+      opacity: var(--o, .5);
+    }
+    .mark span:nth-child(5) { width: 11px; height: 11px; opacity: 1; box-shadow: 0 0 18px var(--signal-glow); }
     .brand strong { display: block; font-size: 18px; }
     .brand span { color: var(--muted); font-size: 12px; }
 
@@ -138,8 +154,9 @@
       text-align: left;
     }
     .nav button.active {
-      background: rgba(255,255,255,.08);
+      background: var(--signal-ghost);
       color: #fff;
+      outline: 1px solid var(--line);
     }
     .dot {
       width: 8px;
@@ -172,9 +189,11 @@
       border-radius: 8px;
       border: 1px solid rgba(255,255,255,.11);
       background:
-        linear-gradient(120deg, rgba(40,215,238,.14), transparent 48%),
-        linear-gradient(300deg, rgba(255,56,107,.14), transparent 52%),
+        linear-gradient(120deg, rgba(255,45,120,.16), transparent 48%),
+        linear-gradient(rgba(255,45,120,.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,45,120,.08) 1px, transparent 1px),
         var(--panel-bg);
+      background-size: auto, 34px 34px, 34px 34px, auto;
       box-shadow: 0 30px 90px rgba(0,0,0,.28);
     }
     .kicker {
@@ -185,9 +204,9 @@
       padding: 6px 9px;
       margin-bottom: 12px;
       border-radius: 999px;
-      background: rgba(147,221,85,.12);
-      color: var(--lime);
-      border: 1px solid rgba(147,221,85,.26);
+      background: var(--signal-ghost);
+      color: var(--signal);
+      border: 1px solid var(--line);
       font-size: 11px;
       font-weight: 900;
       text-transform: uppercase;
@@ -213,7 +232,7 @@
       position: absolute;
       inset: 0 0 auto;
       height: 2px;
-      background: linear-gradient(90deg, var(--cyan), var(--pink));
+      background: linear-gradient(90deg, transparent, var(--signal), transparent);
     }
     .metric span { color: var(--muted); font-size: 12px; font-weight: 750; }
     .metric strong { display: block; font-size: 28px; margin-top: 5px; letter-spacing: -.04em; }
@@ -256,7 +275,7 @@
       padding: 11px 12px;
     }
     textarea { resize: vertical; min-height: 118px; line-height: 1.48; }
-    textarea:focus, input:focus, select:focus { border-color: rgba(40,215,238,.58); }
+    textarea:focus, input:focus, select:focus { border-color: rgba(255,45,120,.72); box-shadow: 0 0 0 3px rgba(255,45,120,.10); }
     .form-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -265,8 +284,8 @@
     }
 
     .primary {
-      background: linear-gradient(135deg, var(--cyan), var(--pink));
-      color: var(--ink);
+      background: var(--signal);
+      color: #fff;
       font-weight: 950;
       border-radius: 8px;
       padding: 11px 13px;
@@ -297,8 +316,8 @@
       margin-bottom: 9px;
     }
     .campaign-button.active {
-      border-color: rgba(40,215,238,.42);
-      background: rgba(40,215,238,.08);
+      border-color: rgba(255,45,120,.48);
+      background: var(--signal-ghost);
     }
     .campaign-button strong { display: block; font-size: 13px; margin-bottom: 3px; }
     .campaign-button span { color: var(--muted); font-size: 11px; }
@@ -364,6 +383,25 @@
       font-size: 12px;
       font-weight: 850;
     }
+    .toggle-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+    }
+    .toggle-button::before {
+      content: "";
+      width: 28px;
+      height: 16px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.18);
+      box-shadow: inset 12px 0 0 rgba(255,255,255,.45);
+      transition: .18s ease;
+    }
+    .toggle-button[aria-pressed="true"]::before {
+      background: rgba(147,221,85,.28);
+      box-shadow: inset -12px 0 0 var(--lime);
+    }
 
     .section { display: none; }
     .section.active { display: block; animation: rise .24s ease both; }
@@ -377,8 +415,8 @@
     .notice {
       padding: 12px;
       border-radius: 8px;
-      border: 1px solid rgba(40,215,238,.18);
-      background: rgba(40,215,238,.07);
+      border: 1px solid var(--line);
+      background: var(--signal-ghost);
       color: var(--notice-text);
       font-size: 13px;
       line-height: 1.5;
@@ -414,9 +452,11 @@
       place-items: center;
       padding: 18px;
       background:
-        radial-gradient(circle at 20% 0%, rgba(40,215,238,.2), transparent 28rem),
-        radial-gradient(circle at 80% 12%, rgba(255,56,107,.18), transparent 26rem),
-        rgba(7,9,13,.96);
+        linear-gradient(rgba(255,45,120,.10) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,45,120,.10) 1px, transparent 1px),
+        radial-gradient(circle at 80% 12%, rgba(255,45,120,.18), transparent 26rem),
+        rgba(8,8,15,.96);
+      background-size: 56px 56px, 56px 56px, auto, auto;
     }
     .login-screen.hidden { display: none; }
     .login-card {
@@ -460,39 +500,50 @@
   <div class="login-screen hidden" id="loginScreen">
     <div class="login-card">
       <div class="brand">
-        <div class="mark">SC</div>
+        <div class="mark" aria-hidden="true"><span style="--o:.35"></span><span style="--o:.65"></span><span style="--o:.25"></span><span style="--o:.70"></span><span></span><span style="--o:.50"></span><span style="--o:.20"></span><span style="--o:.45"></span><span style="--o:.75"></span></div>
         <div>
           <strong>Social Cues</strong>
           <span>Social command center</span>
         </div>
       </div>
-      <h1>Log in to Social Cues</h1>
-      <p>Start as a Social Cues customer user. This alpha workspace is set up to launch Social Cues itself.</p>
-      <label>
+      <h1 id="authTitle">Log in to Social Cues</h1>
+      <p id="authHelp">Use your registered email and password. Create account opens tester and setup fields.</p>
+      <label class="create-only hidden">
         <span class="small-label">Name</span>
         <input id="loginNameInput" placeholder="Cory Barton">
       </label>
-      <div style="height:10px"></div>
+      <div class="create-only hidden" style="height:10px"></div>
       <label>
         <span class="small-label">Email</span>
-        <input id="loginEmailInput" placeholder="you@example.com">
+        <input id="loginEmailInput" type="email" autocomplete="email" placeholder="you@example.com">
       </label>
       <div style="height:10px"></div>
       <label>
-        <span class="small-label">Workspace</span>
-        <input id="loginWorkspaceInput" value="Social Cues Alpha">
+        <span class="small-label">Password</span>
+        <input id="loginPasswordInput" type="password" autocomplete="current-password" placeholder="At least 8 characters">
+      </label>
+      <div class="create-only hidden" style="height:10px"></div>
+      <label class="create-only hidden">
+        <span class="small-label">Promo code</span>
+        <input id="loginPromoInput" autocomplete="off" placeholder="Optional test code">
+      </label>
+      <div style="height:10px"></div>
+      <label>
+        <span class="small-label">Device name</span>
+        <input id="loginDeviceInput" placeholder="Laptop, phone, studio desktop">
       </label>
       <div class="actions">
-        <button class="primary" id="loginButton">Continue to Social Cues</button>
+        <button class="primary" id="createAccountButton">Create account</button>
+        <button class="secondary" id="loginButton">Log in</button>
       </div>
-      <p style="font-size:12px;margin-top:14px">Local test login only. Real authentication comes next through the backend session system.</p>
+      <p style="font-size:12px;margin-top:14px">Social Cues remembers trusted devices after password login. Use the same email and password from phone or laptop.</p>
     </div>
   </div>
 
   <div class="app">
     <aside class="side">
       <div class="brand">
-        <div class="mark">SC</div>
+        <div class="mark" aria-hidden="true"><span style="--o:.35"></span><span style="--o:.65"></span><span style="--o:.25"></span><span style="--o:.70"></span><span></span><span style="--o:.50"></span><span style="--o:.20"></span><span style="--o:.45"></span><span style="--o:.75"></span></div>
         <div>
           <strong>Social Cues</strong>
           <span id="workspaceLabel">Customer workspace</span>
@@ -509,7 +560,7 @@
         <button data-view="actionlab"><span class="dot"></span><span>Action</span></button>
         <button data-view="devices"><span class="dot"></span><span>Devices</span></button>
         <button data-view="accounts"><span class="dot"></span><span>Accounts</span></button>
-        <button data-view="integrations"><span class="dot"></span><span>Integrations</span></button>
+        <button data-view="integrations"><span class="dot"></span><span>Admin</span></button>
         <button data-view="billing"><span class="dot"></span><span>Billing</span></button>
         <button data-view="settings"><span class="dot"></span><span>Settings</span></button>
       </nav>
@@ -531,7 +582,7 @@
             <h1>Turn one honest idea into a social system that compounds.</h1>
             <p>Log in as a Social Cues user, connect provider-verified social accounts, create campaigns, approve content, attach media, and turn real platform signals into a working growth machine.</p>
             <div class="tags">
-              <span class="tag">Local persistence</span>
+              <span class="tag" id="persistenceTag">Cloud persistence</span>
               <span class="tag">Approval-first</span>
               <span class="tag">Profile-aware</span>
               <span class="tag">Exportable model</span>
@@ -568,7 +619,7 @@
           </div>
           <div class="panel">
             <h2>Workspace model</h2>
-            <p>This copy stores your customer workspace in this browser on this machine. Export it often while testing.</p>
+            <p id="workspaceStorageCopy">The hosted backend stores your customer workspace and remembers trusted devices. Export it often while testing.</p>
             <div style="height:12px"></div>
             <div class="notice" id="storageNotice"></div>
             <div class="actions">
@@ -602,17 +653,71 @@
             <div class="form-grid">
               <label>
                 <span class="small-label">Offer/product</span>
-                <input id="offerInput" placeholder="Social Cues alpha, service package, subscription, etc.">
+                <input id="offerInput" placeholder="Service package, subscription, offer, product, etc.">
               </label>
               <label>
                 <span class="small-label">Audience</span>
                 <input id="audienceDescInput" placeholder="Creators, local businesses, agencies...">
               </label>
+              <label>
+                <span class="small-label">Business name</span>
+                <input id="businessNameInput" placeholder="Brand, LLC, personal brand, or shop">
+              </label>
+              <label>
+                <span class="small-label">Legal setup</span>
+                <select id="legalStructureInput">
+                  <option>Not sure yet</option>
+                  <option>Sole proprietor</option>
+                  <option>LLC</option>
+                  <option>Corporation</option>
+                  <option>Nonprofit</option>
+                  <option>Partnership</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">LLC status</span>
+                <select id="llcStatusInput">
+                  <option value="not-sure">Not sure</option>
+                  <option value="yes">Yes, LLC exists</option>
+                  <option value="planned">Planning to form one</option>
+                  <option value="no">No LLC</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Website/domain</span>
+                <input id="websiteInput" placeholder="https://example.com">
+              </label>
+              <label>
+                <span class="small-label">Industry/niche</span>
+                <input id="industryInput" placeholder="Local service, creator, ecommerce...">
+              </label>
+              <label>
+                <span class="small-label">Location/market</span>
+                <input id="locationInput" placeholder="City, region, online-only...">
+              </label>
+              <label>
+                <span class="small-label">Monthly ad/content budget</span>
+                <input id="monthlyBudgetInput" placeholder="$0, $500, $2k...">
+              </label>
+              <label>
+                <span class="small-label">Main platform today</span>
+                <input id="primaryPlatformInput" placeholder="Instagram, Facebook, YouTube...">
+              </label>
+              <label>
+                <span class="small-label">Content comfort</span>
+                <select id="contentComfortInput">
+                  <option>Mixed</option>
+                  <option>Comfortable on camera</option>
+                  <option>Prefer voiceover</option>
+                  <option>Prefer text/images</option>
+                  <option>Team creates content</option>
+                </select>
+              </label>
             </div>
           </div>
           <div class="panel">
             <h2>Setup sequence</h2>
-            <p>Social Cues alpha starts here, then moves into social account connection and command-center analytics.</p>
+            <p>Social Cues starts here, then moves into social account connection and command-center analytics.</p>
             <div style="height:14px"></div>
             <div class="stack" id="onboardingSteps"></div>
           </div>
@@ -632,7 +737,7 @@
             <div style="height:12px"></div>
             <label>
               <span class="small-label">Campaign title</span>
-              <input id="campaignTitleInput" placeholder="Social Cues alpha launch push">
+              <input id="campaignTitleInput" placeholder="Launch push, spring campaign, founder story...">
             </label>
             <div style="height:10px"></div>
             <label>
@@ -863,8 +968,12 @@
             <div class="stack" id="deviceFlowList"></div>
           </div>
           <div class="panel">
-            <h2>Current local handoff</h2>
-            <p>Use export/import for handoff while backend sync and device pairing are brought online.</p>
+            <h2>Current device handoff</h2>
+            <p>This device is remembered by the hosted backend after account creation. Use the same account on phone or laptop to watch the device list update.</p>
+            <div style="height:14px"></div>
+            <div class="notice" id="deviceSessionNotice">Create or sign in to an account to remember this device.</div>
+            <div style="height:14px"></div>
+            <div class="stack" id="rememberedDeviceList"></div>
             <div style="height:14px"></div>
             <label>
               <span class="small-label">Handoff link</span>
@@ -875,7 +984,7 @@
               <button class="secondary" id="exportHandoff">Export handoff packet</button>
             </div>
             <div style="height:14px"></div>
-            <div class="notice">Future version: phone app and desktop app will share the same authenticated workspace, so this link opens the same campaign on either device.</div>
+            <div class="notice">Opening Social Cues on another device and signing in with the same email should create a second remembered device row.</div>
           </div>
         </div>
       </section>
@@ -897,7 +1006,7 @@
             <h2>Connection notes</h2>
             <p>Connection status now comes from backend OAuth evidence only. Accounts are not marked connected unless Social Cues has provider account data and server-side token storage.</p>
             <div style="height:14px"></div>
-            <div class="notice">Meta login is wired. TikTok, X, YouTube, Shopify, Canva, and Sora stay unavailable until their real provider flows are added.</div>
+          <div class="notice">Meta, TikTok, YouTube, Threads, X, Pinterest, Canva, Etsy, and Shopify use backend OAuth/readiness evidence. Google Growth and Business Profile use the Google project readiness lane.</div>
           </div>
         </div>
       </section>
@@ -907,8 +1016,8 @@
           <div class="panel">
             <div class="row">
               <div>
-                <h2>Integration cockpit</h2>
-                <p>First production stack: OpenAI for intelligence, Social Cues Queue for scheduled publishing/reminders, Shopify for commerce evidence.</p>
+                <h2>Admin cockpit</h2>
+                <p>Provider switches, readiness checks, and debug surfaces for the production stack.</p>
               </div>
               <button class="primary" id="exportIntegrationConfig">Export config</button>
             </div>
@@ -916,8 +1025,8 @@
             <div class="stack" id="integrationList"></div>
           </div>
           <div class="panel">
-            <h2>Local readiness</h2>
-            <p>This test copy does not store live API secrets. Mark readiness here and put real keys only in the backend environment file.</p>
+            <h2>Service switches</h2>
+            <p>Turn unused systems down so they do not clutter the workspace. Real keys stay only in the backend environment.</p>
             <div class="form-grid">
               <label>
                 <span class="small-label">OpenAI</span>
@@ -925,6 +1034,24 @@
                   <option>Needed</option>
                   <option>Credential ready</option>
                   <option>Connected in backend</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Stripe</span>
+                <select id="stripeStatusInput">
+                  <option>Needed</option>
+                  <option>Payment Link ready</option>
+                  <option>Stripe Checkout ready</option>
+                  <option>Live subscriptions</option>
+                </select>
+              </label>
+              <label>
+                <span class="small-label">Discord</span>
+                <select id="discordStatusInput">
+                  <option>Needed</option>
+                  <option>Credential ready</option>
+                  <option>Connected in backend</option>
+                  <option>Community alerts ready</option>
                 </select>
               </label>
               <label>
@@ -937,27 +1064,12 @@
                 </select>
               </label>
               <label>
-                <span class="small-label">Shopify</span>
-                <select id="shopifyStatusInput">
+                <span class="small-label">AI editor</span>
+                <select id="mediaEditorStatusInput">
                   <option>Needed</option>
                   <option>Credential ready</option>
-                  <option>Connected in backend</option>
-                </select>
-              </label>
-              <label>
-                <span class="small-label">Canva</span>
-                <select id="canvaStatusInput">
-                  <option>Needed</option>
-                  <option>Credential ready</option>
-                  <option>Connected in backend</option>
-                </select>
-              </label>
-              <label>
-                <span class="small-label">Sora</span>
-                <select id="soraStatusInput">
-                  <option>Needed</option>
-                  <option>Credential ready</option>
-                  <option>Connected in backend</option>
+                  <option>Storage ready</option>
+                  <option>Server pipeline ready</option>
                 </select>
               </label>
               <label>
@@ -973,7 +1085,7 @@
               <button class="secondary" id="saveIntegrations">Save readiness</button>
             </div>
             <div style="height:14px"></div>
-            <div class="notice">Recommended order: OpenAI generation endpoint, Supabase-backed Social Cues Queue, reminders/exports for blocked platforms, Shopify commerce context, then native platform adapters.</div>
+            <div class="notice">Recommended order: OpenAI generation, Stripe paid lane, Supabase-backed Social Cues Queue, AI editor storage/worker, reminders/exports for blocked platforms, then native provider adapters.</div>
           </div>
         </div>
         <div style="height:18px"></div>
@@ -981,7 +1093,7 @@
           <div class="panel">
             <div class="row">
               <div>
-                <h2>SCv2 Meta surfaces</h2>
+                <h2>Admin: Meta surfaces</h2>
                 <p>Live capability map for every Meta lane Social Cues can use or submit for review.</p>
               </div>
               <button class="secondary" id="refreshMeta">Refresh Meta</button>
@@ -990,7 +1102,7 @@
             <div class="stack" id="metaCapabilityList"></div>
           </div>
           <div class="panel">
-            <h2>Connected Meta assets</h2>
+            <h2>Admin: connected Meta assets</h2>
             <p>Tokens stay server-side. This panel only shows asset names, status, permissions, and review gates.</p>
             <div style="height:14px"></div>
             <div class="stack" id="metaAssetList"></div>
@@ -1004,7 +1116,7 @@
             <div class="row">
               <div>
                 <h2>Billing</h2>
-                <p>Alpha payment path for turning Social Cues into revenue quickly.</p>
+                <p>Payment path for turning Social Cues into revenue cleanly.</p>
               </div>
               <button class="primary" id="createCheckout">Create checkout link</button>
             </div>
@@ -1044,7 +1156,7 @@
               <button class="secondary" id="openCheckout">Open checkout</button>
             </div>
             <div style="height:14px"></div>
-            <div class="notice">Keep Stripe secret keys on the backend only. The browser stores only public/payment-link status for this alpha.</div>
+            <div class="notice">Keep Stripe secret keys on the backend only. The browser stores only public/payment-link status.</div>
           </div>
         </div>
       </section>
@@ -1135,8 +1247,70 @@
   </div>
 
   <script>
-    const STORAGE_KEY = "Social Cues-alpha-run";
+    const STORAGE_KEY = "Social Cues-command-center";
+    const LEGACY_STORAGE_KEY = "Social Cues-alpha-run";
+    const SESSION_TOKEN_KEY = "Social Cues-session-token";
+    const DEVICE_ID_KEY = "Social Cues-device-id";
     const SERVER_MODE = location.protocol === "http:" || location.protocol === "https:";
+    let clientErrorReports = 0;
+
+    function reportClientError(error, context = {}) {
+      if (!SERVER_MODE || clientErrorReports >= 20) return;
+      clientErrorReports += 1;
+      const sourceError = error instanceof Error ? error : new Error(String(error || "Browser error"));
+      const payload = {
+        name: sourceError.name,
+        message: sourceError.message,
+        stack: sourceError.stack,
+        source: context.source || "command-center",
+        route: location.pathname,
+        url: location.pathname
+      };
+      if (window.Sentry?.captureException) {
+        window.Sentry.withScope(scope => {
+          scope.setTag("social_cues.surface", "browser");
+          scope.setTag("social_cues.route", location.pathname.slice(0, 160));
+          window.Sentry.captureException(sourceError);
+        });
+        return;
+      }
+      fetch("/api/observability/client-error", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true
+      }).catch(() => {});
+    }
+
+    window.addEventListener("error", event => reportClientError(event.error || new Error(event.message || "Browser error"), { source: "window-error" }));
+    window.addEventListener("unhandledrejection", event => reportClientError(event.reason || new Error("Unhandled promise rejection"), { source: "unhandled-rejection" }));
+
+    async function initializeClientErrorTracking() {
+      if (!SERVER_MODE) return;
+      try {
+        const response = await fetch("/api/observability/config", { cache: "no-store" });
+        const config = await response.json();
+        if (!config.enabled || !config.browserCdnUrl || document.querySelector("script[data-social-cues-sentry]") || window.Sentry) return;
+        const script = document.createElement("script");
+        script.src = config.browserCdnUrl;
+        script.crossOrigin = "anonymous";
+        script.dataset.socialCuesSentry = "true";
+        script.onload = () => {
+          if (!window.Sentry?.init) return;
+          window.Sentry.init({
+            dsn: config.dsn,
+            environment: config.environment,
+            release: config.release || undefined,
+            dist: config.dist || undefined,
+            sendDefaultPii: false,
+            tracesSampleRate: Number(config.tracesSampleRate || 0)
+          });
+        };
+        document.head.appendChild(script);
+      } catch {}
+    }
+
+    initializeClientErrorTracking();
 
     const platforms = [
       { id: "tiktok", name: "TikTok", accent: "#ff386b", bestTime: "5:40 PM", connector: "Content Posting API", fit: "Discovery and hooks", tags: ["#AItools", "#SmallBiz", "#CreatorTools", "#Automation", "#TechTok"] },
@@ -1145,11 +1319,15 @@
       { id: "youtube", name: "YouTube", accent: "#ff4d4d", bestTime: "12:30 PM", connector: "YouTube Data API", fit: "Search and authority", tags: ["AI tools", "creator workflow", "social media automation", "small business software"] },
       { id: "facebook", name: "Facebook", accent: "#64a9ff", bestTime: "8:10 AM", connector: "Meta Pages API", fit: "Community and local trust", tags: ["#SmallBusiness", "#MarketingTools", "#ContentPlanning"] },
       { id: "x", name: "X", accent: "#dbeafe", bestTime: "9:05 AM", connector: "X API", fit: "Signal and conversation", tags: ["#buildinpublic", "#AI", "#SaaS"] },
-      { id: "shopify", name: "Shopify", accent: "#93dd55", bestTime: "Campaign source", connector: "Shopify Admin GraphQL", fit: "Commerce and attribution", tags: ["launch", "creator-stack", "automation"] }
+      { id: "google_growth", name: "Google Growth Suite", accent: "#34a853", bestTime: "11:00 AM", connector: "Google API suite", fit: "Search, site, profile, ads, and channel feedback", tags: ["YouTube", "Business Profile", "Search Console", "GA4", "Google Ads"] },
+      { id: "google_business", name: "Google Business Profile", accent: "#4285f4", bestTime: "9:30 AM", connector: "Google Business Profile APIs", fit: "Local trust, profile posts, reviews, and location media", tags: ["business.manage", "reviews", "local profile", "offers"] },
+      { id: "pinterest", name: "Pinterest", accent: "#e60023", bestTime: "7:25 PM", connector: "Pinterest API v5", fit: "Evergreen discovery and visual intent", tags: ["creator workflow", "visual search", "evergreen content", "campaign pins"] },
+      { id: "shopify", name: "Shopify", accent: "#95bf47", bestTime: "2:20 PM", connector: "Shopify Admin API", fit: "Products, offers, marketing events, and storefront outcomes", tags: ["products", "marketing events", "UTM", "conversion signal"] },
+      { id: "etsy", name: "Etsy", accent: "#f56400", bestTime: "3:40 PM", connector: "Etsy Open API", fit: "Shop/listing signal for maker commerce campaigns", tags: ["shops", "listings", "maker commerce", "marketplace"] }
     ];
 
     const growthPlan = [
-      ["Diagnose", "Read cadence, engagement, views, saves, comments, weak formats, and top posts before asking for extra user data.", "#28d7ee"],
+      ["Diagnose", "Read cadence, engagement, views, saves, comments, weak formats, and top posts before asking for extra user data.", "#ff2d78"],
       ["Focus", "Pick one bottleneck: hooks, consistency, format fit, CTA clarity, timing, or offer path.", "#93dd55"],
       ["Rebuild", "Create content pillars and platform variants that turn the page into a repeatable system.", "#f6bd4a"],
       ["Compound", "Turn winners into sequels, Shorts, threads, reels, email prompts, and Shopify campaigns.", "#ff386b"],
@@ -1161,16 +1339,25 @@
       version: "0.2.0-local",
       currentUser: null,
       workspace: {
-        name: "Social Cues Alpha",
-        owner: "Alpha User",
+        name: "Social Cues",
+        owner: "Social Cues User",
         purpose: "Launch Social Cues as a customer-ready social command center"
       },
       onboarding: {
         complete: false,
         bio: "This workspace is testing Social Cues as an end-user customer.",
         purpose: "Use Social Cues to launch itself with a repeatable social growth engine, customer-ready onboarding, media planning, account connections, and revenue path.",
-        offer: "Social Cues alpha",
-        audience: "Creators, small businesses, agencies, and ecommerce operators"
+        offer: "Social Cues",
+        audience: "Creators, small businesses, agencies, and ecommerce operators",
+        businessName: "",
+        legalStructure: "Not sure yet",
+        hasLlc: "not-sure",
+        website: "",
+        industry: "",
+        location: "",
+        monthlyBudget: "",
+        primaryPlatform: "",
+        contentComfort: "Mixed"
       },
       profile: {
         operator: "Founder",
@@ -1195,7 +1382,7 @@
       campaigns: [
         {
           id: "camp-Social Cues-self-launch",
-          title: "Social Cues Customer-Ready Alpha Launch",
+          title: "Social Cues Customer-Ready Launch",
           brief: "Launch Social Cues as the social command center for creators, small businesses, agencies, and ecommerce operators. Show how it helps a customer log in, connect social accounts, analyze metrics, generate platform-native campaigns, attach or generate media, approve content, and turn results into a repeatable growth system.",
           goal: "Build demand",
           tone: "Sharp and useful",
@@ -1223,7 +1410,7 @@
           id: "proof-seed-1",
           type: "Workflow saved",
           metric: "Prototype to usable local run",
-          note: "Social Cues moved from visual prototype into a persistent local alpha with onboarding, accounts, campaigns, approvals, media, billing, exports, and growth diagnosis.",
+          note: "Social Cues moved from visual prototype into a persistent command center with onboarding, accounts, campaigns, approvals, media, billing, exports, and growth diagnosis.",
           createdAt: new Date().toISOString()
         }
       ],
@@ -1232,10 +1419,18 @@
       },
       integrations: {
         openai: "Needed",
+        stripe: "Needed",
+        discord: "Needed",
+        resend: "Needed for signup email",
         publishingQueue: "Supabase queue ready",
-        shopify: "Needed",
-        canva: "Needed",
-        sora: "Needed",
+        shopify: "Partner app setup pending",
+        etsy: "Developer app setup pending",
+        linkedin: "Approval-gated backlog",
+        snapchat: "Approval-gated backlog",
+        twitch: "Developer app setup pending",
+        pinterest: "Developer app pending",
+        canva: "MFA / developer integration pending",
+        mediaEditor: "Needed",
         publishingPath: "Social Cues Queue first"
       },
       analytics: {
@@ -1250,9 +1445,8 @@
         { id: "acct-youtube", platform: "youtube", name: "YouTube", handle: "", status: "not connected", connectedAt: null },
         { id: "acct-facebook", platform: "facebook", name: "Facebook Page", handle: "", status: "not connected", connectedAt: null },
         { id: "acct-x", platform: "x", name: "X", handle: "", status: "not connected", connectedAt: null },
-        { id: "acct-shopify", platform: "shopify", name: "Shopify", handle: "", status: "not connected", connectedAt: null },
-        { id: "acct-canva", platform: "canva", name: "Canva", handle: "", status: "not connected", connectedAt: null },
-        { id: "acct-sora", platform: "sora", name: "Sora", handle: "", status: "not connected", connectedAt: null }
+        { id: "acct-pinterest", platform: "pinterest", name: "Pinterest", handle: "", status: "not connected", connectedAt: null },
+        { id: "acct-canva", platform: "canva", name: "Canva", handle: "", status: "not connected", connectedAt: null }
       ],
       actions: [
         {
@@ -1260,7 +1454,7 @@
           type: "Experiment",
           priority: "High",
           status: "active",
-          title: "Run Social Cues self-launch alpha sprint",
+          title: "Run Social Cues self-launch sprint",
           signal: "At least one campaign shipped, evidence captured, and one reusable launch insight captured.",
           createdAt: new Date().toISOString()
         },
@@ -1281,10 +1475,38 @@
       {
         id: "openai",
         name: "OpenAI",
-        accent: "#28d7ee",
-        role: "Generation, scoring, image concepts, evidence-to-launch strategy, and growth diagnosis.",
-        backend: "OPENAI_API_KEY",
-        firstUse: "Server-side /api/generate endpoint for platform variants and campaign scoring."
+        accent: "#ff2d78",
+        role: "Generation, scoring, image concepts, evidence-to-launch strategy, growth diagnosis, and AI edit planning.",
+        backend: "OPENAI_API_KEY, OPENAI_PROJECT_ID",
+        endpoint: "/api/openai/readiness",
+        firstUse: "Server-side campaign generation, platform scoring, and media editor planning."
+      },
+      {
+        id: "stripe",
+        name: "Stripe",
+        accent: "#a88cff",
+        role: "Payment Links first, then Checkout, subscriptions, invoices, and paid workspace gates.",
+        backend: "STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, Stripe price IDs",
+        endpoint: "/api/billing/readiness",
+        firstUse: "Sell founder audits and Pro subscriptions without putting secrets in the browser."
+      },
+      {
+        id: "discord",
+        name: "Discord",
+        accent: "#5865f2",
+        role: "Customer community, support server, campaign notifications, and private handoff rooms.",
+        backend: "DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_BOT_TOKEN",
+        endpoint: "/api/discord/readiness",
+        firstUse: "Community/support login and campaign status alerts."
+      },
+      {
+        id: "resend",
+        name: "Resend",
+        accent: "#93dd55",
+        role: "Production signup email, verification, password recovery, and campaign/account notifications.",
+        backend: "RESEND_API_KEY, SMTP_FROM, Supabase Auth custom SMTP",
+        endpoint: "/api/resend/readiness",
+        firstUse: "Unblock account creation by delivering Supabase confirmation and recovery email."
       },
       {
         id: "publishingQueue",
@@ -1295,36 +1517,103 @@
         firstUse: "Approved variants become timed queue items. Social Cues publishes when allowed or alerts the user when a platform needs manual handoff."
       },
       {
-        id: "shopify",
-        name: "Shopify",
-        accent: "#93dd55",
-        role: "Commerce context, product links, discount codes, UTM attribution, and revenue evidence.",
-        backend: "SHOPIFY_STORE_DOMAIN, SHOPIFY_ADMIN_ACCESS_TOKEN",
-        firstUse: "Pull products/offers into campaigns and attach conversion context to the evidence trail."
-      },
-      {
-        id: "canva",
-        name: "Canva",
-        accent: "#64a9ff",
-        role: "Branded post graphics, thumbnails, covers, and reusable creative templates.",
-        backend: "CANVA_CLIENT_ID, CANVA_CLIENT_SECRET",
-        firstUse: "Generate design briefs and template autofill packets for approved variants."
-      },
-      {
-        id: "sora",
-        name: "Sora",
-        accent: "#f6bd4a",
-        role: "Video concept generation, short-form scripts, scene prompts, and visual directions.",
-        backend: "SORA / OpenAI video access",
-        firstUse: "Turn platform post angles into video prompts and shot lists."
+        id: "mediaEditor",
+        name: "AI editor pipeline",
+        accent: "#ff8cc6",
+        role: "Raw client media intake, transcription, captioning, FX/edit plans, and platform-ready cut sheets.",
+        serviceId: "media_editor",
+        backend: "OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY, media worker",
+        endpoint: "/api/media/editor/readiness",
+        firstUse: "One raw video becomes campaign-ready variants for TikTok, Reels, Shorts, Facebook, X, and Threads."
       },
       {
         id: "native",
         name: "Native adapters",
         accent: "#a88cff",
-        role: "Long-term direct integrations for TikTok, Meta, YouTube, X, and more.",
+        role: "Long-term direct integrations for TikTok, Meta, YouTube, X, Pinterest, and more.",
         backend: "Provider OAuth apps",
         firstUse: "Turn scheduled queue items into real platform posts once each provider approves scopes."
+      },
+      {
+        id: "meta",
+        name: "Meta",
+        accent: "#1877f2",
+        role: "Facebook Pages, Instagram, Threads, oEmbed, comments, insights, and approved publishing workflows.",
+        backend: "META_APP_ID, META_APP_SECRET, THREADS_APP_ID, THREADS_APP_SECRET",
+        endpoint: "/api/oauth/meta/status",
+        firstUse: "OAuth login, managed asset discovery, Page/IG insights, comments, and approved publish jobs."
+      },
+      {
+        id: "x",
+        name: "X",
+        accent: "#111111",
+        role: "Profile signal, approved posts, publish status, and response monitoring where the X plan allows it.",
+        backend: "X_CLIENT_ID, X_CLIENT_SECRET",
+        endpoint: "/api/oauth/x/status",
+        firstUse: "OAuth account connection, tweet preparation, and platform feedback."
+      },
+      {
+        id: "tiktok",
+        name: "TikTok",
+        accent: "#00f2ea",
+        role: "Creator profile signal, upload/direct-post jobs after scope approval, and publish status tracking.",
+        backend: "TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET",
+        endpoint: "/api/oauth/tiktok/status",
+        firstUse: "Connect TikTok, prepare approved video/photo jobs, and check publish status."
+      },
+      {
+        id: "youtube",
+        name: "YouTube",
+        accent: "#ff0033",
+        role: "Channel signal, analytics, reporting, private-first upload preparation, and posting reminders.",
+        backend: "GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, YOUTUBE_CHANNEL_ID",
+        endpoint: "/api/youtube/readiness",
+        firstUse: "Connect a channel, read channel/analytics data, and prepare private-first uploads."
+      },
+      {
+        id: "pinterest",
+        name: "Pinterest",
+        accent: "#e60023",
+        role: "Boards, campaign Pins, visual discovery analytics, and evergreen social content.",
+        backend: "PINTEREST_APP_ID, PINTEREST_APP_SECRET",
+        endpoint: "/api/pinterest/readiness",
+        firstUse: "Connect a Pinterest account, read boards, and create approved Pins after Pinterest grants app access."
+      },
+      {
+        id: "canva",
+        name: "Canva Connect",
+        accent: "#00c4cc",
+        role: "Brand assets, design metadata, imports/exports, comments, folders, and creative handoff.",
+        backend: "CANVA_CLIENT_ID, CANVA_CLIENT_SECRET",
+        endpoint: "/api/canva/readiness",
+        firstUse: "Turn approved campaigns into organized design assets without treating Canva as a social feed."
+      },
+      {
+        id: "shopify",
+        name: "Shopify",
+        accent: "#95bf47",
+        role: "Commerce attribution, product context, offer links, marketing events, and conversion feedback.",
+        backend: "SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET",
+        endpoint: "/api/shopify/readiness",
+        firstUse: "Tie social campaigns to products, offers, and storefront outcomes after Partner app setup."
+      },
+      {
+        id: "etsy",
+        name: "Etsy",
+        accent: "#f56400",
+        role: "Shop/listing context for maker commerce, product-led campaigns, and marketplace signal.",
+        backend: "ETSY_CLIENT_ID, ETSY_CLIENT_SECRET",
+        endpoint: "/api/etsy/readiness",
+        firstUse: "Use listing/shop data to shape marketplace-ready social campaigns."
+      },
+      {
+        id: "twitch",
+        name: "Twitch",
+        accent: "#9146ff",
+        role: "Creator community, livestream moments, clips, channel signal, and campaign events.",
+        backend: "TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET",
+        endpoint: "/api/twitch/readiness",
+        firstUse: "Turn live/community moments into campaign proof and short-form repurposing queues."
       }
     ];
 
@@ -1337,10 +1626,16 @@
     ];
 
     let model = loadModel();
-    let metaState = { loading: false, error: "", capabilities: [], accounts: [], metaConnection: null };
+    let metaState = { loading: false, error: "", capabilities: [], accounts: [], metaConnection: null, diagnostic: null, xAccount: null, tiktokAccount: null, youtubeAccount: null, pinterestStatus: null, canvaStatus: null, shopifyStatus: null, etsyStatus: null, googleSuite: null, googleBusinessStatus: null, services: [], securityAudit: null, observabilityStatus: null };
 
     const $ = selector => document.querySelector(selector);
     const $$ = selector => Array.from(document.querySelectorAll(selector));
+
+    function backendService(id) {
+      const item = integrationStack.find(entry => entry.id === id);
+      const serviceId = item?.serviceId || id;
+      return (metaState.services || []).find(service => service.id === serviceId) || null;
+    }
 
     function clone(value) {
       return JSON.parse(JSON.stringify(value));
@@ -1349,14 +1644,15 @@
     function normalizeModel(raw) {
       const next = { ...clone(defaultModel), ...raw };
       if (!Array.isArray(next.connectedAccounts)) next.connectedAccounts = clone(defaultModel.connectedAccounts);
-      next.connectedAccounts = next.connectedAccounts.filter(account => account.platform !== "buffer");
+      const hiddenBacklogPlatforms = new Set(["buffer", "linkedin", "sora", "discord"]);
+      next.connectedAccounts = next.connectedAccounts.filter(account => !hiddenBacklogPlatforms.has(account.platform));
       const existingPlatforms = new Set(next.connectedAccounts.map(account => account.platform));
       defaultModel.connectedAccounts.forEach(account => {
         if (!existingPlatforms.has(account.platform)) next.connectedAccounts.push(clone(account));
       });
       if (!("currentUser" in next)) next.currentUser = null;
       if (!Array.isArray(next.actions)) next.actions = clone(defaultModel.actions);
-      if (!next.onboarding) next.onboarding = clone(defaultModel.onboarding);
+      next.onboarding = { ...clone(defaultModel.onboarding), ...(next.onboarding || {}) };
       if (!next.analytics) next.analytics = clone(defaultModel.analytics);
       next.settings = { ...clone(defaultModel.settings), ...(next.settings || {}) };
       next.integrations = {
@@ -1367,6 +1663,14 @@
         next.integrations.publishingQueue = next.integrations.buffer;
       }
       delete next.integrations.buffer;
+      next.integrations.resend = next.integrations.resend || "Needed for signup email";
+      next.integrations.shopify = next.integrations.shopify || "Partner app setup pending";
+      next.integrations.etsy = next.integrations.etsy || "Developer app setup pending";
+      next.integrations.linkedin = "Approval-gated backlog";
+      next.integrations.snapchat = "Approval-gated backlog";
+      next.integrations.twitch = next.integrations.twitch || "Developer app setup pending";
+      next.integrations.pinterest = next.integrations.pinterest || "Developer app pending";
+      next.integrations.canva = next.integrations.canva || "MFA / developer integration pending";
       if (next.integrations.publishingPath === "Buffer first") next.integrations.publishingPath = "Social Cues Queue first";
       if (next.integrations.publishingPath === "Manual export first") next.integrations.publishingPath = "Reminder/export first";
       next.actions = next.actions.map(action => {
@@ -1384,7 +1688,7 @@
 
     function loadModel() {
       try {
-        const saved = localStorage.getItem(STORAGE_KEY);
+        const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
         if (!saved) return normalizeModel(clone(defaultModel));
         return normalizeModel(JSON.parse(saved));
       } catch {
@@ -1395,11 +1699,12 @@
     async function syncModelFromServer(reason = "Synced server model.") {
       if (!SERVER_MODE) return false;
       try {
-        const response = await fetch("/api/model", { cache: "no-store" });
+        const response = await authedFetch("/api/model");
         if (!response.ok) return false;
         const serverModel = normalizeModel(await response.json());
         model = serverModel;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
         if (reason) {
           model.activity = model.activity || [];
           if (!model.activity.some(item => item.message === reason)) {
@@ -1424,7 +1729,7 @@
       const theme = resolvedTheme();
       document.documentElement.dataset.theme = theme;
       const meta = document.querySelector('meta[name="theme-color"]');
-      if (meta) meta.setAttribute("content", theme === "light" ? "#f6f7f4" : "#07090d");
+      if (meta) meta.setAttribute("content", theme === "light" ? "#f6f7f4" : "#08080f");
       const preview = $("#themePreviewInput");
       if (preview) preview.value = `${theme[0].toUpperCase()}${theme.slice(1)}${(model.settings?.theme || "auto") === "auto" ? " by device" : " locked"}`;
     }
@@ -1437,7 +1742,7 @@
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
       if (SERVER_MODE) {
-        fetch("/api/model", {
+        authedFetch("/api/model", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(model)
@@ -1446,10 +1751,93 @@
       render();
     }
 
-    function loginUser() {
-      const name = clean($("#loginNameInput").value) || "Social Cues User";
+    function deviceId() {
+      let id = localStorage.getItem(DEVICE_ID_KEY);
+      if (!id) {
+        id = `device-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+        localStorage.setItem(DEVICE_ID_KEY, id);
+      }
+      return id;
+    }
+
+    function deviceKind() {
+      const ua = navigator.userAgent || "";
+      if (/iphone|android.*mobile|windows phone/i.test(ua)) return "phone";
+      if (/ipad|tablet|android/i.test(ua)) return "tablet";
+      return "laptop";
+    }
+
+    function defaultDeviceName() {
+      const kind = deviceKind();
+      const platform = navigator.platform || "";
+      return `${kind[0].toUpperCase()}${kind.slice(1)}${platform ? ` - ${platform}` : ""}`;
+    }
+
+    function collectDeviceInfo() {
+      return {
+        deviceId: deviceId(),
+        deviceName: clean($("#loginDeviceInput")?.value) || defaultDeviceName(),
+        deviceKind: deviceKind(),
+        userAgent: navigator.userAgent || "",
+        platform: navigator.platform || "",
+        language: navigator.language || "",
+        screen: `${window.screen?.width || 0}x${window.screen?.height || 0}`,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+        trusted: true
+      };
+    }
+
+    async function authedFetch(url, options = {}) {
+      const token = localStorage.getItem(SESSION_TOKEN_KEY);
+      const headers = { ...(options.headers || {}) };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      return fetch(url, { ...options, headers, cache: options.cache || "no-store" });
+    }
+
+    async function submitAuth(mode = "login") {
+      const signupMode = mode === "signup";
+      const name = signupMode ? (clean($("#loginNameInput").value) || "Social Cues User") : "";
       const email = clean($("#loginEmailInput").value) || "user@local.test";
-      const workspace = clean($("#loginWorkspaceInput").value) || "Social Cues Alpha";
+      const password = $("#loginPasswordInput").value || "";
+      const promoCode = signupMode ? clean($("#loginPromoInput").value) : "";
+      if (password.length < 8) {
+        alert("Use at least 8 characters for your Social Cues password.");
+        return;
+      }
+      if (SERVER_MODE) {
+        const createButton = $("#createAccountButton");
+        const loginButton = $("#loginButton");
+        const activeButton = mode === "signup" ? createButton : loginButton;
+        const originalText = activeButton.textContent;
+        createButton.disabled = true;
+        loginButton.disabled = true;
+        activeButton.textContent = mode === "signup" ? "Creating..." : "Logging in...";
+        try {
+          const response = await fetch(mode === "signup" ? "/api/auth/signup" : "/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, email, password, promoCode, device: collectDeviceInfo() })
+          });
+          const auth = await response.json();
+          if (!response.ok || !auth.ok) throw new Error(auth.error || "Account sign-in failed.");
+          if (auth.session?.token) localStorage.setItem(SESSION_TOKEN_KEY, auth.session.token);
+          model.currentUser = auth.user;
+          model.workspace = { ...(model.workspace || {}), ...(auth.workspace || {}), owner: auth.user?.name || name };
+          model.deviceSessions = auth.devices || [];
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
+          await syncModelFromServer(`${mode === "signup" ? "Created account" : "Logged in"} as ${auth.user?.name || name}. This device is remembered.`);
+          heartbeatDevice();
+          jump(model.onboarding?.complete ? "dashboard" : "onboarding");
+          render();
+          return;
+        } catch (error) {
+          alert(`Account sign-in failed: ${error.message}`);
+        } finally {
+          createButton.disabled = false;
+          loginButton.disabled = false;
+          activeButton.textContent = originalText;
+        }
+      }
       model.currentUser = {
         id: "user-local",
         name,
@@ -1457,23 +1845,87 @@
         role: "Owner",
         loggedInAt: new Date().toISOString()
       };
-      model.workspace.name = workspace;
       if (!model.workspace.owner || model.workspace.owner === "Cory Barton") model.workspace.owner = name;
       saveModel(`Logged in as ${name}.`);
     }
 
-    function logoutUser() {
+    function createAccount() {
+      if (!document.body.classList.contains("signup-mode")) {
+        document.body.classList.add("signup-mode");
+        $$(".create-only").forEach(item => item.classList.remove("hidden"));
+        $("#authTitle").textContent = "Create your Social Cues account";
+        $("#authHelp").textContent = "Enter your name, email, password, and promo code if you have one. Promo testers get highest-tier access for 120 days.";
+        $("#loginButton").textContent = "Back to login";
+        return;
+      }
+      return submitAuth("signup");
+    }
+
+    function loginUser() {
+      if (document.body.classList.contains("signup-mode")) {
+        document.body.classList.remove("signup-mode");
+        $$(".create-only").forEach(item => item.classList.add("hidden"));
+        $("#authTitle").textContent = "Log in to Social Cues";
+        $("#authHelp").textContent = "Use your registered email and password. Create account opens tester and setup fields.";
+        $("#loginButton").textContent = "Log in";
+        return;
+      }
+      return submitAuth("login");
+    }
+
+    async function logoutUser() {
+      if (SERVER_MODE) {
+        await authedFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+      }
+      localStorage.removeItem(SESSION_TOKEN_KEY);
       model.currentUser = null;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
       render();
     }
 
+    async function restoreSession() {
+      if (!SERVER_MODE) return false;
+      try {
+        const response = await authedFetch("/api/auth/session");
+        const auth = await response.json();
+        if (!response.ok || !auth.ok) throw new Error(auth.error || "Session expired.");
+        model.currentUser = auth.user;
+        model.workspace = { ...(model.workspace || {}), ...(auth.workspace || {}) };
+        model.deviceSessions = auth.devices || [];
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
+        heartbeatDevice();
+        return true;
+      } catch {
+        localStorage.removeItem(SESSION_TOKEN_KEY);
+        return false;
+      }
+    }
+
+    async function heartbeatDevice() {
+      if (!SERVER_MODE || !localStorage.getItem(SESSION_TOKEN_KEY)) return false;
+      try {
+        const response = await authedFetch("/api/auth/device/heartbeat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(collectDeviceInfo())
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || "Device heartbeat failed.");
+        model.deviceSessions = data.devices || model.deviceSessions || [];
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
+        renderDevices();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
     async function saveToDisk() {
       if (!SERVER_MODE) {
-        alert("Disk save is available when running from http://127.0.0.1:4177.");
+        alert("Cloud save is available when Social Cues is opened from the hosted app.");
         return;
       }
-      const response = await fetch("/api/model", {
+      const response = await authedFetch("/api/model", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(model)
@@ -1484,10 +1936,10 @@
 
     async function loadFromDisk() {
       if (!SERVER_MODE) {
-        alert("Disk load is available when running from http://127.0.0.1:4177.");
+        alert("Cloud load is available when Social Cues is opened from the hosted app.");
         return;
       }
-      const response = await fetch("/api/model");
+      const response = await authedFetch("/api/model");
       if (!response.ok) throw new Error("Disk load failed");
       model = { ...clone(defaultModel), ...(await response.json()) };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
@@ -1510,7 +1962,16 @@
       return Boolean(account?.token || account?.accessToken || account?.refreshToken || account?.tokenStored);
     }
 
+    function metaTokenHealthy(source = metaState) {
+      const tokenHealth = source?.health?.tokenHealth || {};
+      const connection = source?.metaConnection || {};
+      if (tokenHealth.valid === true || connection.tokenValid === true) return true;
+      if (tokenHealth.valid === false || connection.tokenValid === false) return false;
+      return Boolean(connection.tokenStored || source?.health?.hasMetaUserToken);
+    }
+
     function isRealConnectedAccount(account) {
+      if (account?.disabled) return false;
       if (!account || account.status !== "connected") return false;
       if (typeof account.connected === "boolean") return account.connected;
       if (account.platform === "meta") return account.oauthProvider === "meta" && hasStoredToken(account) && Boolean(account.providerAccountId);
@@ -1656,6 +2117,9 @@
       const campaign = activeCampaign();
       const variant = campaign?.variants.find(v => v.id === id);
       if (!variant) return;
+      if (status === "queued" && variant.platform === "youtube") {
+        alert("YouTube reminder: Social Cues prepares uploads private-first. Public automated publishing needs Google OAuth, YouTube upload scope, and Google API compliance/audit clearance.");
+      }
       variant.status = status;
       if (status === "published") {
         variant.publishedAt = new Date().toISOString();
@@ -1719,8 +2183,8 @@
 
     function createSelfLaunchCampaign() {
       const evidence = (model.proof || []).slice(0, 4).map(item => `${item.type}: ${item.metric} (${item.note})`).join(" ");
-      const brief = `Launch Social Cues using this customer-ready alpha as the first success story. Show how the tool helps a customer log in, connect accounts, generate platform-native variants, maintain approval control, attach media, analyze metrics, and turn honest signals into a repeatable growth system. Evidence so far: ${evidence || "evidence is still being built."}`;
-      const campaign = createCampaignFromIdea("Social Cues Self-Launch From Alpha Evidence", brief, "Launch product");
+      const brief = `Launch Social Cues using this customer-ready command center as the first success story. Show how the tool helps a customer log in, connect accounts, generate platform-native variants, maintain approval control, attach media, analyze metrics, and turn honest signals into a repeatable growth system. Evidence so far: ${evidence || "evidence is still being built."}`;
+      const campaign = createCampaignFromIdea("Social Cues Self-Launch From Customer Evidence", brief, "Launch product");
       const flags = claimFlags(campaign.brief);
       campaign.variants = platforms.map(platform => ({
         id: uid(platform.id),
@@ -1806,12 +2270,12 @@
     }
 
     function exportModel() {
-      exportJson("Social Cues-alpha-model.json", model);
+      exportJson("Social Cues-model.json", model);
     }
 
     function exportContent() {
       const campaign = activeCampaign();
-      exportJson("Social Cues-alpha-content-bundle.json", {
+      exportJson("Social Cues-content-bundle.json", {
         exportedAt: new Date().toISOString(),
         workspace: model.workspace,
         profile: model.profile,
@@ -1873,17 +2337,56 @@
       saveModel("Saved appearance.");
     }
 
+    async function startProviderOAuth(provider, platform = provider) {
+      try {
+        const response = await authedFetch(`/api/oauth/connect-url?provider=${encodeURIComponent(provider)}&platform=${encodeURIComponent(platform)}`);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false) throw new Error(data.error || `${platformName(platform)} did not return a connect URL.`);
+        if (data.url) {
+          window.location.assign(data.url);
+          return;
+        }
+        throw new Error(`${platformName(platform)} did not return a connect URL.`);
+      } catch (error) {
+        alert(error.message || `Sign in before connecting ${platformName(platform)}.`);
+      }
+    }
+
     function connectAccount(platform) {
+      if (SERVER_MODE && platform === "tiktok") {
+        window.location.assign("/api/oauth/tiktok/start");
+        return;
+      }
+      if (SERVER_MODE && platform === "youtube") {
+        startProviderOAuth("youtube", "youtube");
+        return;
+      }
       if (SERVER_MODE && platform === "threads") {
-        window.location.href = "/api/oauth/threads/start";
+        startProviderOAuth("threads", "threads");
         return;
       }
       if (SERVER_MODE && platform === "x") {
-        window.location.href = "/api/oauth/x/start";
+        startProviderOAuth("x", "x");
+        return;
+      }
+      if (SERVER_MODE && platform === "pinterest") {
+        startProviderOAuth("pinterest", "pinterest");
+        return;
+      }
+      if (SERVER_MODE && platform === "canva") {
+        startProviderOAuth("canva", "canva");
+        return;
+      }
+      if (SERVER_MODE && platform === "etsy") {
+        startProviderOAuth("etsy", "etsy");
+        return;
+      }
+      if (SERVER_MODE && platform === "shopify") {
+        startProviderOAuth("shopify", "shopify");
         return;
       }
       if (SERVER_MODE && ["instagram", "facebook"].includes(platform)) {
-        window.location.href = `/api/oauth/meta/start?platform=${encodeURIComponent(platform)}`;
+        startProviderOAuth("meta", platform);
         return;
       }
       if (SERVER_MODE) {
@@ -1898,12 +2401,53 @@
       saveModel(`${account.name} needs provider OAuth before it can connect.`);
     }
 
-    function disconnectAccount(platform) {
+    async function disconnectAccount(platform) {
       const account = (model.connectedAccounts || []).find(item => item.platform === platform);
       if (!account) return;
+      const confirmed = confirm(`Turn off ${account.name}? Social Cues will clear cached account evidence and token status for this provider. You can get it back by logging in again.`);
+      if (!confirmed) return;
       account.status = "not connected";
       account.connectedAt = null;
-      saveModel(`Disconnected ${account.name}.`);
+      account.connected = false;
+      account.disabled = true;
+      account.connectionEvidence = "disabled by user; cached provider data cleared";
+      ["token", "accessToken", "refreshToken", "credential", "refreshCredential", "oauthCode", "providerAccountId", "tokenType", "tokenExpiresAt", "refreshTokenExpiresAt", "profile", "scopes"].forEach(key => delete account[key]);
+      if (SERVER_MODE) {
+        try {
+          const response = await authedFetch(`/api/accounts/${encodeURIComponent(platform)}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ disconnect: true, disabled: true, status: "not connected" })
+          });
+          if (response.ok) {
+            const body = await response.json();
+            if (body.account) Object.assign(account, body.account);
+          }
+        } catch {
+          // Local cleanup still protects the UI if the server is temporarily unavailable.
+        }
+      }
+      saveModel(`Turned off ${account.name} and cleared cached provider evidence.`);
+    }
+
+    async function toggleAccount(platform) {
+      const account = (model.connectedAccounts || []).find(item => item.platform === platform);
+      if (!account) return;
+      if (account.disabled === true) {
+        account.disabled = false;
+        account.status = account.status === "disabled" ? "not connected" : account.status || "not connected";
+        account.connectionEvidence = "provider lane re-enabled; connect with OAuth when ready";
+        if (SERVER_MODE) {
+          await authedFetch(`/api/accounts/${encodeURIComponent(platform)}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ disabled: false, status: "not connected" })
+          }).catch(() => {});
+        }
+        saveModel(`Re-enabled ${account.name}.`);
+        return;
+      }
+      await disconnectAccount(platform);
     }
 
     function saveOnboarding() {
@@ -1912,7 +2456,16 @@
         bio: clean($("#bioInput").value),
         purpose: clean($("#purposeInput").value),
         offer: clean($("#offerInput").value),
-        audience: clean($("#audienceDescInput").value)
+        audience: clean($("#audienceDescInput").value),
+        businessName: clean($("#businessNameInput").value),
+        legalStructure: $("#legalStructureInput").value,
+        hasLlc: $("#llcStatusInput").value,
+        website: clean($("#websiteInput").value),
+        industry: clean($("#industryInput").value),
+        location: clean($("#locationInput").value),
+        monthlyBudget: clean($("#monthlyBudgetInput").value),
+        primaryPlatform: clean($("#primaryPlatformInput").value),
+        contentComfort: $("#contentComfortInput").value
       };
       model.workspace.purpose = model.onboarding.purpose || model.workspace.purpose;
       saveModel("Completed meet-and-greet onboarding.");
@@ -1922,7 +2475,7 @@
     async function compileAnalytics() {
       if (SERVER_MODE) {
         try {
-          const response = await fetch("/api/analyze", { method: "POST" });
+          const response = await authedFetch("/api/analyze", { method: "POST" });
           if (response.ok) {
             const body = await response.json();
             const serverMetrics = body.analytics?.metrics || [];
@@ -1944,16 +2497,17 @@
       const metaIdentity = metaAccounts.find(account => account.platform === "meta" && isRealConnectedAccount(account));
       const pageCount = Number(model.metaConnection?.pageCount || metaAccounts.filter(account => account.platform === "facebook" && isRealConnectedAccount(account)).length);
       const instagramCount = metaAccounts.filter(account => account.platform === "instagram" && isRealConnectedAccount(account)).length;
-      const readyLanes = model.metaConnection ? 5 : 0;
+      const metaHealthy = model.metaConnection?.tokenValid !== false && Boolean(metaIdentity || model.metaConnection?.userName);
+      const readyLanes = metaHealthy ? 5 : 0;
       const base = model.baseline || defaultModel.baseline;
       model.analytics = {
         lastCompiledAt: new Date().toISOString(),
         status: "Compiled locally from current account state, Meta connection records, and clearly labeled manual baseline estimates.",
         metrics: [
-          { label: "Meta identity", value: metaIdentity?.name || model.metaConnection?.userName || "Not connected", source: "Current Social Cues model from Meta OAuth", kind: metaIdentity || model.metaConnection?.userName ? "live" : "blocked", signal: metaIdentity || model.metaConnection?.userName ? "Meta login returned an identity and the server model retained it." : "Meta login is not connected in the current model." },
+          { label: "Meta identity", value: metaIdentity?.name || model.metaConnection?.userName || "Not connected", source: "Current Social Cues model from Meta OAuth", kind: metaHealthy ? "live" : "blocked", signal: metaHealthy ? "Meta login returned an identity and the token is currently usable." : "Meta login needs reconnect because the token is missing or no longer usable." },
           { label: "Meta Pages", value: String(pageCount), source: "Current Meta connection page count", kind: pageCount ? "live" : "blocked", signal: pageCount ? "Facebook Page assets are available." : "No Facebook Pages are available, so Page analytics cannot be called live yet." },
           { label: "Instagram assets", value: String(instagramCount), source: "Current Meta-connected Instagram account records", kind: instagramCount ? "live" : "blocked", signal: instagramCount ? "Instagram professional assets are available." : "No Instagram professional asset is available; this still needs permissions and linked professional account discovery." },
-          { label: "Meta ready lanes", value: `${readyLanes}/18`, source: "Current Meta integration state", kind: "computed", signal: readyLanes ? "Core OAuth/readiness is online; the rest remains gated by permissions, review, or assets." : "Meta readiness has not been compiled by the server yet." },
+          { label: "Meta ready lanes", value: `${readyLanes}/18`, source: "Current Meta integration state", kind: "computed", signal: readyLanes ? "Core OAuth/readiness is online; the rest remains gated by permissions, review, or assets." : "Meta identity exists only as a stale or incomplete record; reconnect Meta before trusting live lanes." },
           { label: "Connected account cards", value: `${connected.length}/${accounts.length}`, source: "Browser local account state", kind: "computed", signal: "Counts cards marked connected or logged in; it does not mean live analytics are available." },
           { label: "Manual audience estimate", value: Number(base.audience || 0).toLocaleString(), source: "Manual baseline input", kind: "manual", signal: "User-entered planning number, not live platform data." },
           { label: "Manual avg. views", value: Number(base.avgViews || 0).toLocaleString(), source: "Manual baseline input", kind: "manual", signal: "User-entered planning number, not live platform data." },
@@ -1961,14 +2515,14 @@
           { label: "Manual cadence", value: `${base.cadence || 0}/week`, source: "Manual baseline input", kind: "manual", signal: "User-entered posting rhythm for planning." }
         ],
         sourceBreakdown: [
-          { source: "Current Social Cues model from Meta OAuth", status: metaIdentity || model.metaConnection?.userName ? "Live login record present" : "No live login record", data: metaIdentity || model.metaConnection?.userName ? `Identity returned: ${metaIdentity?.name || model.metaConnection.userName}.` : "No connected Meta identity in the current model." },
+          { source: "Current Social Cues model from Meta OAuth", status: metaHealthy ? "Live login record present" : "Reconnect required", data: metaHealthy ? `Identity returned: ${metaIdentity?.name || model.metaConnection.userName}.` : "Meta identity may be stored, but the current token is not usable." },
           { source: "Current Meta connection page count", status: pageCount ? "Pages available" : "No Pages returned", data: `${pageCount} Facebook Page record(s) in the current model.` },
           { source: "Current Meta-connected Instagram account records", status: instagramCount ? "Instagram assets available" : "No Instagram assets returned", data: `${instagramCount} Instagram professional account record(s) in the current model.` },
           { source: "Browser local account state", status: "Computed locally", data: `${connected.length} account card(s) marked connected or logged in.` },
           { source: "Manual baseline input", status: "Manual estimate", data: `Audience ${Number(base.audience || 0).toLocaleString()}, views ${Number(base.avgViews || 0).toLocaleString()}, engagement ${base.engagement || 0}%, cadence ${base.cadence || 0}/week.` }
         ],
         translatedAnalysis: [
-          metaIdentity || model.metaConnection?.userName ? `Meta login is real: Social Cues can identify ${metaIdentity?.name || model.metaConnection.userName}.` : "Meta login is not connected in the current model.",
+          metaHealthy ? `Meta login is real: Social Cues can identify ${metaIdentity?.name || model.metaConnection.userName}.` : "Meta needs reconnect before Social Cues can treat the identity as live.",
           pageCount ? `${pageCount} Facebook Page asset(s) are available for Page analysis.` : "Meta returned zero Facebook Pages. That is why audience, views, and engagement cannot honestly be called live Meta data yet.",
           instagramCount ? `${instagramCount} Instagram professional asset(s) are available.` : "Instagram analytics are still gated because no linked professional Instagram account was returned.",
           "Manual baseline numbers are preserved for planning, but labeled so they cannot be mistaken for live growth data.",
@@ -1992,10 +2546,10 @@
     }
 
     function generatedMediaDataUrl(platformId, campaign) {
-      const p = platformById(platformId) || { name: platformId, accent: "#28d7ee" };
+      const p = platformById(platformId) || { name: platformId, accent: "#ff2d78" };
       const title = `${p.name} media concept`;
       const subtitle = mediaSuggestion(platformId, campaign).slice(0, 110);
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675"><defs><linearGradient id="g" x1="0" x2="1"><stop stop-color="#28d7ee"/><stop offset="1" stop-color="${p.accent || "#ff386b"}"/></linearGradient></defs><rect width="1200" height="675" fill="#07090d"/><rect x="54" y="54" width="1092" height="567" rx="36" fill="url(#g)" opacity=".22"/><circle cx="960" cy="150" r="82" fill="${p.accent || "#ff386b"}" opacity=".85"/><text x="86" y="170" fill="#f8fafc" font-family="Arial, sans-serif" font-size="58" font-weight="800">${escapeHtml(title)}</text><text x="86" y="248" fill="#dbeafe" font-family="Arial, sans-serif" font-size="30">${escapeHtml(campaign?.title || "Social Cues campaign")}</text><foreignObject x="86" y="310" width="820" height="210"><div xmlns="http://www.w3.org/1999/xhtml" style="font-family:Arial,sans-serif;color:#f8fafc;font-size:34px;line-height:1.25">${escapeHtml(subtitle)}</div></foreignObject><text x="86" y="585" fill="#93dd55" font-family="Arial, sans-serif" font-size="34" font-weight="800">Generated concept - replace or refine in Canva/Sora</text></svg>`;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675"><defs><linearGradient id="g" x1="0" x2="1"><stop stop-color="#ff2d78"/><stop offset="1" stop-color="${p.accent || "#ff386b"}"/></linearGradient></defs><rect width="1200" height="675" fill="#08080f"/><rect x="54" y="54" width="1092" height="567" rx="36" fill="url(#g)" opacity=".22"/><circle cx="960" cy="150" r="82" fill="${p.accent || "#ff386b"}" opacity=".85"/><text x="86" y="170" fill="#f8fafc" font-family="Arial, sans-serif" font-size="58" font-weight="800">${escapeHtml(title)}</text><text x="86" y="248" fill="#dbeafe" font-family="Arial, sans-serif" font-size="30">${escapeHtml(campaign?.title || "Social Cues campaign")}</text><foreignObject x="86" y="310" width="820" height="210"><div xmlns="http://www.w3.org/1999/xhtml" style="font-family:Arial,sans-serif;color:#f8fafc;font-size:34px;line-height:1.25">${escapeHtml(subtitle)}</div></foreignObject><text x="86" y="585" fill="#93dd55" font-family="Arial, sans-serif" font-size="34" font-weight="800">Generated concept - replace or refine before publishing</text></svg>`;
       return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
     }
 
@@ -2035,13 +2589,42 @@
       reader.readAsDataURL(file);
     }
 
+    async function planMediaEdit(id) {
+      const campaign = activeCampaign();
+      const variant = campaign?.variants.find(v => v.id === id);
+      if (!variant) return;
+      const sourceName = variant.media?.name || "raw client media";
+      try {
+        const response = await authedFetch("/api/media/editor/plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            platform: variant.platform,
+            sourceName,
+            brief: variant.copy || campaign.brief,
+            campaign: { id: campaign.id, title: campaign.title, brief: campaign.brief }
+          })
+        });
+        const body = await response.json();
+        if (!response.ok || !body.ok) throw new Error(body.error || "AI editor plan failed.");
+        variant.mediaEdit = body.plan;
+        variant.flags = Array.from(new Set([...(variant.flags || []), body.ready ? "AI editor ready" : "AI editor needs server worker"]));
+        saveModel(`Prepared AI editor plan for ${platformName(variant.platform)}.`);
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
     function saveIntegrations() {
       model.integrations = {
         openai: $("#openaiStatusInput").value,
+        stripe: $("#stripeStatusInput").value,
+        discord: $("#discordStatusInput").value,
         publishingQueue: $("#queueStatusInput").value,
-        shopify: $("#shopifyStatusInput").value,
-        canva: $("#canvaStatusInput").value,
-        sora: $("#soraStatusInput").value,
+        shopify: "Backlog",
+        pinterest: model.integrations?.pinterest || "Developer app pending",
+        canva: model.integrations?.canva || "MFA / developer integration pending",
+        mediaEditor: $("#mediaEditorStatusInput").value,
         publishingPath: $("#publishingPathInput").value
       };
       saveModel("Saved integration readiness.");
@@ -2125,10 +2708,40 @@
       metaState = { ...metaState, loading: true, error: "" };
       renderMetaSurfaces();
       try {
-        const healthResponse = await fetch("/api/meta/health", { method: "POST" });
+        const [healthResponse, diagnosticResponse, metaOAuthResponse, xResponse, tiktokResponse, youtubeResponse, pinterestResponse, canvaResponse, shopifyResponse, etsyResponse, googleSuiteResponse, googleBusinessResponse, integrationsResponse, securityResponse, observabilityResponse] = await Promise.all([
+          authedFetch("/api/meta/health", { method: "POST" }),
+          authedFetch("/api/meta/diagnostic-agent"),
+          authedFetch("/api/oauth/meta/status"),
+          authedFetch("/api/x/account"),
+          authedFetch("/api/tiktok/account"),
+          authedFetch("/api/youtube/account"),
+          authedFetch("/api/pinterest/readiness"),
+          authedFetch("/api/canva/readiness"),
+          authedFetch("/api/shopify/readiness"),
+          authedFetch("/api/etsy/readiness"),
+          authedFetch("/api/google/growth-suite"),
+          authedFetch("/api/google/business/readiness"),
+          authedFetch("/api/integrations/readiness"),
+          authedFetch("/api/security/audit"),
+          fetch("/api/observability/status", { cache: "no-store" })
+        ]);
         const assets = healthResponse.ok
           ? await healthResponse.json()
-          : await fetch("/api/meta/assets", { cache: "no-store" }).then(response => response.json());
+          : await authedFetch("/api/meta/assets").then(response => response.json());
+        const diagnostic = diagnosticResponse.ok ? await diagnosticResponse.json() : null;
+        const metaOAuthStatus = metaOAuthResponse.ok ? await metaOAuthResponse.json() : null;
+        const xStatus = xResponse.ok ? await xResponse.json() : null;
+        const tiktokStatus = tiktokResponse.ok ? await tiktokResponse.json() : null;
+        const youtubeStatus = youtubeResponse.ok ? await youtubeResponse.json() : null;
+        const pinterestStatus = pinterestResponse.ok ? await pinterestResponse.json() : null;
+        const canvaStatus = canvaResponse.ok ? await canvaResponse.json() : null;
+        const shopifyStatus = shopifyResponse.ok ? await shopifyResponse.json() : null;
+        const etsyStatus = etsyResponse.ok ? await etsyResponse.json() : null;
+        const googleSuite = googleSuiteResponse.ok ? await googleSuiteResponse.json() : null;
+        const googleBusinessStatus = googleBusinessResponse.ok ? await googleBusinessResponse.json() : null;
+        const integrationsStatus = integrationsResponse.ok ? await integrationsResponse.json() : null;
+        const securityAudit = securityResponse.ok ? await securityResponse.json() : null;
+        const observabilityStatus = observabilityResponse.ok ? await observabilityResponse.json() : null;
         const blockers = assets.health?.blockers || assets.metaHealth?.blockers || assets.metaConnection?.blockers || [];
         const freshMetaState = {
           loading: false,
@@ -2136,15 +2749,31 @@
           accounts: assets.accounts || [],
           metaConnection: assets.metaConnection || null,
           health: assets.health || assets.metaHealth || (blockers.length ? { blockers } : null),
-          capabilities: assets.capabilities || []
+          capabilities: assets.capabilities || [],
+          diagnostic,
+          metaOAuthStatus,
+          xAccount: xStatus?.account || null,
+          xStatus,
+          tiktokAccount: tiktokStatus?.account || null,
+          tiktokStatus,
+          youtubeAccount: youtubeStatus?.account || null,
+          youtubeStatus,
+          pinterestStatus,
+          canvaStatus,
+          shopifyStatus,
+          etsyStatus,
+          googleSuite,
+          googleBusinessStatus,
+          services: integrationsStatus?.coreServices || [],
+          securityAudit,
+          observabilityStatus
         };
         await syncModelFromServer("");
         metaState = freshMetaState;
       } catch (error) {
         metaState = { loading: false, error: error.message, capabilities: [], accounts: [], metaConnection: null };
       }
-      renderMetaSurfaces();
-      renderRightRail();
+      render();
     }
 
     function baselineInsight() {
@@ -2192,11 +2821,11 @@
       $("#sessionInput").value = model.security.session;
       $("#stepUpInput").value = model.security.stepUp;
       $("#themeInput").value = model.settings?.theme || "auto";
-      $("#openaiStatusInput").value = model.integrations?.openai || "Needed";
+      $("#openaiStatusInput").value = backendService("openai")?.ready ? "Connected in backend" : model.integrations?.openai || "Needed";
+      $("#stripeStatusInput").value = backendService("stripe")?.ready ? "Stripe Checkout ready" : model.integrations?.stripe || "Needed";
+      $("#discordStatusInput").value = backendService("discord")?.ready ? "Connected in backend" : model.integrations?.discord || "Needed";
       $("#queueStatusInput").value = model.integrations?.publishingQueue || "Needed";
-      $("#shopifyStatusInput").value = model.integrations?.shopify || "Needed";
-      $("#canvaStatusInput").value = model.integrations?.canva || "Needed";
-      $("#soraStatusInput").value = model.integrations?.sora || "Needed";
+      $("#mediaEditorStatusInput").value = backendService("mediaEditor")?.ready ? "Server pipeline ready" : model.integrations?.mediaEditor || "Needed";
       $("#publishingPathInput").value = model.integrations?.publishingPath || "Social Cues Queue first";
       applyTheme();
     }
@@ -2214,14 +2843,23 @@
       $("#purposeInput").value = model.onboarding?.purpose || "";
       $("#offerInput").value = model.onboarding?.offer || "";
       $("#audienceDescInput").value = model.onboarding?.audience || "";
+      $("#businessNameInput").value = model.onboarding?.businessName || "";
+      $("#legalStructureInput").value = model.onboarding?.legalStructure || "Not sure yet";
+      $("#llcStatusInput").value = model.onboarding?.hasLlc || "not-sure";
+      $("#websiteInput").value = model.onboarding?.website || "";
+      $("#industryInput").value = model.onboarding?.industry || "";
+      $("#locationInput").value = model.onboarding?.location || "";
+      $("#monthlyBudgetInput").value = model.onboarding?.monthlyBudget || "";
+      $("#primaryPlatformInput").value = model.onboarding?.primaryPlatform || "";
+      $("#contentComfortInput").value = model.onboarding?.contentComfort || "Mixed";
       const steps = [
-        ["Meet", model.onboarding?.complete ? "Bio and purpose saved." : "Tell Social Cues who this workspace serves."],
+        ["Meet", model.onboarding?.complete ? `${model.onboarding?.businessName || "Profile"} saved with ${model.onboarding?.legalStructure || "business"} context.` : "Tell Social Cues who this account serves."],
         ["Connect", `${(model.connectedAccounts || []).filter(isRealConnectedAccount).length} accounts connected.`],
         ["Analyze", model.analytics?.lastCompiledAt ? `Compiled ${new Date(model.analytics.lastCompiledAt).toLocaleString()}.` : "Compile baseline and account status."],
-        ["Create", "Generate posts with media suggestions, upload, Canva, or Sora concepts."]
+        ["Create", "Generate posts with media suggestions, uploads, and AI editor concepts."]
       ];
       $("#onboardingSteps").innerHTML = steps.map(([title, body], index) => `
-        <article class="variant" style="--accent:${index % 2 ? "#ff386b" : "#28d7ee"}">
+        <article class="variant" style="--accent:${index % 2 ? "#ff386b" : "#ff2d78"}">
           <div class="variant-head"><div><h3>${title}</h3><p>${body}</p></div><span class="pill approved">step ${index + 1}</span></div>
         </article>
       `).join("");
@@ -2232,7 +2870,19 @@
       $("#workspaceLabel").textContent = `${model.workspace.name} workspace`;
       $("#activeCampaignTitle").textContent = campaign?.title || "No campaign";
       $("#activeCampaignMeta").textContent = campaign ? `${campaign.goal} - ${campaign.tone} - ${campaignMeta(campaign)}` : "Create or select a campaign to begin.";
-      $("#storageNotice").innerHTML = `Stored locally as <strong>${STORAGE_KEY}</strong>. Last update: ${model.updatedAt ? new Date(model.updatedAt).toLocaleString() : "just now"}.`;
+      const storageMode = SERVER_MODE ? "Cloud workspace" : "Local browser copy";
+      const storageDetail = SERVER_MODE
+        ? "Synced through the hosted backend with Supabase persistence; this browser keeps a working cache for speed."
+        : `Stored locally as <strong>${STORAGE_KEY}</strong> in this browser.`;
+      const persistenceTag = $("#persistenceTag");
+      if (persistenceTag) persistenceTag.textContent = SERVER_MODE ? "Cloud persistence" : "Local persistence";
+      const workspaceStorageCopy = $("#workspaceStorageCopy");
+      if (workspaceStorageCopy) {
+        workspaceStorageCopy.textContent = SERVER_MODE
+          ? "The hosted backend stores your customer workspace and remembers trusted devices. Export it often while testing."
+          : "This copy stores your customer workspace in this browser on this machine. Export it often while testing.";
+      }
+      $("#storageNotice").innerHTML = `<strong>${storageMode}</strong> - ${storageDetail} Last update: ${model.updatedAt ? new Date(model.updatedAt).toLocaleString() : "just now"}.`;
       const needs = model.campaigns.flatMap(c => (c.variants || []).filter(v => v.status === "draft" || v.status === "needs revision").map(v => ({ ...v, campaignTitle: c.title }))).slice(0, 5);
       $("#dashboardQueue").innerHTML = needs.length ? needs.map(v => miniCard(v, v.campaignTitle)).join("") : `<div class="empty">No draft work waiting. Generate variants or approve the current campaign.</div>`;
       $("#profileSummary").textContent = `${model.profile.operator} - ${model.profile.outcome} - ${model.profile.display} - ${model.profile.automation}`;
@@ -2245,7 +2895,6 @@
       if (!model.currentUser) {
         screen.classList.remove("hidden");
         $("#loginNameInput").value = model.workspace.owner || "Cory Barton";
-        $("#loginWorkspaceInput").value = model.workspace.name || "Social Cues Alpha";
       } else {
         screen.classList.add("hidden");
       }
@@ -2271,6 +2920,7 @@
       const campaign = activeCampaign();
       const media = v.media;
       const mediaHtml = media ? `<div class="media-preview">${media.type === "video" ? `<video src="${media.url}" controls></video>` : `<img src="${media.url}" alt="${escapeHtml(media.name)}">`}<div class="media-copy">${escapeHtml(media.provider)} - ${escapeHtml(media.name)}<br>${escapeHtml(media.suggestion || mediaSuggestion(v.platform, campaign))}</div></div>` : `<div class="notice">${escapeHtml(mediaSuggestion(v.platform, campaign))}</div>`;
+      const editHtml = v.mediaEdit ? `<div class="notice">AI editor: ${escapeHtml((v.mediaEdit.editPass || []).join(" - "))}</div>` : "";
       return `<article class="variant" style="--accent:${p.accent}">
         <div class="variant-head">
           <div>
@@ -2281,6 +2931,7 @@
         </div>
         <textarea data-copy="${v.id}" oninput="syncCopy('${v.id}')">${escapeHtml(v.copy)}</textarea>
         ${mediaHtml}
+        ${editHtml}
         ${flags}
         <div class="tags">
           ${v.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
@@ -2295,8 +2946,9 @@
         <div class="variant-tools">
           <button onclick="document.querySelector('[data-media-input=&quot;${v.id}&quot;]').click()">Upload media</button>
           <button onclick="generateMedia('${v.id}','Social Cues')">Generate concept</button>
-          <button onclick="generateMedia('${v.id}','Canva')">Canva concept</button>
-          <button onclick="generateMedia('${v.id}','Sora')">Sora prompt</button>
+          <button onclick="generateMedia('${v.id}','Graphic')">Graphic concept</button>
+          <button onclick="generateMedia('${v.id}','Video')">Video prompt</button>
+          <button onclick="planMediaEdit('${v.id}')">AI edit plan</button>
         </div>
         <input class="file-input" data-media-input="${v.id}" type="file" accept="image/*,video/*" onchange="attachMedia('${v.id}', this)">
       </article>`;
@@ -2353,7 +3005,7 @@
       if (metrics.length) {
         const kindAccent = {
           live: "#93dd55",
-          computed: "#28d7ee",
+          computed: "#ff2d78",
           manual: "#f6bd4a",
           blocked: "#ff386b"
         };
@@ -2370,7 +3022,7 @@
           </article>
         `).join("");
         const analysisHtml = translated.length ? `
-          <article class="variant" style="--accent:#28d7ee">
+          <article class="variant" style="--accent:#ff2d78">
             <div class="variant-head">
               <div>
                 <h3>Translated analysis</h3>
@@ -2441,7 +3093,7 @@
     }
 
     function miniAction(action) {
-      return `<article class="variant" style="--accent:#28d7ee">
+      return `<article class="variant" style="--accent:#ff2d78">
         <div class="variant-head">
           <div>
             <h3>${escapeHtml(action.title)}</h3>
@@ -2457,7 +3109,7 @@
       if (!$("#proofList") || !$("#selfLaunchList")) return;
       const proof = model.proof || [];
       $("#proofList").innerHTML = proof.length ? proof.map(item => `
-        <article class="variant" style="--accent:#28d7ee">
+        <article class="variant" style="--accent:#ff2d78">
           <div class="variant-head">
             <div>
               <h3>${escapeHtml(item.metric)}</h3>
@@ -2492,10 +3144,41 @@
       const campaign = activeCampaign();
       const link = model.handoff?.lastLink || handoffUrl();
       $("#handoffLinkInput").value = link;
+      const devices = model.deviceSessions || [];
+      const currentDeviceId = localStorage.getItem(DEVICE_ID_KEY);
+      const notice = $("#deviceSessionNotice");
+      if (notice) {
+        notice.textContent = model.currentUser
+          ? `Signed in as ${model.currentUser.name || model.currentUser.email}. This ${deviceKind()} is remembered as ${currentDeviceId || "a trusted device"}.`
+          : "Create or sign in to an account to remember this device.";
+      }
+      const remembered = $("#rememberedDeviceList");
+      if (remembered) {
+        remembered.innerHTML = devices.length ? devices.map(device => {
+          const isCurrent = device.deviceId === currentDeviceId;
+          const lastSeen = device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : "not seen yet";
+          return `
+            <article class="variant" style="--accent:${isCurrent ? "#93dd55" : "#ff2d78"}">
+              <div class="variant-head">
+                <div>
+                  <h3>${escapeHtml(device.name || device.kind || "Remembered device")}</h3>
+                  <p>${escapeHtml(device.kind || "device")} - last seen ${escapeHtml(lastSeen)}${device.screen ? ` - ${escapeHtml(device.screen)}` : ""}</p>
+                </div>
+                <span class="pill ${isCurrent ? "published" : "approved"}">${isCurrent ? "this device" : device.active ? "remembered" : "signed out"}</span>
+              </div>
+              <div class="tags">
+                <span class="tag">${escapeHtml(device.timeZone || "time zone unknown")}</span>
+                <span class="tag">${escapeHtml(device.language || "language unknown")}</span>
+                <span class="tag">${device.trusted ? "trusted" : "not trusted"}</span>
+              </div>
+            </article>
+          `;
+        }).join("") : `<div class="empty">No remembered devices yet. Create an account on this device first.</div>`;
+      }
       const flows = [
-        ["Phone capture", "Capture raw ideas, quick proof points, voice notes later, screenshots later, and approve small edits on the move.", "#28d7ee"],
+        ["Phone capture", "Capture raw ideas, quick proof points, voice notes later, screenshots later, and approve small edits on the move.", "#ff2d78"],
         ["Desktop strategy", "Use desktop for campaign planning, long-form editing, platform comparison, exports, and launch-room review.", "#93dd55"],
-        ["Shared workspace", "Future backend keeps profile, campaigns, approvals, proof ledger, and device sessions synced across both.", "#f6bd4a"],
+        ["Shared workspace", "The hosted backend now remembers account sessions and device presence. Campaign-level multi-user sync is the next layer.", "#f6bd4a"],
         ["Deep links", `Current campaign: ${campaign?.title || "none"}. Future links open this exact campaign and view on phone or desktop.`, "#ff386b"],
         ["Security", "Keep me logged in on trusted devices, but re-auth before publish, account changes, exports, or billing.", "#a88cff"]
       ];
@@ -2514,8 +3197,57 @@
 
     function renderIntegrations() {
       const readiness = model.integrations || defaultModel.integrations;
-      const statusFor = id => id === "native" ? readiness.publishingPath : readiness[id] || "Needed";
-      $("#integrationList").innerHTML = integrationStack.map(item => `
+      const serviceFor = id => backendService(id);
+      const statusFor = id => {
+        const service = serviceFor(id);
+        if (service?.ready) return "Connected in backend";
+        if (service?.configured) return "Credential ready";
+        return id === "native" ? readiness.publishingPath : readiness[id] || "Needed";
+      };
+      const security = metaState.securityAudit || null;
+      const securityMissing = [
+        ...(security?.auth?.missingEnv || []),
+        ...(security?.storage?.missingEnv || [])
+      ];
+      const observability = metaState.observabilityStatus || null;
+      const observabilityCard = observability ? `
+        <article class="variant" style="--accent:${observability.initialized ? "#93dd55" : "#f6bd4a"}">
+          <div class="variant-head">
+            <div>
+              <h3>Observability</h3>
+              <p>Sentry captures server and browser failures without collecting session tokens or default personal data.</p>
+            </div>
+            <span class="pill ${observability.initialized ? "published" : observability.configured ? "approved" : "draft"}">${observability.initialized ? "active" : observability.configured ? "configured" : "needs DSN"}</span>
+          </div>
+          <div class="tags">
+            <span class="tag">environment: ${escapeHtml(observability.environment || "unknown")}</span>
+            <span class="tag">traces: ${escapeHtml(String(observability.tracesSampleRate ?? 0))}</span>
+            <span class="tag">release: ${escapeHtml(observability.release || "pending deployment")}</span>
+            <span class="tag">GitHub: ${escapeHtml(observability.sourceMapping?.repository || "not connected")}</span>
+            <span class="tag">source context: ${observability.sourceMapping?.ready ? "active" : "needs setup"}</span>
+            <span class="tag">Supabase: monitored by server boundary</span>
+          </div>
+        </article>
+      ` : "";
+      const securityCard = security ? `
+        <article class="variant" style="--accent:${security.remainingGaps?.length ? "#f6bd4a" : "#93dd55"}">
+          <div class="variant-head">
+            <div>
+              <h3>Security posture</h3>
+              <p>Sessions, storage, and browser protections checked by the backend.</p>
+            </div>
+            <span class="pill ${security.remainingGaps?.length ? "approved" : "published"}">${security.remainingGaps?.length ? "needs attention" : "hardened"}</span>
+          </div>
+          <div class="tags">
+            <span class="tag">auth: ${escapeHtml(security.auth?.provider || "unknown")}</span>
+            <span class="tag">sessions: ${security.auth?.sessionHashesUseServerSecret ? "server-secret hashed" : "needs secret"}</span>
+            <span class="tag">storage: ${security.storage?.ready ? "ready" : "not ready"}</span>
+            <span class="tag">public users: ${security.auth?.publicUserListHidden ? "hidden" : "check"}</span>
+            ${securityMissing.length ? `<span class="tag">missing ${escapeHtml([...new Set(securityMissing)].join(", "))}</span>` : ""}
+          </div>
+        </article>
+      ` : "";
+      $("#integrationList").innerHTML = securityCard + observabilityCard + integrationStack.map(item => `
         <article class="variant" style="--accent:${item.accent}">
           <div class="variant-head">
             <div>
@@ -2527,6 +3259,8 @@
           <div class="tags">
             <span class="tag">${item.backend}</span>
             <span class="tag">${item.firstUse}</span>
+            ${serviceFor(item.id)?.missingEnv?.length ? `<span class="tag">missing ${escapeHtml(serviceFor(item.id).missingEnv.join(", "))}</span>` : ""}
+            ${item.endpoint ? `<span class="tag">${escapeHtml(item.endpoint)}</span>` : ""}
           </div>
         </article>
       `).join("");
@@ -2573,6 +3307,94 @@
         });
         const blockers = metaState.health?.blockers || metaState.metaConnection?.blockers || [];
         const nextActions = metaState.health?.nextActions || metaState.metaConnection?.nextActions || [];
+        const diagnostic = metaState.diagnostic || null;
+        const xAccount = metaState.xAccount || null;
+        const pinterestStatus = metaState.pinterestStatus || null;
+        const canvaStatus = metaState.canvaStatus || null;
+        const metaOAuthStatus = metaState.metaOAuthStatus || null;
+        const metaWhitelist = metaOAuthStatus?.blockedRedirectFix || null;
+        const evidenceHtml = `
+          <article class="variant" style="--accent:#93dd55">
+            <div class="variant-head">
+              <div>
+                <h3>Provider evidence</h3>
+                <p>Live provider facts Social Cues can use right now.</p>
+              </div>
+              <span class="pill approved">checked</span>
+            </div>
+            <div class="tags">
+              <span class="tag">Meta token: ${metaTokenHealthy() ? "verified" : "reconnect needed"}</span>
+              <span class="tag">Meta redirect: ${escapeHtml(metaOAuthStatus?.redirectUri || "not loaded")}</span>
+              <span class="tag">Meta user: ${escapeHtml(metaState.metaConnection?.userName || "not returned")}</span>
+              <span class="tag">Pages: ${escapeHtml(String(metaState.metaConnection?.pageCount ?? metaState.health?.assetSync?.pagesReturned ?? 0))}</span>
+              <span class="tag">Instagram assets: ${escapeHtml(String(metaState.metaConnection?.instagramCount ?? metaState.health?.assetSync?.instagramReturned ?? 0))}</span>
+              <span class="tag">X: ${xAccount?.connected ? escapeHtml(xAccount.handle || xAccount.name || "connected") : "not connected"}</span>
+              <span class="tag">Pinterest: ${pinterestStatus?.ready ? "ready" : pinterestStatus?.portalStatus || "pending"}</span>
+              <span class="tag">Canva: ${canvaStatus?.ready ? "ready" : canvaStatus?.portalStatus || "pending"}</span>
+            </div>
+          </article>
+        `;
+        const metaOAuthSetupHtml = metaWhitelist ? `
+          <article class="variant" style="--accent:#1877f2">
+            <div class="variant-head">
+              <div>
+                <h3>Meta OAuth whitelist</h3>
+                <p>Fix URL Blocked in the Meta developer dashboard with this exact value.</p>
+              </div>
+              <span class="pill ${metaOAuthStatus.secureOAuthReady ? "approved" : "revision"}">${metaOAuthStatus.secureOAuthReady ? "HTTPS ready" : "check URL"}</span>
+            </div>
+            <div class="stack">
+              <p><strong>${escapeHtml(metaWhitelist.field)}:</strong> ${escapeHtml(metaWhitelist.exactValue)}</p>
+              <p><strong>${escapeHtml(metaWhitelist.appDomainsField)}:</strong> ${escapeHtml(metaWhitelist.appDomainsValue)}</p>
+              ${(metaWhitelist.requiredToggles || []).map(item => `<p><strong>Required:</strong> ${escapeHtml(item)}</p>`).join("")}
+            </div>
+          </article>
+        ` : "";
+        const providerExpansionHtml = `
+          <article class="variant" style="--accent:#e60023">
+            <div class="variant-head">
+              <div>
+                <h3>Pinterest</h3>
+                <p>${escapeHtml(pinterestStatus?.allowedUse?.join(", ") || "Boards, Pins, analytics, and ads-read readiness.")}</p>
+              </div>
+              <span class="pill ${pinterestStatus?.ready ? "published" : pinterestStatus?.configured ? "approved" : "revision"}">${pinterestStatus?.ready ? "ready" : pinterestStatus?.portalStatus || "app pending"}</span>
+            </div>
+            <div class="tags">
+              <span class="tag">${escapeHtml(pinterestStatus?.redirectUri || "/api/oauth/pinterest/callback")}</span>
+              ${(pinterestStatus?.missingEnv || []).map(value => `<span class="tag">missing ${escapeHtml(value)}</span>`).join("")}
+              <span class="tag">connect: /api/oauth/pinterest/start</span>
+            </div>
+          </article>
+          <article class="variant" style="--accent:#00c4cc">
+            <div class="variant-head">
+              <div>
+                <h3>Canva Connect</h3>
+                <p>${escapeHtml(canvaStatus?.allowedUse?.join(", ") || "Design assets, imports, exports, comments, folders, and creative handoff.")}</p>
+              </div>
+              <span class="pill ${canvaStatus?.ready ? "published" : canvaStatus?.configured ? "approved" : "revision"}">${canvaStatus?.ready ? "ready" : canvaStatus?.portalStatus || "MFA needed"}</span>
+            </div>
+            <div class="tags">
+              <span class="tag">${escapeHtml(canvaStatus?.redirectUri || "/api/oauth/canva/callback")}</span>
+              ${(canvaStatus?.missingEnv || []).map(value => `<span class="tag">missing ${escapeHtml(value)}</span>`).join("")}
+              <span class="tag">connect: /api/oauth/canva/start</span>
+            </div>
+          </article>
+        `;
+        const diagnosticHtml = diagnostic ? `
+          <article class="variant" style="--accent:#ff2d78">
+            <div class="variant-head">
+              <div>
+                <h3>Meta diagnostic</h3>
+                <p>${escapeHtml(diagnostic.snapshot?.reason || diagnostic.mode || "diagnostic")}</p>
+              </div>
+              <span class="pill ${diagnostic.snapshot?.pagesReturned ? "approved" : "revision"}">${escapeHtml(String(diagnostic.snapshot?.pagesReturned || 0))} Pages</span>
+            </div>
+            <div class="stack">
+              ${(diagnostic.facts || []).slice(0, 5).map(item => `<p>${escapeHtml(item)}</p>`).join("")}
+              ${(diagnostic.actions || []).slice(0, 4).map(item => `<p><strong>Next:</strong> ${escapeHtml(item)}</p>`).join("")}
+            </div>
+          </article>
+        ` : "";
         const blockerHtml = blockers.length ? `
           <article class="variant" style="--accent:#ff386b">
             <div class="variant-head">
@@ -2586,7 +3408,7 @@
           </article>
         ` : "";
         const nextActionHtml = nextActions.length ? `
-          <article class="variant" style="--accent:#28d7ee">
+          <article class="variant" style="--accent:#ff2d78">
             <div class="variant-head">
               <div>
                 <h3>Meta next actions</h3>
@@ -2597,7 +3419,7 @@
             <div class="stack">${nextActions.map(item => `<p>${escapeHtml(item)}</p>`).join("")}</div>
           </article>
         ` : "";
-        capList.innerHTML = blockerHtml + nextActionHtml + (capabilities.length ? capabilities.map(item => {
+        capList.innerHTML = evidenceHtml + metaOAuthSetupHtml + providerExpansionHtml + diagnosticHtml + blockerHtml + nextActionHtml + (capabilities.length ? capabilities.map(item => {
           const missing = [...(item.missingScopes || []), ...(item.missingEnv || [])];
           const pill = item.ready ? "published" : missing.length ? "revision" : "draft";
           return `<article class="variant" style="--accent:${item.ready ? "#93dd55" : "#f6bd4a"}">
@@ -2640,11 +3462,13 @@
 
     function renderBilling() {
       const billing = model.billing || defaultModel.billing;
-      $("#billingStatusInput").value = billing.status || "Not configured";
+      const stripeService = backendService("stripe");
+      const status = stripeService?.ready ? "Stripe Checkout ready" : billing.status || "Not configured";
+      $("#billingStatusInput").value = status;
       $("#selectedPlanInput").value = billing.selectedPlan || "Founder Audit - $99";
       $("#paymentLinkInput").value = billing.paymentLink || "";
       $("#planList").innerHTML = (billing.offers || defaultModel.billing.offers).map((offer, index) => `
-        <article class="variant" style="--accent:${index % 2 ? "#ff386b" : "#28d7ee"}">
+        <article class="variant" style="--accent:${index % 2 ? "#ff386b" : "#ff2d78"}">
           <div class="variant-head">
             <div>
               <h3>${escapeHtml(offer.name)} - ${escapeHtml(offer.price)}</h3>
@@ -2666,15 +3490,41 @@
       saveModel("Saved billing setup.");
     }
 
-    function createCheckout() {
+    async function createCheckout() {
       const billing = model.billing || defaultModel.billing;
       const selectedPlan = $("#selectedPlanInput").value || billing.selectedPlan;
       const paymentLink = clean($("#paymentLinkInput").value);
-      if (paymentLink) {
-        window.open(paymentLink, "_blank");
-        return;
+      const button = $("#createCheckout");
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = "Creating...";
+      try {
+        const response = await authedFetch("/api/billing/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ selectedPlan, paymentLink })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.message || result.error || "Checkout is not ready yet.");
+        model.billing = {
+          ...(model.billing || defaultModel.billing),
+          selectedPlan,
+          status: result.mode === "stripe-checkout" ? "Stripe Checkout ready" : result.mode === "payment-link" ? "Payment Link ready" : "Not configured",
+          paymentLink: result.mode === "payment-link" ? result.url || paymentLink : paymentLink
+        };
+        saveModel("Updated billing checkout status.");
+        renderBilling();
+        if (result.url) {
+          window.open(result.url, "_blank");
+        } else {
+          alert(result.message || "Stripe is not fully configured yet. Check backend Stripe keys and price IDs.");
+        }
+      } catch (error) {
+        alert(`Checkout could not be created yet: ${error.message}`);
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
       }
-      alert(`Stripe is not connected yet. Fast path: create a Stripe Payment Link for ${selectedPlan}, paste it here, then customers can pay from Billing.`);
     }
 
     function openCheckout() {
@@ -2694,29 +3544,40 @@
         if (!isRealConnectedAccount(account) && realPlatforms.has(account.platform)) return false;
         return true;
       });
-      const identityAccounts = displayAccounts.filter(account => account.platform === "meta" || (account.platform === "x" && isRealConnectedAccount(account)));
+      const identityAccounts = displayAccounts.filter(account =>
+        account.platform === "meta"
+        || (["x", "tiktok"].includes(account.platform) && isRealConnectedAccount(account))
+      );
       const managedAssets = displayAccounts.filter(account => account.platform !== "meta" && isRealConnectedAccount(account) && !identityAccounts.includes(account));
       const setupAccounts = displayAccounts.filter(account => !isRealConnectedAccount(account) && account.platform !== "meta");
       const card = (account, role = "") => {
         const platform = platformById(account.platform);
-        const accent = account.platform === "meta" ? "#28d7ee" : platform?.accent || "#f6bd4a";
+        const accent = account.platform === "meta" ? "#ff2d78" : platform?.accent || "#f6bd4a";
         const connected = isRealConnectedAccount(account);
         const pending = ["oauth code received", "oauth pending secret"].includes(String(account.status || "").toLowerCase());
+        const tokenState = hasStoredToken(account) ? (connected ? "token stored" : "stale token") : "no token";
         const note = account.loginNote || account.connectionEvidence || (pending ? "OAuth started, but token exchange is not complete." : "Ready for secure OAuth connection");
-        const canConnect = SERVER_MODE ? ["facebook", "instagram", "threads", "x"].includes(account.platform) : false;
+        const canConnect = SERVER_MODE ? ["tiktok", "youtube", "facebook", "instagram", "threads", "x", "pinterest", "canva", "etsy", "shopify"].includes(account.platform) : false;
+        const active = account.disabled !== true;
+        const accountLabel = account.platform === "x" && connected
+          ? "X"
+          : account.platform === "tiktok" && connected
+            ? "TikTok"
+            : (account.name || account.displayName || account.handle || platform?.name || "Account");
+        const connectedIdentity = account.displayName || account.handle || account.name || platform?.name || "Account";
         return `<article class="variant" style="--accent:${accent}">
           <div class="variant-head">
             <div>
-              <h3>${escapeHtml(account.name)}</h3>
-              <p>${role ? `${escapeHtml(role)} - ` : ""}${connected ? `${escapeHtml(account.handle || account.name)} - connected ${account.connectedAt ? new Date(account.connectedAt).toLocaleString() : ""}` : escapeHtml(note)}</p>
+              <h3>${escapeHtml(accountLabel)}</h3>
+              <p>${role ? `${escapeHtml(role)} - ` : ""}${connected ? `${escapeHtml(connectedIdentity)} - connected ${account.connectedAt ? new Date(account.connectedAt).toLocaleString() : ""}` : escapeHtml(note)}</p>
             </div>
             <span class="pill ${connected ? "published" : pending ? "approved" : "draft"}">${connected ? "connected" : pending ? "pending" : "not connected"}</span>
           </div>
           <div class="variant-tools">
             <button onclick="connectAccount('${account.platform}')" ${canConnect ? "" : "disabled"}>${connected ? "Reconnect" : "Connect"}</button>
-            <button onclick="disconnectAccount('${account.platform}')" ${connected ? "" : "disabled"}>Disconnect</button>
+            <button class="toggle-button" aria-pressed="${active ? "true" : "false"}" onclick="toggleAccount('${account.platform}')">${active ? "Active" : "Off"}</button>
             <button disabled>${canConnect ? "OAuth route" : "provider pending"}</button>
-            <button disabled>${hasStoredToken(account) ? "token stored" : "no token"}</button>
+            <button disabled>${tokenState}</button>
           </div>
         </article>`;
       };
@@ -2725,7 +3586,7 @@
         ${body.length ? body.join("") : `<div class="empty">${escapeHtml(empty)}</div>`}
       `;
       $("#socialAccountList").innerHTML = [
-        section("Login identities", identityAccounts.map(account => card(account, account.platform === "meta" ? "Meta user identity" : "X user identity")), "No provider identities connected yet."),
+        section("Login identities", identityAccounts.map(account => card(account, account.platform === "meta" ? "Meta user identity" : account.platform === "tiktok" ? "TikTok user identity" : "X user identity")), "No provider identities connected yet."),
         section("Managed publishing assets", managedAssets.map(account => card(account, account.platform === "facebook" ? "Facebook Page asset" : "Managed social asset")), "No managed Page, professional account, or channel asset connected yet."),
         section("Setup needed", setupAccounts.map(account => card(account)), "No remaining provider setup rows.")
       ].join("");
@@ -2748,26 +3609,113 @@
 
     function providerReadiness(platform) {
       const account = connectedAccountForPlatform(platform.id);
-      if (platform.id === "x") {
-        if (account && isRealConnectedAccount(account)) {
+      if (platform.id === "tiktok") {
+        const tiktokAccount = metaState.tiktokAccount || account;
+        if (tiktokAccount && (tiktokAccount.connected || isRealConnectedAccount(tiktokAccount))) {
           return {
             label: "connected",
             pill: "published",
-            detail: `${account.handle || account.name || "X account"} is authenticated. Draft and dry-run posting can use the stored token.`,
-            tags: ["OAuth 2.0", "token stored", ...(account.scopes || []).slice(0, 3)]
+            detail: `${tiktokAccount.displayName || tiktokAccount.handle || "TikTok account"} is authenticated. Social Cues can read approved profile fields and prepare upload/direct-post jobs when scopes are approved.`,
+            tags: ["Login Kit", "Content Posting API", ...(tiktokAccount.scopes || []).slice(0, 3)],
+            connectRoute: "/api/oauth/tiktok/start"
           };
         }
         return {
-          label: model.integrations?.x?.includes("connected") ? "verify token" : "needs OAuth",
-          pill: "draft",
-          detail: "Connect X from Accounts so Social Cues can store the user token and enable approved posting.",
-          tags: ["OAuth route", "/api/oauth/x/start"]
+          label: metaState.tiktokStatus?.configured ? "needs OAuth" : "needs config",
+          pill: metaState.tiktokStatus?.configured ? "approved" : "draft",
+          detail: metaState.tiktokStatus?.configured
+            ? (metaState.tiktokStatus?.mode === "sandbox"
+              ? "TikTok is in sandbox mode. The logging-in TikTok account must be added as a sandbox target user before authorization will complete."
+              : "TikTok production OAuth is configured and the Social Cues domain is verified. If TikTok still reports client_key after login, finish Login Kit, user.info.basic, and Live/review setup in the production app.")
+            : "Add TikTok client key/secret, then configure Login Kit with the exact callback URL.",
+          tags: ["Login Kit", `mode: ${metaState.tiktokStatus?.mode || "production"}`, `domain: ${metaState.tiktokStatus?.domainVerification?.status || "verified"}`, `active scopes: ${(metaState.tiktokStatus?.scopes || ["user.info.basic"]).join(",")}`, `future: ${(metaState.tiktokStatus?.futureScopes || ["video.upload", "video.publish"]).slice(-2).join(",")}`, metaState.tiktokStatus?.redirectUri || "/api/oauth/tiktok/start"],
+          connectRoute: "/api/oauth/tiktok/start"
+        };
+      }
+
+      if (platform.id === "youtube") {
+        const youtubeAccount = metaState.youtubeAccount || account;
+        const googleReady = (metaState.googleSuite?.apis || []).filter(api => api.ready).length;
+        const googleTotal = (metaState.googleSuite?.apis || []).length || 0;
+        if (youtubeAccount && (youtubeAccount.connected || isRealConnectedAccount(youtubeAccount))) {
+          return {
+            label: "connected",
+            pill: "published",
+            detail: `${youtubeAccount.handle || youtubeAccount.name || "YouTube channel"} is authenticated. Uploads are prepared private-first; public automation may require Google API compliance audit approval.`,
+            tags: ["YouTube Data API", "Analytics API", "private-first uploads", googleTotal ? `Google suite ${googleReady}/${googleTotal}` : "Google suite"],
+            connectRoute: "/api/oauth/youtube/start"
+          };
+        }
+        return {
+          label: metaState.youtubeStatus?.configured ? "needs OAuth" : "needs config",
+          pill: metaState.youtubeStatus?.configured ? "approved" : "draft",
+          detail: metaState.youtubeStatus?.configured
+            ? "Connect YouTube from Accounts so Social Cues can store the channel token and read analytics."
+            : "Enable YouTube Data API v3 and YouTube Analytics API in Google Cloud, then add the Google OAuth client credentials.",
+          tags: ["Data API v3", "Business Profile next", "Google Ads later", metaState.youtubeStatus?.redirectUri || "/api/oauth/youtube/start"],
+          connectRoute: "/api/oauth/youtube/start"
+        };
+      }
+
+      if (platform.id === "google_growth") {
+        const apis = metaState.googleSuite?.apis || [];
+        const ready = apis.filter(api => api.ready).length;
+        return {
+          label: ready ? `${ready}/${apis.length || 1} ready` : "needs config",
+          pill: ready ? "approved" : "draft",
+          detail: "Google Growth Suite is the combined Google lane for YouTube, Business Profile, Ads, Search Console, Analytics, and Drive-backed launch/profile kits.",
+          tags: apis.length ? apis.slice(0, 5).map(api => `${api.name}: ${api.ready ? "ready" : "missing"}`) : ["Google Cloud project", "OAuth client", "API library"],
+          statusRoute: "/api/google/growth-suite",
+          connectRoute: "/api/oauth/youtube/start"
+        };
+      }
+
+      if (platform.id === "google_business") {
+        const businessReady = Boolean(metaState.googleBusinessStatus?.ready);
+        return {
+          label: businessReady ? "ready" : "needs config",
+          pill: businessReady ? "approved" : "draft",
+          detail: "Google Business Profile is the Google local/profile connector for posts, reviews, offers, and location media. It uses the Google project/OAuth lane, not Google+.",
+          tags: ["business.manage", "profile posts", "reviews", metaState.googleBusinessStatus?.note || "Google+ is not a current social app"],
+          statusRoute: "/api/google/business/readiness",
+          connectRoute: "/api/oauth/youtube/start"
+        };
+      }
+
+      if (platform.id === "x") {
+        const xAccount = metaState.xAccount || account;
+        if (xAccount && (xAccount.connected || isRealConnectedAccount(xAccount))) {
+          const xLabel = xAccount.handle || xAccount.displayName || xAccount.name || "X account";
+          return {
+            label: "connected",
+            pill: "published",
+            detail: `${xLabel} is authenticated. Draft and dry-run posting can use the stored token.`,
+            tags: ["OAuth 2.0", "token stored", ...(xAccount.scopes || []).slice(0, 3)],
+            connectRoute: "/api/oauth/x/start"
+          };
+        }
+        return {
+          label: metaState.xStatus?.refreshError ? "needs reconnect" : metaState.xStatus?.configured ? "needs OAuth" : "needs config",
+          pill: metaState.xStatus?.refreshError ? "revision" : "draft",
+          detail: metaState.xStatus?.refreshError
+            ? `Reconnect X from Accounts. Social Cues has an old token record, but cannot refresh it: ${metaState.xStatus.refreshError}`
+            : metaState.xStatus?.configured ? "Connect X from Accounts so Social Cues can store the user token and enable approved posting." : "Add X client credentials before OAuth can start.",
+          tags: ["OAuth route", metaState.xStatus?.redirectUri || "/api/oauth/x/start"],
+          connectRoute: "/api/oauth/x/start"
         };
       }
 
       if (platform.id === "facebook") {
         const publish = capabilityById("facebook_pages_publish");
         const insights = capabilityById("facebook_pages_insights");
+        if (!metaTokenHealthy()) {
+          return {
+            label: "needs reconnect",
+            pill: "revision",
+            detail: "Meta returned a stored identity, but the current token is not usable. Reconnect Facebook before Social Cues treats Page analytics or publishing as live.",
+            tags: ["Meta OAuth", "token refresh", "Page assets after reconnect"]
+          };
+        }
         if (account && isRealConnectedAccount(account)) {
           const publishReady = Boolean(publish?.ready);
           const insightsReady = !insights || Boolean(insights.ready);
@@ -2781,16 +3729,18 @@
               account.handle || account.providerAccountId || "Page asset",
               insightsReady ? "analytics ready" : "analytics gated",
               publishReady ? "publishing ready" : "pages_manage_posts needed"
-            ]
+            ],
+            connectRoute: "/api/oauth/meta/start?platform=facebook"
           };
         }
         return {
-          label: metaState.metaConnection?.tokenStored ? "needs Page" : "needs login",
+          label: metaTokenHealthy() ? "needs Page" : "needs reconnect",
           pill: "revision",
-          detail: metaState.metaConnection?.tokenStored
+          detail: metaTokenHealthy()
             ? "Meta login is stored, but no managed Facebook Page asset is available to the app yet."
-            : "Connect Meta and select a Page so Social Cues can discover managed assets.",
-          tags: ["Meta Pages API", "Page asset required"]
+            : "Reconnect Meta so Social Cues can refresh the user token before discovering managed assets.",
+          tags: ["Meta Pages API", "Page asset required"],
+          connectRoute: "/api/oauth/meta/start?platform=facebook"
         };
       }
 
@@ -2800,7 +3750,8 @@
             label: "connected",
             pill: "published",
             detail: `${account.name || "Instagram"} is connected as a professional asset through Meta.`,
-            tags: ["Meta Instagram API", "professional account", "token stored"]
+            tags: ["Meta Instagram API", "professional account", "token stored"],
+            connectRoute: "/api/oauth/meta/start?platform=instagram"
           };
         }
         const facebook = connectedAccountForPlatform("facebook");
@@ -2810,7 +3761,8 @@
           detail: facebook
             ? "Link an Instagram professional account to the connected Facebook Page, then reauthorize Instagram permissions."
             : "Meta must return a Page before Instagram business assets can be discovered.",
-          tags: ["instagram_basic", "instagram_content_publish"]
+          tags: ["instagram_basic", "instagram_content_publish"],
+          connectRoute: "/api/oauth/meta/start?platform=instagram"
         };
       }
 
@@ -2820,7 +3772,8 @@
             label: "connected",
             pill: "published",
             detail: `${account.handle || account.name || "Threads"} is authenticated for Threads-specific work.`,
-            tags: ["Threads API", "token stored"]
+            tags: ["Threads API", "token stored"],
+            connectRoute: "/api/oauth/threads/start"
           };
         }
         const threadsCaps = metaCapabilitiesForLane("threads");
@@ -2828,7 +3781,58 @@
           label: threadsCaps.some(item => item.ready) ? "partly ready" : "needs OAuth",
           pill: "draft",
           detail: "Threads still needs its own account authorization and approved Threads permissions before it can publish or report insights.",
-          tags: ["threads_basic", "threads_content_publish"]
+          tags: ["threads_basic", "threads_content_publish"],
+          connectRoute: "/api/oauth/threads/start"
+        };
+      }
+
+      if (platform.id === "shopify") {
+        const shopifyAccount = account;
+        if (shopifyAccount && isRealConnectedAccount(shopifyAccount)) {
+          return {
+            label: "connected",
+            pill: "published",
+            detail: `${shopifyAccount.handle || shopifyAccount.name || "Shopify store"} is connected. Social Cues can attach product/offer context and marketing-event signal where scopes allow.`,
+            tags: ["Admin API", "token stored", ...(shopifyAccount.scopes || []).slice(0, 3)],
+            connectRoute: "/api/oauth/shopify/start",
+            statusRoute: "/api/shopify/readiness"
+          };
+        }
+        const shopifyStatus = metaState.shopifyStatus || {};
+        return {
+          label: shopifyStatus.configured ? "needs store" : "needs config",
+          pill: shopifyStatus.configured ? "approved" : "draft",
+          detail: shopifyStatus.configured
+            ? "Shopify Partner app credentials are present. Add/select a test store domain, then connect the store."
+            : "Create the Shopify Partner app credentials and add the client id/secret before store OAuth can start.",
+          tags: ["Partner app", ...(shopifyStatus.missingEnv || []).map(name => `missing ${name}`), shopifyStatus.redirectUri || "/api/oauth/shopify/callback"],
+          connectRoute: "/api/oauth/shopify/start",
+          statusRoute: "/api/shopify/readiness"
+        };
+      }
+
+      if (platform.id === "etsy") {
+        const etsyAccount = account;
+        if (etsyAccount && isRealConnectedAccount(etsyAccount)) {
+          return {
+            label: "connected",
+            pill: "published",
+            detail: `${etsyAccount.handle || etsyAccount.name || "Etsy shop"} is connected. Social Cues can read shop/listing context for marketplace campaigns.`,
+            tags: ["Open API", "token stored", ...(etsyAccount.scopes || []).slice(0, 3)],
+            connectRoute: "/api/oauth/etsy/start",
+            statusRoute: "/api/etsy/readiness"
+          };
+        }
+        const etsyStatus = metaState.etsyStatus || {};
+        return {
+          label: etsyStatus.configured ? "needs OAuth" : etsyStatus.clientIdPresent ? "needs secret" : "needs config",
+          pill: etsyStatus.configured ? "approved" : "draft",
+          detail: etsyStatus.configured
+            ? "Etsy credentials are present. Connect an Etsy user/shop so Social Cues can store shop/listing evidence."
+            : "Etsy app/keystring is visible, but the shared secret and app approval still gate live OAuth.",
+          tags: ["Open API", ...(etsyStatus.missingEnv || []).map(name => `missing ${name}`), etsyStatus.redirectUri || "/api/oauth/etsy/callback"],
+          connectRoute: "/api/oauth/etsy/start",
+          statusRoute: "/api/etsy/readiness"
         };
       }
 
@@ -2837,7 +3841,8 @@
           label: "connected",
           pill: "published",
           detail: `${account.handle || account.name || platform.name} is connected and has stored provider evidence.`,
-          tags: ["token stored", account.providerAccountId || "provider account"]
+          tags: ["token stored", account.providerAccountId || "provider account"],
+          connectRoute: `/api/oauth/${platform.id}/start`
         };
       }
 
@@ -2845,7 +3850,8 @@
         label: "planned",
         pill: "draft",
         detail: `${platform.connector} is not wired to a live OAuth/token flow yet.`,
-        tags: [platform.fit, "no live token"]
+        tags: [platform.fit, "no live token"],
+        statusRoute: backendService(platform.id)?.firstUse || ""
       };
     }
 
@@ -2867,9 +3873,32 @@
             <span class="tag">${escapeHtml(p.connector)}</span>
             ${readiness.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
           </div>
+          <div class="variant-tools">
+            ${readiness.connectRoute ? `<button class="connector-route" data-route="${escapeHtml(readiness.connectRoute)}">Connect</button>` : ""}
+            ${readiness.statusRoute ? `<button class="connector-route" data-route="${escapeHtml(readiness.statusRoute)}">Check setup</button>` : ""}
+          </div>
         </div>
       `;
       }).join("");
+      $$("#connectorList .connector-route").forEach(button => {
+        button.addEventListener("click", async () => {
+          const route = button.dataset.route || "";
+          if (!route.startsWith("/")) return;
+          if (!route.includes("/oauth/")) {
+            try {
+              const response = await authedFetch(route);
+              const data = await response.json().catch(() => ({}));
+              const missing = [...(data.missingEnv || []), ...(data.optionalMissingEnv || [])];
+              const status = data.ready ? "ready" : data.configured ? "configured" : "needs setup";
+              alert(`${route}\n${status}${missing.length ? `\nMissing: ${missing.join(", ")}` : ""}`);
+            } catch (error) {
+              alert(error.message || `Could not check ${route}.`);
+            }
+            return;
+          }
+          window.location.assign(route);
+        });
+      });
     }
 
     function escapeHtml(value) {
@@ -2912,6 +3941,7 @@
     }
 
     $("#newCampaign").addEventListener("click", createCampaign);
+    $("#createAccountButton").addEventListener("click", createAccount);
     $("#loginButton").addEventListener("click", loginUser);
     $("#completeOnboarding").addEventListener("click", saveOnboarding);
     $("#logoutButton").addEventListener("click", logoutUser);
@@ -2953,8 +3983,10 @@
     $("#importModelButton").addEventListener("click", () => $("#importModelInput").click());
     $("#importModelInput").addEventListener("change", e => e.target.files[0] && importModel(e.target.files[0]));
     $("#resetAll").addEventListener("click", () => {
-      if (!confirm("Reset the local Social Cues Alpha model? Export first if you want to keep it.")) return;
+      if (!confirm("Reset the local Social Cues model? Export first if you want to keep it.")) return;
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(SESSION_TOKEN_KEY);
+      localStorage.removeItem(DEVICE_ID_KEY);
       model = clone(defaultModel);
       saveModel("Reset local model.");
     });
@@ -2974,10 +4006,19 @@
     window.setActionStatus = setActionStatus;
     window.connectAccount = connectAccount;
     window.disconnectAccount = disconnectAccount;
+    window.toggleAccount = toggleAccount;
     window.generateMedia = generateMedia;
     window.attachMedia = attachMedia;
+    window.planMediaEdit = planMediaEdit;
 
-    if (!localStorage.getItem(STORAGE_KEY)) {
+    async function bootApp() {
+      const restored = await restoreSession();
+      if (SERVER_MODE && (restored || localStorage.getItem(SESSION_TOKEN_KEY))) await syncModelFromServer("Synced account changes from server.");
+      await refreshMetaState();
+      setInterval(() => heartbeatDevice(), 60_000);
+    }
+
+    if (!localStorage.getItem(STORAGE_KEY) && !localStorage.getItem(LEGACY_STORAGE_KEY)) {
       const first = defaultModel.campaigns[0];
       first.variants = platforms.map(platform => ({
         id: uid(platform.id),
@@ -2994,14 +4035,14 @@
       }));
       model = clone(defaultModel);
       model.campaigns[0] = first;
-      saveModel("Initialized Social Cues alpha model.");
+      saveModel("Initialized Social Cues model.");
     } else {
       render();
     }
-    syncModelFromServer("Synced account changes from server.").then(() => refreshMetaState());
+    bootApp();
 
     if ("serviceWorker" in navigator && SERVER_MODE) {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
+      navigator.serviceWorker.register("/sw.js").then(registration => registration.update()).catch(() => {});
     }
   </script>
 </body>

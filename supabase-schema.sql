@@ -1,4 +1,4 @@
--- Social Cues Supabase starter schema
+﻿-- Social Cues Supabase starter schema
 -- Run this in the Supabase SQL editor for the alpha backend.
 -- Keep service-role keys on the server only.
 
@@ -15,6 +15,17 @@ create table if not exists public.workspaces (
   owner_user_id uuid,
   name text not null,
   plan text not null default 'founder_alpha',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Per-workspace model snapshots are the migration bridge away from the legacy
+-- app_state.primary JSON document. The server can mirror isolated workspace
+-- state here while feature tables are adopted endpoint by endpoint.
+create table if not exists public.workspace_models (
+  workspace_id uuid primary key references public.workspaces(id) on delete cascade,
+  owner_user_id uuid not null,
+  model jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -120,7 +131,23 @@ create table if not exists public.billing_customers (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.billing_entitlements (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  user_id uuid,
+  source text not null default 'unknown',
+  access text not null default 'unpaid',
+  status text not null default 'inactive',
+  promo_code text,
+  stripe_customer_id text,
+  stripe_subscription_id text,
+  current_period_end timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table public.app_state enable row level security;
+alter table public.workspace_models enable row level security;
 alter table public.workspaces enable row level security;
 alter table public.profiles enable row level security;
 alter table public.social_accounts enable row level security;
@@ -130,95 +157,193 @@ alter table public.scheduled_posts enable row level security;
 alter table public.media_assets enable row level security;
 alter table public.action_items enable row level security;
 alter table public.billing_customers enable row level security;
+alter table public.billing_entitlements enable row level security;
 
 create policy "profiles can read own profile"
   on public.profiles for select
-  using (id = auth.uid());
+  to authenticated
+  using (id = (select auth.uid()));
 
 create policy "profiles can update own profile"
   on public.profiles for update
-  using (id = auth.uid())
-  with check (id = auth.uid());
+  to authenticated
+  using (id = (select auth.uid()))
+  with check (id = (select auth.uid()));
+
+create or replace function public.social_cues_has_active_entitlement(target_workspace_id uuid, target_user_id uuid)
+returns boolean
+language sql
+stable
+security invoker
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.billing_entitlements be
+    where be.workspace_id = target_workspace_id
+      and (be.user_id is null or be.user_id = target_user_id)
+      and be.status = 'active'
+      and coalesce(be.access, 'unpaid') <> 'unpaid'
+      and (be.current_period_end is null or be.current_period_end > now())
+  );
+$$;
+
+revoke all on function public.social_cues_has_active_entitlement(uuid, uuid) from public;
+grant execute on function public.social_cues_has_active_entitlement(uuid, uuid) to authenticated;
+
+create policy "users can read own workspace model"
+  on public.workspace_models for select
+  to authenticated
+  using ((select auth.uid()) = owner_user_id and public.social_cues_has_active_entitlement(workspace_id, (select auth.uid())));
+
+create policy "users can insert own workspace model"
+  on public.workspace_models for insert
+  to authenticated
+  with check ((select auth.uid()) = owner_user_id and public.social_cues_has_active_entitlement(workspace_id, (select auth.uid())));
+
+create policy "users can update own workspace model"
+  on public.workspace_models for update
+  to authenticated
+  using ((select auth.uid()) = owner_user_id and public.social_cues_has_active_entitlement(workspace_id, (select auth.uid())))
+  with check ((select auth.uid()) = owner_user_id and public.social_cues_has_active_entitlement(workspace_id, (select auth.uid())));
 
 create policy "workspace members can read workspace"
   on public.workspaces for select
+  to authenticated
   using (
     exists (
       select 1 from public.profiles
       where profiles.workspace_id = workspaces.id
-      and profiles.id = auth.uid()
+      and profiles.id = (select auth.uid())
     )
+    and public.social_cues_has_active_entitlement(workspaces.id, (select auth.uid()))
   );
 
 create policy "workspace members can read social accounts"
   on public.social_accounts for select
+  to authenticated
   using (
     exists (
       select 1 from public.profiles
       where profiles.workspace_id = social_accounts.workspace_id
-      and profiles.id = auth.uid()
+      and profiles.id = (select auth.uid())
     )
+    and public.social_cues_has_active_entitlement(social_accounts.workspace_id, (select auth.uid()))
   );
 
 create policy "workspace members can read campaigns"
   on public.campaigns for select
+  to authenticated
   using (
     exists (
       select 1 from public.profiles
       where profiles.workspace_id = campaigns.workspace_id
-      and profiles.id = auth.uid()
+      and profiles.id = (select auth.uid())
     )
+    and public.social_cues_has_active_entitlement(campaigns.workspace_id, (select auth.uid()))
   );
 
 create policy "workspace members can read variants"
   on public.content_variants for select
+  to authenticated
   using (
     exists (
       select 1
       from public.campaigns
       join public.profiles on profiles.workspace_id = campaigns.workspace_id
       where campaigns.id = content_variants.campaign_id
-      and profiles.id = auth.uid()
+      and profiles.id = (select auth.uid())
+      and public.social_cues_has_active_entitlement(campaigns.workspace_id, (select auth.uid()))
     )
   );
 
 create policy "workspace members can read scheduled posts"
   on public.scheduled_posts for select
+  to authenticated
   using (
     exists (
       select 1 from public.profiles
       where profiles.workspace_id = scheduled_posts.workspace_id
-      and profiles.id = auth.uid()
+      and profiles.id = (select auth.uid())
     )
+    and public.social_cues_has_active_entitlement(scheduled_posts.workspace_id, (select auth.uid()))
   );
 
 create policy "workspace members can read media"
   on public.media_assets for select
+  to authenticated
   using (
     exists (
       select 1 from public.profiles
       where profiles.workspace_id = media_assets.workspace_id
-      and profiles.id = auth.uid()
+      and profiles.id = (select auth.uid())
     )
+    and public.social_cues_has_active_entitlement(media_assets.workspace_id, (select auth.uid()))
+  );
+
+create policy "workspace members can create media"
+  on public.media_assets for insert
+  to authenticated
+  with check (
+    exists (
+      select 1 from public.profiles
+      where profiles.workspace_id = media_assets.workspace_id
+      and profiles.id = (select auth.uid())
+    )
+    and public.social_cues_has_active_entitlement(media_assets.workspace_id, (select auth.uid()))
+  );
+
+create policy "workspace members can update media"
+  on public.media_assets for update
+  to authenticated
+  using (
+    exists (
+      select 1 from public.profiles
+      where profiles.workspace_id = media_assets.workspace_id
+      and profiles.id = (select auth.uid())
+    )
+    and public.social_cues_has_active_entitlement(media_assets.workspace_id, (select auth.uid()))
+  )
+  with check (
+    exists (
+      select 1 from public.profiles
+      where profiles.workspace_id = media_assets.workspace_id
+      and profiles.id = (select auth.uid())
+    )
+    and public.social_cues_has_active_entitlement(media_assets.workspace_id, (select auth.uid()))
   );
 
 create policy "workspace members can read actions"
   on public.action_items for select
+  to authenticated
   using (
     exists (
       select 1 from public.profiles
       where profiles.workspace_id = action_items.workspace_id
-      and profiles.id = auth.uid()
+      and profiles.id = (select auth.uid())
     )
+    and public.social_cues_has_active_entitlement(action_items.workspace_id, (select auth.uid()))
   );
 
 create policy "workspace members can read billing"
   on public.billing_customers for select
+  to authenticated
   using (
     exists (
       select 1 from public.profiles
       where profiles.workspace_id = billing_customers.workspace_id
-      and profiles.id = auth.uid()
+      and profiles.id = (select auth.uid())
+    )
+  );
+
+create policy "members can read billing entitlements"
+  on public.billing_entitlements for select
+  to authenticated
+  using (
+    exists (
+      select 1 from public.profiles
+      where profiles.workspace_id = billing_entitlements.workspace_id
+      and profiles.id = (select auth.uid())
     )
   );
 
@@ -229,3 +354,46 @@ create index if not exists scheduled_posts_workspace_idx on public.scheduled_pos
 create index if not exists scheduled_posts_due_idx on public.scheduled_posts(status, scheduled_for);
 create index if not exists media_workspace_idx on public.media_assets(workspace_id);
 create index if not exists actions_workspace_idx on public.action_items(workspace_id);
+
+-- Supabase Storage bucket for user-uploaded raw media and generated derivatives.
+-- Object paths should start with the authenticated user's UUID when uploaded directly from the browser.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'social-cues-media',
+  'social-cues-media',
+  false,
+  262144000,
+  array['image/png','image/jpeg','image/webp','image/gif','video/mp4','video/quicktime','video/webm','audio/mpeg','audio/mp4','audio/wav','audio/webm']
+)
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+create policy "users can read own media objects"
+  on storage.objects for select
+  to authenticated
+  using (
+    bucket_id = 'social-cues-media'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
+
+create policy "users can insert own media objects"
+  on storage.objects for insert
+  to authenticated
+  with check (
+    bucket_id = 'social-cues-media'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
+
+create policy "users can update own media objects"
+  on storage.objects for update
+  to authenticated
+  using (
+    bucket_id = 'social-cues-media'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  )
+  with check (
+    bucket_id = 'social-cues-media'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
