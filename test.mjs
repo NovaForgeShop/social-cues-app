@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 const port = 4199;
@@ -9,12 +11,22 @@ const promoCodes = [crypto.randomBytes(18).toString("base64url"), crypto.randomB
 const promoCodeHashes = promoCodes.map(code => crypto.createHash("sha256").update(code.toUpperCase()).digest("hex")).join(",");
 const accountEmail = `alpha-${Date.now()}@socialcuesapp.com`;
 const accountPassword = "test-password-2026";
+const testMetaAppSecret = crypto.randomBytes(32).toString("base64url");
+const testDataDir = await mkdtemp(path.join(tmpdir(), "social-cues-test-"));
+const testModelPath = path.join(testDataDir, "model.json");
+await writeFile(testModelPath, await readFile(new URL("./social-cues-model-seed.json", import.meta.url)));
 let defaultToken = "";
 const serverSource = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
 const declaredApiEndpoints = (serverSource.match(/url\.pathname\s*===\s*"\/api\//g) || []).length
   + (serverSource.match(/url\.pathname\.startsWith\("\/api\//g) || []).length;
-if (declaredApiEndpoints < 100 || !serverSource.includes('url.pathname.startsWith("/api/") && !(await authorizeApiRequest(req, res, url))')) {
+const routeSource = serverSource.slice(serverSource.indexOf("async function route(req, res)"));
+const apiGuardIndex = routeSource.indexOf('url.pathname.startsWith("/api/") && !(await authorizeApiRequest(req, res, url))');
+const firstApiHandlerIndex = routeSource.indexOf('if (url.pathname === "/api/');
+if (declaredApiEndpoints < 100 || apiGuardIndex < 0 || firstApiHandlerIndex < 0 || apiGuardIndex > firstApiHandlerIndex) {
   throw new Error("API endpoint authorization guard is missing or no longer covers the full route surface");
+}
+if (!serverSource.includes('/rpc/social_cues_claim_auth_rate_limit') || !serverSource.includes('return "active-workspace"')) {
+  throw new Error("durable auth limiting or fail-closed API authorization default is missing");
 }
 const server = spawn(process.execPath, ["server.mjs"], {
   cwd: new URL(".", import.meta.url),
@@ -30,7 +42,9 @@ const server = spawn(process.execPath, ["server.mjs"], {
     SENTRY_SOURCE_CONTEXT_ENABLED: "true",
     SOCIAL_CUES_PROMO_CODE_HASHES: promoCodeHashes,
     SOCIAL_CUES_ADMIN_EMAILS: accountEmail,
-    SOCIAL_CUES_PUBLIC_SIGNUP_ENABLED: "true"
+    SOCIAL_CUES_PUBLIC_SIGNUP_ENABLED: "true",
+    SOCIAL_CUES_DATA_DIR: testDataDir,
+    META_APP_SECRET: testMetaAppSecret
   },
   stdio: ["ignore", "pipe", "pipe"]
 });
@@ -87,6 +101,33 @@ try {
 
   const portalReadiness = await request("/api/portal/readiness");
   if (!portalReadiness.ok || Object.prototype.hasOwnProperty.call(portalReadiness, "missingEnv")) throw new Error("public portal readiness leaked internal configuration");
+
+  const malformedJsonResponse = await fetch(base + "/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{not-json"
+  });
+  if (malformedJsonResponse.status !== 400) throw new Error("malformed JSON should be rejected as a client error");
+  const oversizedJsonResponse = await fetch(base + "/api/observability/client-error", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "x".repeat(1024 * 1024) })
+  });
+  if (oversizedJsonResponse.status !== 413) throw new Error("oversized request body should be rejected before route handling");
+  for (let index = 0; index < 12; index += 1) {
+    const crossOriginLogin = await fetch(base + "/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://attacker.invalid" },
+      body: JSON.stringify({ email: "nobody@invalid.example", password: "invalid-password" })
+    });
+    if (crossOriginLogin.status !== 403) throw new Error("cross-origin login request was not rejected");
+  }
+  const loginAfterCrossOriginFlood = await fetch(base + "/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "nobody@invalid.example", password: "invalid-password" })
+  });
+  if (loginAfterCrossOriginFlood.status !== 401) throw new Error("cross-origin requests consumed the legitimate auth rate limit");
 
   const anonymousModelResponse = await fetch(base + "/api/model");
   if (anonymousModelResponse.status !== 401) throw new Error("anonymous model read should be rejected");
@@ -202,6 +243,77 @@ try {
     headers: { Authorization: `Bearer ${secondSignup.session.token}` }
   });
   if ((secondModelAfterForgery.connectedAccounts || []).some(item => item.id === forgedAccountId)) throw new Error("forged account crossed into another workspace");
+
+  const deletionModel = JSON.parse(await readFile(testModelPath, "utf8"));
+  deletionModel.connectedAccounts = (deletionModel.connectedAccounts || []).filter(account => !String(account.id || "").startsWith("acct-meta-deletion-test-"));
+  deletionModel.connectedAccounts.push(
+    {
+      id: "acct-meta-deletion-test-first-identity",
+      platform: "meta",
+      name: "First Meta Identity",
+      status: "connected",
+      oauthProvider: "meta",
+      providerAccountId: "meta-user-first",
+      ownerUserId: signup.user.id,
+      workspaceId: signup.workspace.id,
+      credential: "test-encrypted-token"
+    },
+    {
+      id: "acct-meta-deletion-test-first-page",
+      platform: "facebook",
+      name: "First Meta Page",
+      status: "connected",
+      oauthProvider: "meta",
+      providerAccountId: "meta-page-first",
+      ownerUserId: signup.user.id,
+      workspaceId: signup.workspace.id,
+      credential: "test-encrypted-page-token"
+    },
+    {
+      id: "acct-meta-deletion-test-second-identity",
+      platform: "meta",
+      name: "Second Meta Identity",
+      status: "connected",
+      oauthProvider: "meta",
+      providerAccountId: "meta-user-second",
+      ownerUserId: secondSignup.user.id,
+      workspaceId: secondSignup.workspace.id,
+      credential: "test-encrypted-token"
+    },
+    {
+      id: "acct-meta-deletion-test-second-page",
+      platform: "facebook",
+      name: "Second Meta Page",
+      status: "connected",
+      oauthProvider: "meta",
+      providerAccountId: "meta-page-second",
+      ownerUserId: secondSignup.user.id,
+      workspaceId: secondSignup.workspace.id,
+      credential: "test-encrypted-page-token"
+    }
+  );
+  await writeFile(testModelPath, JSON.stringify(deletionModel, null, 2));
+  const encodedDeletionPayload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: "meta-user-first", issued_at: Math.floor(Date.now() / 1000) })).toString("base64url");
+  const encodedDeletionSignature = crypto.createHmac("sha256", testMetaAppSecret).update(encodedDeletionPayload).digest("base64url");
+  const deletionResponse = await fetch(base + "/api/meta/data-deletion", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ signed_request: `${encodedDeletionSignature}.${encodedDeletionPayload}` })
+  });
+  const deletionResult = await deletionResponse.json();
+  if (deletionResponse.status !== 200 || !deletionResult.confirmation_code) throw new Error("verified Meta deletion request failed");
+  const malformedDeletionResponse = await fetch(base + "/api/meta/data-deletion", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "signed_request=bad"
+  });
+  if (malformedDeletionResponse.status !== 400) throw new Error("malformed Meta deletion request should be rejected as a client error");
+  const firstModelAfterDeletion = await request("/api/model", { headers: { Authorization: `Bearer ${signup.session.token}` } });
+  const secondModelAfterDeletion = await request("/api/model", { headers: { Authorization: `Bearer ${secondSignup.session.token}` } });
+  if ((firstModelAfterDeletion.connectedAccounts || []).some(account => account.oauthProvider === "meta" || account.platform === "meta")) throw new Error("Meta deletion left provider data in the requesting workspace");
+  if (!(secondModelAfterDeletion.connectedAccounts || []).some(account => account.name === "Second Meta Page")) throw new Error("Meta deletion crossed into another workspace");
+  const deletionStatusResponse = await fetch(base + `/api/meta/data-deletion/status?code=${encodeURIComponent(deletionResult.confirmation_code)}`);
+  if (deletionStatusResponse.status !== 200) throw new Error("Meta deletion confirmation status failed");
 
   const unpaidEmail = `unpaid-${Date.now()}@socialcuesapp.com`;
   const unpaidSignup = await request("/api/auth/signup", {
@@ -353,6 +465,19 @@ try {
     body: JSON.stringify({ object: "page", entry: [] })
   });
   if (![403, 503].includes(unsignedWebhook.status)) throw new Error("unsigned Meta webhook should be rejected");
+  const signedWebhookBody = JSON.stringify({ object: "page", entry: [{ id: "page-test", changes: [{ field: "feed", value: { message: "sensitive webhook content" } }] }] });
+  const signedWebhookSignature = crypto.createHmac("sha256", testMetaAppSecret).update(signedWebhookBody).digest("hex");
+  const signedWebhook = await fetch(base + "/api/meta/webhook", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Hub-Signature-256": `sha256=${signedWebhookSignature}` },
+    body: signedWebhookBody
+  });
+  if (signedWebhook.status !== 200) throw new Error("valid Meta webhook signature was rejected");
+  const webhookModel = JSON.parse(await readFile(testModelPath, "utf8"));
+  const webhookReceipt = webhookModel.metaWebhookEvents?.[0];
+  if (!webhookReceipt || webhookReceipt.payload || webhookReceipt.entryCount !== 1 || !webhookReceipt.fieldNames?.includes("feed")) throw new Error("Meta webhook retained raw payload data or lost receipt metadata");
+  const publicModelAfterWebhook = await request("/api/model");
+  if (Object.prototype.hasOwnProperty.call(publicModelAfterWebhook, "metaWebhookEvents")) throw new Error("Meta webhook receipts leaked into a client model");
 
   const metaPages = await request("/api/meta/pages");
   if (!metaPages.ok || !Array.isArray(metaPages.pages) || !metaPages.gate) throw new Error("meta pages failed");
@@ -501,4 +626,5 @@ try {
 } finally {
   server.kill();
   await delay(150);
+  await rm(testDataDir, { recursive: true, force: true });
 }

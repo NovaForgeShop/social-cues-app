@@ -8,7 +8,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
-const dataDir = process.env.VERCEL ? "/tmp/social-cues-data" : path.join(__dirname, "data");
+const dataDir = process.env.SOCIAL_CUES_DATA_DIR || (process.env.VERCEL ? "/tmp/social-cues-data" : path.join(__dirname, "data"));
 const modelPath = path.join(dataDir, "model.json");
 const localUiPath = path.join(__dirname, "social-cues-app.html");
 const parentUiPath = path.join(root, "social-cues-app.html");
@@ -1873,15 +1873,27 @@ function binary(res, status, body, contentType) {
   res.end(body);
 }
 
+function publicRequestError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  error.expose = true;
+  return error;
+}
+
 async function bodyJson(req) {
   let raw = "";
   let total = 0;
   for await (const chunk of req) {
     total += chunk.length;
-    if (total > maxJsonBodyBytes) throw new Error(`Request body exceeds ${maxJsonBodyBytes} bytes.`);
+    if (total > maxJsonBodyBytes) throw publicRequestError(413, "Request body is too large.");
     raw += chunk;
   }
-  return raw ? JSON.parse(raw) : {};
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw publicRequestError(400, "Request body must be valid JSON.");
+  }
 }
 
 async function bodyText(req) {
@@ -1889,7 +1901,7 @@ async function bodyText(req) {
   let total = 0;
   for await (const chunk of req) {
     total += chunk.length;
-    if (total > maxJsonBodyBytes) throw new Error(`Request body exceeds ${maxJsonBodyBytes} bytes.`);
+    if (total > maxJsonBodyBytes) throw publicRequestError(413, "Request body is too large.");
     raw += chunk;
   }
   return raw;
@@ -2128,6 +2140,74 @@ function parseMetaSignedRequest(signedRequest) {
 
   if (!timingSafeEqualText(encodedSignature, expected)) throw new Error("Invalid signed_request signature.");
   return payload;
+}
+
+function isMetaProviderAccount(account = {}) {
+  return account.oauthProvider === "meta" || account.platform === "meta";
+}
+
+function metaDeletionTargetKey(target = {}) {
+  return `${String(target.workspaceId || "")}:${String(target.ownerUserId || "")}`;
+}
+
+function accountMatchesMetaDeletionTarget(account = {}, target = {}) {
+  return isMetaProviderAccount(account)
+    && String(account.workspaceId || "") === String(target.workspaceId || "")
+    && String(account.ownerUserId || "") === String(target.ownerUserId || "");
+}
+
+function clearMetaProviderData(model = {}, target = {}, metaUserId = "") {
+  model.connectedAccounts = (model.connectedAccounts || []).filter(account => !accountMatchesMetaDeletionTarget(account, target));
+  if (!model.metaConnection?.userId || String(model.metaConnection.userId) === String(metaUserId)) delete model.metaConnection;
+  delete model.metaHealth;
+  model.integrations = {
+    ...(model.integrations || {}),
+    meta: "Disconnected by verified Meta data deletion request",
+    facebook: "Disconnected by verified Meta data deletion request",
+    instagram: "Disconnected by verified Meta data deletion request"
+  };
+  return model;
+}
+
+async function verifiedMetaDeletionTargets(model = {}, metaUserId = "") {
+  const targets = new Map();
+  for (const account of model.connectedAccounts || []) {
+    if (account.platform !== "meta" || account.oauthProvider !== "meta" || String(account.providerAccountId || "") !== String(metaUserId)) continue;
+    const target = { workspaceId: account.workspaceId || "", ownerUserId: account.ownerUserId || "" };
+    if (target.workspaceId && target.ownerUserId) targets.set(metaDeletionTargetKey(target), target);
+  }
+  if (supabaseEnabled && metaUserId) {
+    const rows = await optionalSupabaseRequest(`/connected_accounts?provider=eq.meta&platform=eq.meta&provider_account_id=eq.${encodeURIComponent(metaUserId)}&select=workspace_id,user_id&limit=100`);
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const target = { workspaceId: row.workspace_id || "", ownerUserId: row.user_id || "" };
+      if (target.workspaceId && target.ownerUserId) targets.set(metaDeletionTargetKey(target), target);
+    }
+  }
+  return [...targets.values()];
+}
+
+async function purgeVerifiedMetaIdentity(model = {}, metaUserId = "") {
+  const targets = await verifiedMetaDeletionTargets(model, metaUserId);
+  for (const target of targets) {
+    if (supabaseEnabled && isUuid(target.workspaceId) && isUuid(target.ownerUserId)) {
+      const workspaceRows = await optionalSupabaseRequest(`/workspace_models?workspace_id=eq.${encodeURIComponent(target.workspaceId)}&select=model&limit=1`);
+      if (Array.isArray(workspaceRows) && workspaceRows[0]?.model) {
+        const workspaceModel = clearMetaProviderData(workspaceRows[0].model, target, metaUserId);
+        await supabaseRequest(`/workspace_models?workspace_id=eq.${encodeURIComponent(target.workspaceId)}`, {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ model: workspaceModel, updated_at: new Date().toISOString() })
+        });
+      }
+      await supabaseRequest(`/connected_accounts?workspace_id=eq.${encodeURIComponent(target.workspaceId)}&user_id=eq.${encodeURIComponent(target.ownerUserId)}&provider=eq.meta`, {
+        method: "DELETE",
+        headers: { Prefer: "return=minimal" }
+      });
+    }
+    clearMetaProviderData(model, target, metaUserId);
+  }
+  if (model.metaConnection?.userId && String(model.metaConnection.userId) === String(metaUserId)) delete model.metaConnection;
+  return targets;
 }
 
 function oauthTokenEncryptionKeyMaterial() {
@@ -3193,6 +3273,36 @@ function takeRateLimit(key, limit, windowMs) {
   return { allowed: current.count <= limit, remaining: Math.max(0, limit - current.count), resetAt: current.resetAt };
 }
 
+async function takeRequestRateLimit(req, pathname, limit, windowMs) {
+  const local = takeRateLimit(`${requestClientKey(req)}:${pathname}`, limit, windowMs);
+  const durable = ["/api/auth/login", "/api/auth/signup", "/api/observability/client-error"].includes(pathname)
+    || /\/(publish|upload|generate|analyze|actions)(?:\/|$)/.test(pathname);
+  if (!local.allowed || !supabaseEnabled || !durable) return local;
+  try {
+    const result = await supabaseRequest("/rpc/social_cues_claim_auth_rate_limit", {
+      method: "POST",
+      body: JSON.stringify({
+        p_action: pathname,
+        p_identity_hash: hashSecret(`${pathname}:${requestClientKey(req)}`),
+        p_window_seconds: Math.max(1, Math.ceil(windowMs / 1000)),
+        p_max_attempts: limit
+      })
+    });
+    const row = Array.isArray(result) ? result[0] : result;
+    if (!row || typeof row.allowed !== "boolean") throw new Error("Supabase auth rate limiter returned no decision.");
+    const retryAfterSeconds = Math.max(0, Number(row.retry_after_seconds || 0));
+    return {
+      allowed: row.allowed,
+      remaining: Math.max(0, Number(row.remaining || 0)),
+      resetAt: Date.now() + retryAfterSeconds * 1000,
+      durable: true
+    };
+  } catch (error) {
+    captureSentryError(error, { surface: "security", operation: "auth-rate-limit", route: pathname });
+    return { allowed: false, remaining: 0, resetAt: Date.now() + 30_000, unavailable: true };
+  }
+}
+
 function sameOriginRequest(req) {
   const origin = String(req?.headers?.origin || "").trim();
   if (!origin) return requestCredentialSource(req) !== "cookie" || runtimeMode !== "vercel";
@@ -3268,6 +3378,11 @@ async function authorizeApiRequest(req, res, url) {
   const permission = apiPermissionFor(url.pathname, req.method);
   if (context) context.permission = permission;
 
+  const unsafeMethod = !["GET", "HEAD", "OPTIONS"].includes(req.method);
+  if (unsafeMethod && !["oauth-state", "signed-external"].includes(permission) && !sameOriginRequest(req)) {
+    return Boolean(json(res, 403, { ok: false, error: "Cross-origin request rejected." }));
+  }
+
   const rateProfile = ["/api/auth/login", "/api/auth/signup"].includes(url.pathname)
     ? { limit: 10, windowMs: 15 * 60 * 1000 }
     : url.pathname === "/api/observability/client-error"
@@ -3275,15 +3390,13 @@ async function authorizeApiRequest(req, res, url) {
     : /\/(publish|upload|generate|analyze|actions)(?:\/|$)/.test(url.pathname)
       ? { limit: 60, windowMs: 60 * 1000 }
       : { limit: 300, windowMs: 60 * 1000 };
-  const rate = takeRateLimit(`${requestClientKey(req)}:${url.pathname}`, rateProfile.limit, rateProfile.windowMs);
+  const rate = await takeRequestRateLimit(req, url.pathname, rateProfile.limit, rateProfile.windowMs);
+  if (rate.unavailable) {
+    return Boolean(json(res, 503, { ok: false, error: "Authentication protection is temporarily unavailable. Try again shortly." }));
+  }
   if (!rate.allowed) {
     res.setHeader("Retry-After", String(Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000))));
     return Boolean(json(res, 429, { ok: false, error: "Too many requests. Try again shortly." }));
-  }
-
-  const unsafeMethod = !["GET", "HEAD", "OPTIONS"].includes(req.method);
-  if (unsafeMethod && !["oauth-state", "signed-external"].includes(permission) && !sameOriginRequest(req)) {
-    return Boolean(json(res, 403, { ok: false, error: "Cross-origin request rejected." }));
   }
 
   if (["public", "oauth-state", "signed-external"].includes(permission)) return true;
@@ -3477,6 +3590,7 @@ function publicModel(model, session = null) {
   }
   delete safe.oauthStates;
   delete safe.metaDeletionRequests;
+  delete safe.metaWebhookEvents;
   return safe;
 }
 
@@ -5075,20 +5189,7 @@ async function route(req, res) {
   if (url.pathname === "/health") {
     return json(res, 200, {
       ok: true,
-      app: "Social Cues",
-      mode: runtimeMode,
-      port,
-      persistence: lastPersistence,
-      supabaseConfigured: supabaseEnabled,
-      observability: {
-        provider: "sentry",
-        configured: Boolean(sentryDsn),
-        initialized: sentryInitialized,
-        environment: sentryEnvironment,
-        release: sentryRelease || null,
-        releaseSource: sentryReleaseSource,
-        repository: sentryGithubRepository || null
-      }
+      app: "Social Cues"
     });
   }
 
@@ -5516,10 +5617,14 @@ async function route(req, res) {
     const contentType = req.headers["content-type"] || "";
     const raw = await bodyText(req);
     let signedRequest = "";
-    if (contentType.includes("application/json")) {
-      signedRequest = JSON.parse(raw || "{}").signed_request || "";
-    } else {
-      signedRequest = new URLSearchParams(raw).get("signed_request") || "";
+    try {
+      if (contentType.includes("application/json")) {
+        signedRequest = JSON.parse(raw || "{}").signed_request || "";
+      } else {
+        signedRequest = new URLSearchParams(raw).get("signed_request") || "";
+      }
+    } catch {
+      return json(res, 400, { ok: false, error: "Request body must include a valid signed_request." });
     }
 
     let payload;
@@ -5531,37 +5636,16 @@ async function route(req, res) {
 
     const confirmationCode = `meta-delete-${crypto.randomBytes(18).toString("base64url")}`;
     const model = await getModel();
+    const metaUserId = payload.user_id || payload.user?.id || "";
+    const deletedTargets = await purgeVerifiedMetaIdentity(model, metaUserId);
     model.metaDeletionRequests = model.metaDeletionRequests || [];
     model.metaDeletionRequests.push({
       confirmationCode,
-      userId: payload.user_id || payload.user?.id || null,
+      userId: metaUserId || null,
       issuedAt: payload.issued_at || null,
-      receivedAt: new Date().toISOString()
+      receivedAt: new Date().toISOString(),
+      deletedWorkspaceCount: deletedTargets.length
     });
-
-    if (Array.isArray(model.connectedAccounts)) {
-      for (const account of model.connectedAccounts) {
-        if (["meta", "facebook", "instagram"].includes(account.platform) || account.oauthProvider === "meta") {
-          account.status = "deleted by user request";
-          account.connectedAt = null;
-          delete account.oauthProvider;
-          delete account.oauthCode;
-          delete account.accessToken;
-          delete account.refreshToken;
-          delete account.token;
-          delete account.credential;
-          delete account.refreshCredential;
-          delete account.tokenType;
-          delete account.tokenExpiresAt;
-          delete account.providerAccountId;
-          delete account.parentFacebookPageId;
-          account.scopes = [];
-          account.tokenDeletedAt = new Date().toISOString();
-        }
-      }
-    }
-    model.integrations = model.integrations || {};
-    model.integrations.meta = "User data deletion callback received";
     await saveModel(model);
 
     return json(res, 200, {
@@ -5602,10 +5686,25 @@ async function route(req, res) {
     if (!signature) return json(res, 403, { ok: false, error: "Missing Meta webhook signature." });
     const expected = crypto.createHmac("sha256", signingSecret).update(raw).digest("hex");
     if (!timingSafeEqualText(signature, expected)) return json(res, 403, { ok: false, error: "Invalid webhook signature." });
-    const payload = raw ? JSON.parse(raw) : {};
+    let payload;
+    try {
+      payload = raw ? JSON.parse(raw) : {};
+    } catch {
+      return json(res, 400, { ok: false, error: "Meta webhook body must be valid JSON." });
+    }
+    const fieldNames = [...new Set((Array.isArray(payload.entry) ? payload.entry : [])
+      .flatMap(entry => Array.isArray(entry?.changes) ? entry.changes : [])
+      .map(change => String(change?.field || "").trim())
+      .filter(Boolean))].slice(0, 20);
     const model = await getModel();
     model.metaWebhookEvents = model.metaWebhookEvents || [];
-    model.metaWebhookEvents.unshift({ id: uid("meta-webhook"), receivedAt: new Date().toISOString(), payload });
+    model.metaWebhookEvents.unshift({
+      id: uid("meta-webhook"),
+      receivedAt: new Date().toISOString(),
+      object: String(payload.object || "unknown").slice(0, 64),
+      entryCount: Array.isArray(payload.entry) ? payload.entry.length : 0,
+      fieldNames
+    });
     model.metaWebhookEvents = model.metaWebhookEvents.slice(0, 50);
     await saveModel(model);
     return json(res, 200, { ok: true, received: true });
@@ -6507,6 +6606,9 @@ async function route(req, res) {
         defaultDenyApiPolicy: true,
         cookieWriteOriginChecks: true,
         requestRateLimits: true,
+        durableAuthRateLimits: supabaseEnabled,
+        durableHighCostRateLimits: supabaseEnabled,
+        rawWebhookPayloadsRetained: false,
         adminAllowlistConfigured: adminEmails.size > 0,
         inviteOnlySignup: !publicSignupEnabled,
         globalAdminRoleDerivedFromServerEmailAllowlistOnly: true,
@@ -8188,6 +8290,9 @@ await ensureModel();
 
 export default async function handler(req, res) {
   return requestSecurityContext.run({ session: null, sessionResolved: false, workspaceScoped: false, permission: "none" }, () => route(req, res)).catch(error => {
+    if (error?.expose && Number.isInteger(error.status) && error.status >= 400 && error.status < 500) {
+      return json(res, error.status, { ok: false, error: error.message });
+    }
     const incidentId = crypto.randomUUID();
     captureSentryError(error, {
       surface: "server",
