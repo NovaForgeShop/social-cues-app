@@ -7708,6 +7708,10 @@
       const analytics = model.analytics || {};
       const providerSnapshot = canonicalProviderSnapshot();
       const providerSummary = providerSnapshot.summary;
+      const storedAnalysisStatus = String(analytics.status || "").trim();
+      const analysisStatus = providerSummary.connectedAssets && /waiting for connected accounts/i.test(storedAnalysisStatus)
+        ? (providerSummary.canReadAnalytics ? "Analytics lanes ready - refresh live insights" : "Accounts connected - analytics permission still needed")
+        : (storedAnalysisStatus || "Latest growth readout");
       const mergedConnected = providerSnapshot.connectedAccounts;
       const livePageCount = mergedConnected.filter(account => account.platform === "facebook").length;
       const liveInstagramCount = mergedConnected.filter(account => account.platform === "instagram").length;
@@ -7814,7 +7818,7 @@
             <div class="variant-head">
               <div>
                 <h3>Translated analysis</h3>
-                <p>${escapeHtml(analytics.status || "Latest growth readout")}</p>
+                <p>${escapeHtml(analysisStatus)}</p>
               </div>
               <span class="pill approved">readout</span>
             </div>
