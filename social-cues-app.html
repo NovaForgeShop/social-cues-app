@@ -916,6 +916,7 @@
         <button data-view="studio"><span class="dot"></span><span>Create</span></button>
         <button data-view="calendar"><span class="dot"></span><span>Plan</span></button>
         <button data-view="growth"><span class="dot"></span><span>Audience</span></button>
+        <button data-view="responses"><span class="dot"></span><span>Responses</span></button>
         <button data-view="accounts"><span class="dot"></span><span>Accounts</span></button>
         <button data-view="help"><span class="dot"></span><span>Help</span></button>
         <button data-view="settings"><span class="dot"></span><span>Settings</span></button>
@@ -928,7 +929,6 @@
             <button data-view="automation" data-feature-module="automation"><span class="dot"></span><span>Automation</span></button>
             <button data-view="commerce" data-feature-module="commerce"><span class="dot"></span><span>Commerce</span></button>
             <button data-view="ads" data-feature-module="ads"><span class="dot"></span><span>Ads</span></button>
-            <button data-view="responses" data-feature-module="responses"><span class="dot"></span><span>Responses</span></button>
             <button data-view="actionlab"><span class="dot"></span><span>Next steps</span></button>
             <button data-view="devices"><span class="dot"></span><span>Devices</span></button>
             <button data-view="billing"><span class="dot"></span><span>Billing</span></button>
@@ -1722,8 +1722,8 @@
           <div class="panel">
             <div class="row">
               <div>
-                <h2>Reaction responses</h2>
-                <p>Comment, reply, message, and community-response lanes from connected accounts.</p>
+                <h2>Response inbox</h2>
+                <p>Read, review, reply to, and moderate audience conversations from connected accounts.</p>
               </div>
               <button class="secondary" id="refreshResponses">Refresh</button>
             </div>
@@ -2298,7 +2298,6 @@
               <label><input type="checkbox" value="automation" data-workspace-feature><span>Automation</span></label>
               <label><input type="checkbox" value="commerce" data-workspace-feature><span>Commerce</span></label>
               <label><input type="checkbox" value="ads" data-workspace-feature><span>Ads and funding</span></label>
-              <label><input type="checkbox" value="responses" data-workspace-feature><span>Responses and CRM</span></label>
             </div>
             <div class="actions"><button class="primary" id="saveWorkspaceFeatures" type="button">Save workspace tools</button></div>
           </div>
@@ -3266,8 +3265,7 @@
     const workspaceFeatureViews = {
       automation: "automation",
       commerce: "commerce",
-      ads: "ads",
-      responses: "responses"
+      ads: "ads"
     };
 
     function suggestedModulePreferences(selectedValues = [], goalValues = []) {

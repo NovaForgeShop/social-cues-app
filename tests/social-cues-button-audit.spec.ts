@@ -51,9 +51,16 @@ test('local workstation navigation and safe buttons respond', async ({ page }) =
   await expect(page.locator('[data-view="commerce"]')).toHaveClass(/hidden/);
   await expect(page.locator('[data-view="ads"]')).not.toHaveClass(/hidden/);
   await expect(page.locator('[data-view="responses"]')).not.toHaveClass(/hidden/);
+  const primaryResponses = page.locator('#nav > [data-view="responses"]');
+  await expect(primaryResponses).toBeVisible();
+  await expect(page.locator('#moreNavigation [data-view="responses"]')).toHaveCount(0);
+  await primaryResponses.click();
+  await expect(page.locator('#responses')).toBeVisible();
+  await expect(page.locator('#responseInbox')).toBeVisible();
+  await expect(page.locator('#responseReadiness')).toBeVisible();
+  await expect(page.locator('#refreshResponses')).toBeVisible();
   await page.locator('#moreNavigation summary').click();
   await expect(page.locator('[data-view="ads"]')).toBeVisible();
-  await expect(page.locator('[data-view="responses"]')).toBeVisible();
   const views = ['dashboard', 'brandkit', 'studio', 'library', 'approvals', 'calendar', 'growth', 'ads', 'responses', 'actionlab', 'devices', 'accounts', 'help', 'billing', 'settings'];
   for (const view of views) {
     await page.locator(`[data-view="${view}"]`).click();
