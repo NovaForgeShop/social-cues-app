@@ -6491,6 +6491,11 @@
         `;
         return;
       }
+      const selectedSourceFile = $("#rawVideoInput")?.files?.[0] || null;
+      const sourceHeading = selectedSourceFile ? "Selected source" : "Campaign source on record";
+      const sourceContext = selectedSourceFile
+        ? "This file is selected for the next video-pack build."
+        : "Choose a file above to replace this saved campaign source. The existing source and its delivery history remain intact until you build the replacement.";
       const outputs = Array.isArray(source.outputs) ? source.outputs : [];
       const job = source.renderJob || null;
       const dissectionStages = Array.isArray(source.dissectionStages) ? source.dissectionStages : [];
@@ -6575,11 +6580,12 @@
         <article class="variant" style="--accent:#93dd55">
           <div class="variant-head">
             <div>
-              <h3>Source: ${escapeHtml(source.name)}</h3>
+              <h3>${escapeHtml(sourceHeading)}: ${escapeHtml(source.name)}</h3>
               <p>${escapeHtml(sourceMeta)}</p>
             </div>
             <span class="pill approved">raw video</span>
           </div>
+          <p>${escapeHtml(sourceContext)}</p>
           <p>${escapeHtml(source.uploadNote || "Ready for planning. Live editing needs server storage and a render worker.")}</p>
           ${jobHtml}
         </article>
@@ -7039,7 +7045,8 @@
       const displayStatus = status === "dry-run-ready" ? "dry-run ready" : status === "queued-review-only" ? "review queued" : status;
       const detail = item.lastAttempt?.error || item.publishError || item.copyPreview || item.copy || item.campaignTitle || "Delivery record";
       const receipt = String(item.providerPostId || "").trim();
-      const statusTone = ["blocked", "failed", "retrying"].includes(status) ? "revision" : status === "published" ? "published" : statusClass(status);
+      const needsAttention = ["blocked", "failed", "retrying"].includes(status);
+      const statusTone = needsAttention ? "revision" : status === "published" ? "published" : statusClass(status);
       return `<article class="variant" style="--accent:${escapeHtml(platform.accent || "#28d7ee")}">
         <div class="variant-head">
           <div>
@@ -7054,7 +7061,17 @@
           ${item.nextRetryAt ? `<span class="tag">retry ${escapeHtml(formatDateTime(item.nextRetryAt))}</span>` : ""}
           ${receipt ? `<span class="tag" title="${escapeHtml(receipt)}">provider receipt ${escapeHtml(receipt.slice(0, 18))}${receipt.length > 18 ? "..." : ""}</span>` : ""}
         </div>
+        ${needsAttention ? `<div class="variant-tools"><button data-delivery-resolve="${escapeHtml(platform.id || item.platform || "")}">Resolve ${escapeHtml(platform.name)}</button></div>` : ""}
       </article>`;
+    }
+
+    function focusAccountLane(providerId = "") {
+      navigateTo("accounts");
+      requestAnimationFrame(() => {
+        const card = [...document.querySelectorAll("#socialAccountList [data-account-lane]")]
+          .find(element => element.dataset.accountLane === providerId);
+        card?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
     }
 
     function renderCalendar() {
@@ -12261,6 +12278,11 @@
     $("#mobileViewSelect").addEventListener("change", event => navigateTo(event.target.value));
     $$("[data-jump]").forEach(button => button.addEventListener("click", () => navigateTo(button.dataset.jump)));
     document.addEventListener("click", event => {
+      const deliveryResolveButton = event.target.closest("[data-delivery-resolve]");
+      if (deliveryResolveButton) {
+        focusAccountLane(deliveryResolveButton.dataset.deliveryResolve || "");
+        return;
+      }
       const customerSourceButton = event.target.closest("[data-customer-source]");
       if (customerSourceButton) {
         loadCustomerSource(customerSourceButton.dataset.customerSurface, customerSourceButton.dataset.customerSource);
