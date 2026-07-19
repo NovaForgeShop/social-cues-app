@@ -5858,8 +5858,25 @@
       const report = options.report || setRawVideoUploadState;
       if (!options.controller) rawVideoUploadController = controller;
       const { signal } = controller;
-      if (upload.resumable?.endpoint && upload.token) await uploadRawVideoTus(file, upload, signal, report);
-      else await uploadRawVideoSignedPut(file, upload, signal, report);
+      if (upload.resumable?.endpoint && upload.token) {
+        try {
+          await uploadRawVideoTus(file, upload, signal, report);
+        } catch (tusError) {
+          if (signal.aborted || tusError?.name === "AbortError") throw tusError;
+          report("Resumable upload is unavailable. Switching to direct upload...", {
+            progress: 0,
+            busy: true
+          });
+          try {
+            await uploadRawVideoSignedPut(file, upload, signal, report);
+          } catch (directError) {
+            if (signal.aborted || directError?.name === "AbortError") throw directError;
+            throw new Error(`Upload failed. Resumable: ${tusError.message} Direct: ${directError.message}`);
+          }
+        }
+      } else {
+        await uploadRawVideoSignedPut(file, upload, signal, report);
+      }
       report("Upload complete. Verifying private source...", { progress: 100, busy: true });
       const response = await authedFetch("/api/media/assets/complete", {
         method: "POST",
