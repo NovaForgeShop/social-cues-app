@@ -44,6 +44,14 @@ test('first-run workspace stays usable on Android and iPhone', async ({ page }, 
   await expect(page.locator('#responses h2').first()).toHaveText('Response inbox');
 
   await page.locator('#mobileViewSelect').selectOption('studio');
+  await expect(page.locator('[data-studio-mode="post"]')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('[data-studio-lane="post"]')).toBeVisible();
+  await expect(page.locator('#quickPostMediaInput')).toBeVisible();
+  await expect(page.locator('#prepareQuickPostOne')).toBeVisible();
+  await expect(page.locator('#prepareQuickPostEverywhere')).toBeVisible();
+  await page.locator('[data-studio-lane="post"]').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.resolve('outputs', `mobile-quick-post-${testInfo.project.name}.png`), fullPage: true });
+  await page.locator('[data-studio-mode="video"]').click();
   await expect(page.locator('[data-studio-mode="video"]')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('[data-studio-lane="video"]')).toBeVisible();
 

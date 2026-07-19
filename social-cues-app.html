@@ -190,9 +190,9 @@
 
     .studio-mode-tabs {
       display: inline-grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 4px;
-      width: min(100%, 560px);
+      width: min(100%, 720px);
       margin-bottom: 14px;
       padding: 4px;
       border: 1px solid var(--line);
@@ -210,6 +210,21 @@
       background: var(--signal-ghost);
       color: var(--text);
     }
+    .check-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      margin-top: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .check-row input[type="checkbox"] {
+      flex: 0 0 auto;
+      width: 18px;
+      height: 18px;
+      margin: 2px 0 0;
+    }
+    .check-row span { min-width: 0; }
 
     h1, h2, h3, p { margin: 0; }
     h1 { font-size: 32px; line-height: 1.04; letter-spacing: 0; }
@@ -842,7 +857,7 @@
 
     @media (max-width: 480px) {
       .grid-4, .form-grid, .variant-tools { grid-template-columns: 1fr; }
-      .studio-mode-tabs { grid-template-columns: 1fr; }
+      .studio-mode-tabs { grid-template-columns: 1fr 1fr; }
       .studio-mode-tabs button { min-height: 38px; }
       .onboarding-platform-grid { grid-template-columns: 1fr 1fr; }
       .onboarding-requirement { grid-template-columns: 1fr; gap: 9px; }
@@ -1257,9 +1272,75 @@
 
       <section id="studio" class="section">
         <div class="studio-mode-tabs" role="tablist" aria-label="Create mode">
-          <button type="button" class="active" role="tab" aria-selected="true" data-studio-mode="video">Video to campaign</button>
+          <button type="button" class="active" role="tab" aria-selected="true" data-studio-mode="post">Quick post</button>
+          <button type="button" role="tab" aria-selected="false" data-studio-mode="video">Video campaign</button>
           <button type="button" role="tab" aria-selected="false" data-studio-mode="campaign">Campaign</button>
           <button type="button" role="tab" aria-selected="false" data-studio-mode="voice">Voiceover</button>
+        </div>
+        <div class="panel" data-studio-lane="post">
+          <div class="row">
+            <div>
+              <h2>Quick post</h2>
+              <p>Prepare one ready image or video for one connected account or every compatible account.</p>
+            </div>
+            <div class="actions">
+              <button class="secondary" id="prepareQuickPostOne" type="button">Prepare one place</button>
+              <button class="primary" id="prepareQuickPostEverywhere" type="button">Prepare everywhere</button>
+            </div>
+          </div>
+          <div style="height:14px"></div>
+          <div class="form-grid">
+            <label>
+              <span class="small-label">Ready image or video</span>
+              <input id="quickPostMediaInput" type="file" accept="image/*,video/*">
+            </label>
+            <label>
+              <span class="small-label">One-place account</span>
+              <select id="quickPostPlatformInput"></select>
+            </label>
+            <label>
+              <span class="small-label">Video lane</span>
+              <select id="quickPostFormatInput">
+                <option value="auto">Match the source</option>
+                <option value="short-form">Short-form vertical</option>
+                <option value="standard">Standard video</option>
+              </select>
+            </label>
+            <label>
+              <span class="small-label">Post title</span>
+              <input id="quickPostTitleInput" maxlength="100" placeholder="Used where the platform supports a title">
+            </label>
+            <label>
+              <span class="small-label">Primary link</span>
+              <input id="quickPostDestinationInput" type="url" inputmode="url" placeholder="https://your-site-store-or-offer.com">
+            </label>
+            <label>
+              <span class="small-label">Link purpose</span>
+              <select id="quickPostCtaInput">
+                <option value="learn_more">Learn more</option>
+                <option value="shop_now">Shop now</option>
+                <option value="book_now">Book now</option>
+                <option value="join_now">Join now</option>
+                <option value="watch_more">Watch more</option>
+                <option value="follow">Follow the story</option>
+              </select>
+            </label>
+          </div>
+          <div style="height:10px"></div>
+          <label>
+            <span class="small-label">Caption or description</span>
+            <textarea id="quickPostCaptionInput" maxlength="5000" placeholder="Write the finished message for this post."></textarea>
+          </label>
+          <div style="height:10px"></div>
+          <label class="check-row"><input id="quickPostIncludeLinks" type="checkbox" checked> <span>Include useful connected profile links</span></label>
+          <div style="height:14px"></div>
+          <div class="notice" id="quickPostUploadStatus">Choose an image or video to begin.</div>
+          <progress class="upload-progress" id="quickPostUploadProgress" max="100" value="0" hidden></progress>
+          <div class="actions" id="quickPostUploadActions" hidden>
+            <button class="danger" id="cancelQuickPostUpload" type="button">Cancel upload</button>
+          </div>
+          <div style="height:14px"></div>
+          <div class="stack" id="quickPostList"></div>
         </div>
         <div class="grid-2" data-studio-lane="campaign" hidden>
           <div class="panel">
@@ -2605,6 +2686,7 @@
       },
       activeCampaignId: "",
       campaigns: [],
+      quickPosts: [],
       billing: {
         status: "Not configured",
         selectedPlan: "Founder Audit - $99",
@@ -3149,7 +3231,8 @@
     let onboardingFormHydrated = false;
     let onboardingRequirementsSignature = "";
     let rawVideoUploadController = null;
-    let studioMode = "video";
+    let quickPostUploadController = null;
+    let studioMode = "post";
     let elevenlabsCatalog = { voices: [], models: [] };
     let elevenlabsVoiceoverUrl = "";
     let customerSurfaceState = {
@@ -3336,6 +3419,7 @@
     function normalizeModel(raw) {
       const next = { ...clone(defaultModel), ...raw };
       if (!Array.isArray(next.connectedAccounts)) next.connectedAccounts = clone(defaultModel.connectedAccounts);
+      if (!Array.isArray(next.quickPosts)) next.quickPosts = [];
       if (!next.activeProviderAccounts || typeof next.activeProviderAccounts !== "object" || Array.isArray(next.activeProviderAccounts)) next.activeProviderAccounts = {};
       const hiddenBacklogPlatforms = new Set(["buffer", "sora"]);
       next.connectedAccounts = next.connectedAccounts.filter(account => !hiddenBacklogPlatforms.has(account.platform));
@@ -3461,6 +3545,7 @@
         workspace: { ...(auth.workspace || {}), owner: auth.user?.name || auth.workspace?.owner || "Workspace Owner" },
         workspaces: auth.workspace ? [auth.workspace] : [],
         campaigns: [],
+        quickPosts: [],
         actions: [],
         proof: [],
         mediaAssets: [],
@@ -4451,10 +4536,9 @@
 
     function publishApproved() {
       const campaign = activeCampaign();
-      if (!campaign) return;
       let count = 0;
       let redditHandoffs = 0;
-      campaign.variants.forEach(v => {
+      (campaign?.variants || []).forEach(v => {
         syncCopy(v.id);
         if (v.status === "approved") {
           if (v.platform === "reddit") {
@@ -4466,6 +4550,20 @@
           v.scheduledFor = nextScheduleTime(v);
           count++;
         }
+      });
+      (model.quickPosts || []).forEach(batch => {
+        (batch.variants || []).forEach(variant => {
+          if (variant.status !== "approved") return;
+          variant.status = "queued";
+          variant.queuedAt = new Date().toISOString();
+          const scheduledAt = Date.parse(variant.scheduledFor || "");
+          variant.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
+            ? variant.scheduledFor
+            : new Date(Date.now() + 2 * 60 * 1000).toISOString();
+          variant.updatedAt = variant.queuedAt;
+          batch.updatedAt = variant.queuedAt;
+          count++;
+        });
       });
       const handoffNote = redditHandoffs ? ` ${redditHandoffs} Reddit variant${redditHandoffs === 1 ? " remains" : "s remain"} approved for manual Devvit handoff.` : "";
       saveModel(count ? `Scheduled ${count} approved variants in Social Cues Queue.${handoffNote}` : redditHandoffs ? handoffNote.trim() : "No approved variants to schedule.");
@@ -4699,8 +4797,8 @@
       return (providerIds[provider] || [String(provider).toLowerCase()]).some(id => id === "social-cues" || active.has(id));
     }
 
-    function setStudioMode(mode = "video") {
-      studioMode = ["video", "campaign", "voice"].includes(mode) ? mode : "video";
+    function setStudioMode(mode = "post") {
+      studioMode = ["post", "video", "campaign", "voice"].includes(mode) ? mode : "post";
       $$('[data-studio-mode]').forEach(button => {
         const active = button.dataset.studioMode === studioMode;
         button.classList.toggle("active", active);
@@ -5442,25 +5540,39 @@
       saveModel(`${provider} media concept generated for ${platformName(variant.platform)}.`);
     }
 
-    function attachMedia(id, input) {
+    async function attachMedia(id, input) {
       const file = input.files?.[0];
       if (!file) return;
       const campaign = activeCampaign();
       const variant = campaign?.variants.find(v => v.id === id);
       if (!variant) return;
-      const reader = new FileReader();
-      reader.onload = () => {
+      try {
+        let asset = null;
+        if (SERVER_MODE) {
+          showAppResult("Uploading media", `${file.name} is being stored privately for ${platformName(variant.platform)}.`, "info");
+          const reservation = await reserveMediaAsset(file, `${campaign.title}: ${platformName(variant.platform)}`);
+          asset = await uploadRawVideoAsset(file, reservation, { controller: new AbortController(), report: () => {} });
+          if (asset?.status !== "uploaded") throw new Error("Private media storage is not ready for provider publishing.");
+        }
         variant.media = {
           type: file.type.startsWith("video/") ? "video" : "image",
-          provider: "Local preview upload",
+          provider: SERVER_MODE ? "Private Social Cues media" : "Local preview upload",
           name: file.name,
-          url: reader.result,
-          suggestion: `${mediaSuggestion(variant.platform, campaign)} Local files preview in the app only; Meta, TikTok, YouTube, X, and Threads need a public HTTPS URL before publishing.`,
+          assetId: asset?.id || "",
+          storagePath: asset?.storagePath || "",
+          storageStatus: asset?.status || (SERVER_MODE ? "storage-not-configured" : "local-only"),
+          url: asset?.id ? `/api/media/assets/${encodeURIComponent(asset.id)}/content` : URL.createObjectURL(file),
+          suggestion: asset?.status === "uploaded" ? `${mediaSuggestion(variant.platform, campaign)} Private source verified for provider delivery.` : `${mediaSuggestion(variant.platform, campaign)} Local preview only.`,
           createdAt: new Date().toISOString()
         };
-        saveModel(`Attached local preview media to ${platformName(variant.platform)}. Use Attach launch video or Hosted video URL before live publishing.`);
-      };
-      reader.readAsDataURL(file);
+        variant.updatedAt = new Date().toISOString();
+        saveModel(`Attached ${file.type.startsWith("video/") ? "video" : "image"} media to ${platformName(variant.platform)}.`);
+        showAppResult("Media attached", `${file.name} is ready for the approval and publishing checks.`, "success");
+      } catch (error) {
+        showAppResult("Media upload failed", error.message, "error");
+      } finally {
+        input.value = "";
+      }
     }
 
     function attachHostedVideo(id) {
@@ -5570,22 +5682,26 @@
       };
     }
 
-    async function reserveRawVideoAsset(file, campaign) {
+    async function reserveMediaAsset(file, title = "Media source") {
       if (!SERVER_MODE || !file) return null;
       const response = await authedFetch("/api/media/assets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fileName: file.name,
-          kind: "video",
-          contentType: file.type || "video/mp4",
+          kind: file.type?.startsWith("video/") ? "video" : "image",
+          contentType: file.type || "application/octet-stream",
           size: file.size,
-          title: `${campaign?.title || "Campaign"} raw source`
+          title
         })
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok || !body.ok || !body.asset) throw new Error(body.error || "Private video storage could not be prepared.");
+      if (!response.ok || !body.ok || !body.asset) throw new Error(body.error || "Private media storage could not be prepared.");
       return body;
+    }
+
+    async function reserveRawVideoAsset(file, campaign) {
+      return reserveMediaAsset(file, `${campaign?.title || "Campaign"} raw source`);
     }
 
     function setRawVideoUploadState(message, { progress = 0, busy = false, tone = "info" } = {}) {
@@ -5609,7 +5725,7 @@
     }
 
     function uploadAbortError() {
-      return new DOMException("Video upload canceled.", "AbortError");
+      return new DOMException("Media upload canceled.", "AbortError");
     }
 
     function uploadRetryDelay(milliseconds, signal) {
@@ -5633,12 +5749,12 @@
       return Math.max(0, Number(response.headers.get("Upload-Offset") || 0));
     }
 
-    async function uploadRawVideoTus(file, upload, signal) {
+    async function uploadRawVideoTus(file, upload, signal, report = setRawVideoUploadState) {
       const config = upload.resumable;
       const metadata = [
         ["bucketName", config.bucket || upload.bucket],
         ["objectName", config.objectName || upload.storagePath],
-        ["contentType", file.type || "video/mp4"],
+        ["contentType", file.type || "application/octet-stream"],
         ["cacheControl", "3600"]
       ].map(([key, value]) => `${key} ${tusMetadataValue(value)}`).join(",");
       const createResponse = await fetch(config.endpoint, {
@@ -5658,7 +5774,7 @@
       const uploadUrl = new URL(location, config.endpoint).toString();
       const chunkSize = Number(config.chunkSize || 6 * 1024 * 1024);
       let offset = Math.max(0, Number(createResponse.headers.get("Upload-Offset") || 0));
-      setRawVideoUploadState(`Uploading ${file.name}...`, { progress: file.size ? (offset / file.size) * 100 : 100, busy: true });
+      report(`Uploading ${file.name}...`, { progress: file.size ? (offset / file.size) * 100 : 100, busy: true });
       while (offset < file.size) {
         if (signal.aborted) throw uploadAbortError();
         const chunkStart = offset;
@@ -5679,7 +5795,7 @@
               body: chunk,
               signal
             });
-            if (!response.ok) throw new Error(`Video chunk upload failed (${response.status}).`);
+            if (!response.ok) throw new Error(`Media chunk upload failed (${response.status}).`);
             offset = Math.max(end, Number(response.headers.get("Upload-Offset") || end));
             uploaded = true;
           } catch (error) {
@@ -5695,53 +5811,278 @@
             if (!uploaded && attempt < 3) await uploadRetryDelay(1000 * (2 ** attempt), signal);
           }
         }
-        if (!uploaded) throw lastError || new Error("Video upload stopped before the source file was complete.");
-        setRawVideoUploadState(`Uploading ${file.name}... ${Math.round((offset / file.size) * 100)}%`, { progress: (offset / file.size) * 100, busy: true });
+        if (!uploaded) throw lastError || new Error("Media upload stopped before the source file was complete.");
+        report(`Uploading ${file.name}... ${Math.round((offset / file.size) * 100)}%`, { progress: (offset / file.size) * 100, busy: true });
       }
     }
 
-    function uploadRawVideoSignedPut(file, upload, signal) {
+    function uploadRawVideoSignedPut(file, upload, signal, report = setRawVideoUploadState) {
       if (!upload.signedUrl) return Promise.reject(new Error("Private storage returned no browser upload URL."));
       return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         const abort = () => xhr.abort();
         signal.addEventListener("abort", abort, { once: true });
         xhr.open(upload.method || "PUT", upload.signedUrl);
-        xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
+        xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
         xhr.setRequestHeader("Cache-Control", "max-age=3600");
         xhr.setRequestHeader("x-upsert", "false");
         xhr.upload.onprogress = event => {
           if (!event.lengthComputable) return;
           const progress = (event.loaded / event.total) * 100;
-          setRawVideoUploadState(`Uploading ${file.name}... ${Math.round(progress)}%`, { progress, busy: true });
+          report(`Uploading ${file.name}... ${Math.round(progress)}%`, { progress, busy: true });
         };
         xhr.onload = () => {
           signal.removeEventListener("abort", abort);
           if (xhr.status >= 200 && xhr.status < 300) resolve();
-          else reject(new Error(`Private video upload failed (${xhr.status}).`));
+          else reject(new Error(`Private media upload failed (${xhr.status}).`));
         };
-        xhr.onerror = () => reject(new Error("Private video upload lost its network connection."));
+        xhr.onerror = () => reject(new Error("Private media upload lost its network connection."));
         xhr.onabort = () => reject(uploadAbortError());
         xhr.send(file);
       });
     }
 
-    async function uploadRawVideoAsset(file, reservation) {
+    async function uploadRawVideoAsset(file, reservation, options = {}) {
       const upload = reservation?.upload || {};
       if (!upload.ready) return reservation?.asset || null;
-      rawVideoUploadController = new AbortController();
-      const { signal } = rawVideoUploadController;
-      if (upload.resumable?.endpoint && upload.token) await uploadRawVideoTus(file, upload, signal);
-      else await uploadRawVideoSignedPut(file, upload, signal);
-      setRawVideoUploadState("Upload complete. Verifying private source...", { progress: 100, busy: true });
+      const controller = options.controller || new AbortController();
+      const report = options.report || setRawVideoUploadState;
+      if (!options.controller) rawVideoUploadController = controller;
+      const { signal } = controller;
+      if (upload.resumable?.endpoint && upload.token) await uploadRawVideoTus(file, upload, signal, report);
+      else await uploadRawVideoSignedPut(file, upload, signal, report);
+      report("Upload complete. Verifying private source...", { progress: 100, busy: true });
       const response = await authedFetch("/api/media/assets/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ assetId: reservation.asset.id, size: file.size })
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok || !body.ok || body.asset?.status !== "uploaded") throw new Error(body.error || "The uploaded video could not be verified.");
+      if (!response.ok || !body.ok || body.asset?.status !== "uploaded") throw new Error(body.error || "The uploaded media could not be verified.");
       return body.asset;
+    }
+
+    function setQuickPostUploadState(message, { progress = 0, busy = false, tone = "info" } = {}) {
+      const status = $("#quickPostUploadStatus");
+      const meter = $("#quickPostUploadProgress");
+      const actions = $("#quickPostUploadActions");
+      if (status) {
+        status.textContent = message || "";
+        status.dataset.tone = tone;
+      }
+      if (meter) {
+        meter.hidden = !busy && progress <= 0;
+        meter.value = Math.max(0, Math.min(100, Number(progress || 0)));
+      }
+      if (actions) actions.hidden = !busy;
+    }
+
+    function quickPostMediaKind(file = null) {
+      if (file?.type?.startsWith("video/")) return "video";
+      if (file?.type?.startsWith("image/")) return "image";
+      return "";
+    }
+
+    function quickPostCompatiblePlatforms(kind = "", format = "auto") {
+      if (kind === "image") return ["facebook", "instagram", "threads"];
+      if (kind === "video" && format === "standard") return ["facebook", "instagram", "youtube", "threads", "tiktok"];
+      if (kind === "video") return ["instagram", "youtube", "tiktok", "threads", "facebook"];
+      return ["facebook", "instagram", "youtube", "tiktok", "threads"];
+    }
+
+    function quickPostConnectedTargets(kind = "", format = "auto") {
+      return quickPostCompatiblePlatforms(kind, format).map(platformId => {
+        const account = authoritativeProviderAccount(platformId);
+        const state = accountConnectionState(account || {});
+        return state.connected && account?.disabled !== true ? {
+          platformId,
+          account,
+          identity: providerPostingIdentityName(platformId, account)
+        } : null;
+      }).filter(Boolean);
+    }
+
+    function renderQuickPostTargetOptions() {
+      const select = $("#quickPostPlatformInput");
+      if (!select) return;
+      const file = $("#quickPostMediaInput")?.files?.[0] || null;
+      const kind = quickPostMediaKind(file);
+      const format = $("#quickPostFormatInput")?.value || "auto";
+      const previous = select.value;
+      const rows = quickPostConnectedTargets(kind, format);
+      select.innerHTML = rows.length
+        ? rows.map(row => `<option value="${escapeHtml(row.platformId)}">${escapeHtml(platformName(row.platformId))}: ${escapeHtml(row.identity)}</option>`).join("")
+        : `<option value="">Connect a compatible posting account first</option>`;
+      select.disabled = !rows.length;
+      if (rows.some(row => row.platformId === previous)) select.value = previous;
+    }
+
+    function safeQuickPostUrl(value = "") {
+      try {
+        const url = new URL(String(value || "").trim());
+        return url.protocol === "https:" ? url.toString() : "";
+      } catch {
+        return "";
+      }
+    }
+
+    function connectedAccountProfileUrl(account = {}) {
+      const direct = [account.profileUrl, account.profile_url, account.permalink, account.channelUrl, account.pageUrl, account.url]
+        .map(safeQuickPostUrl)
+        .find(Boolean);
+      if (direct) return direct;
+      const platform = canonicalProviderAssetPlatform(account.platform || account.provider || account.oauthProvider || "");
+      const handle = String(account.handle || account.username || "").replace(/^@/, "").trim();
+      const providerId = String(account.providerAccountId || "").trim();
+      if (platform === "facebook" && providerId) return `https://www.facebook.com/${encodeURIComponent(providerId)}`;
+      if (platform === "instagram" && handle) return `https://www.instagram.com/${encodeURIComponent(handle)}/`;
+      if (platform === "threads" && handle) return `https://www.threads.net/@${encodeURIComponent(handle)}`;
+      if (platform === "x" && handle) return `https://x.com/${encodeURIComponent(handle)}`;
+      if (platform === "tiktok" && handle) return `https://www.tiktok.com/@${encodeURIComponent(handle)}`;
+      if (platform === "youtube" && providerId) return `https://www.youtube.com/channel/${encodeURIComponent(providerId)}`;
+      if (platform === "linkedin" && providerId) return `https://www.linkedin.com/company/${encodeURIComponent(providerId)}`;
+      if (platform === "pinterest" && handle) return `https://www.pinterest.com/${encodeURIComponent(handle)}/`;
+      return "";
+    }
+
+    function quickPostLinkDirectory(excludePlatform = "") {
+      const rows = [];
+      const seen = new Set();
+      mergedConnectedAccounts().filter(isRealConnectedAccount).forEach(account => {
+        const platformId = canonicalProviderAssetPlatform(account.platform || account.provider || account.oauthProvider || "");
+        if (!platformId || platformId === excludePlatform || seen.has(platformId)) return;
+        const url = connectedAccountProfileUrl(account);
+        if (!url) return;
+        seen.add(platformId);
+        rows.push({ platformId, label: platformName(platformId), url });
+      });
+      return rows.slice(0, 8);
+    }
+
+    function quickPostFormatName(platformId, kind, format) {
+      if (kind === "image") return `${platformName(platformId)} image post`;
+      if (format !== "short-form") return `${platformName(platformId)} video`;
+      return {
+        youtube: "YouTube Short",
+        instagram: "Instagram Reel",
+        tiktok: "TikTok video",
+        threads: "Threads video",
+        facebook: "Facebook Page video"
+      }[platformId] || `${platformName(platformId)} short-form video`;
+    }
+
+    function quickPostDescription(platformId, baseCopy, input = {}) {
+      const labels = { learn_more: "Learn more", shop_now: "Shop now", book_now: "Book now", join_now: "Join now", watch_more: "Watch more", follow: "Follow the story" };
+      const cta = labels[input.cta] || labels.learn_more;
+      const destination = safeQuickPostUrl(input.destinationUrl);
+      const profilePlacement = ["instagram", "tiktok"].includes(platformId);
+      const lines = [String(baseCopy || "").trim()];
+      if (destination) lines.push(profilePlacement ? `${cta} through the link in our profile.` : `${cta}: ${destination}`);
+      const directory = input.includeLinks ? quickPostLinkDirectory(platformId) : [];
+      if (directory.length) {
+        if (profilePlacement) lines.push("Find every connected channel through our profile links.");
+        else lines.push(`Find us everywhere:\n${directory.map(row => `${row.label}: ${row.url}`).join("\n")}`);
+      }
+      const limits = { threads: 500, instagram: 2200, tiktok: 2200, facebook: 12000, youtube: 5000 };
+      return lines.filter(Boolean).join("\n\n").slice(0, limits[platformId] || 5000);
+    }
+
+    function quickPostMediaRecord(file, asset = null) {
+      const kind = quickPostMediaKind(file);
+      return {
+        type: kind,
+        provider: SERVER_MODE ? "Private Social Cues media" : "Local preview",
+        name: file.name,
+        assetId: asset?.id || "",
+        storagePath: asset?.storagePath || "",
+        storageStatus: asset?.status || (SERVER_MODE ? "storage-not-configured" : "local-only"),
+        url: asset?.id ? `/api/media/assets/${encodeURIComponent(asset.id)}/content` : URL.createObjectURL(file),
+        suggestion: asset?.status === "uploaded" ? "Private source verified for provider delivery." : "Local preview only.",
+        createdAt: new Date().toISOString()
+      };
+    }
+
+    async function prepareQuickPost(mode = "single") {
+      const file = $("#quickPostMediaInput")?.files?.[0] || null;
+      const kind = quickPostMediaKind(file);
+      if (!file || !kind) {
+        showAppResult("Choose media first", "Quick Post accepts any image or video supported by your browser.", "error");
+        return;
+      }
+      const caption = clean($("#quickPostCaptionInput")?.value || "");
+      if (!caption) {
+        showAppResult("Add the post message", "Write the caption or description before preparing platform drafts.", "error");
+        return;
+      }
+      const format = kind === "video" ? ($("#quickPostFormatInput")?.value || "auto") : "image";
+      const allTargets = quickPostConnectedTargets(kind, format);
+      const selectedPlatform = $("#quickPostPlatformInput")?.value || "";
+      const targets = mode === "everywhere" ? allTargets : allTargets.filter(row => row.platformId === selectedPlatform).slice(0, 1);
+      if (!targets.length) {
+        showAppResult("No compatible posting account", "Connect and select an account that can publish this media type.", "error");
+        return;
+      }
+      const buttons = [$("#prepareQuickPostOne"), $("#prepareQuickPostEverywhere")].filter(Boolean);
+      buttons.forEach(button => { button.disabled = true; });
+      try {
+        let asset = null;
+        if (SERVER_MODE) {
+          setQuickPostUploadState(`Preparing private storage for ${file.name}...`, { progress: 0, busy: true });
+          const reservation = await reserveMediaAsset(file, `Quick post: ${file.name}`);
+          quickPostUploadController = new AbortController();
+          asset = await uploadRawVideoAsset(file, reservation, { controller: quickPostUploadController, report: setQuickPostUploadState });
+          if (asset?.status !== "uploaded") throw new Error("Private media storage is not ready for provider publishing.");
+        }
+        const now = new Date().toISOString();
+        const media = quickPostMediaRecord(file, asset);
+        const input = {
+          destinationUrl: $("#quickPostDestinationInput")?.value || model.onboarding?.website || "",
+          cta: $("#quickPostCtaInput")?.value || "learn_more",
+          includeLinks: Boolean($("#quickPostIncludeLinks")?.checked)
+        };
+        const batch = {
+          id: uid("quick"),
+          type: "quick-post",
+          title: clean($("#quickPostTitleInput")?.value || file.name.replace(/\.[^.]+$/, "")) || "Quick post",
+          brief: caption,
+          mode,
+          mediaKind: kind,
+          format,
+          destinationUrl: safeQuickPostUrl(input.destinationUrl),
+          destinationCta: input.cta,
+          includeConnectedLinks: input.includeLinks,
+          mediaAssetId: asset?.id || "",
+          createdAt: now,
+          updatedAt: now,
+          variants: targets.map(row => ({
+            id: uid("quick-variant"),
+            platform: row.platformId,
+            providerAccountId: row.account?.providerAccountId || "",
+            postingIdentity: row.identity,
+            status: "draft",
+            title: clean($("#quickPostTitleInput")?.value || "") || (row.platformId === "youtube" ? file.name.replace(/\.[^.]+$/, "") : ""),
+            copy: quickPostDescription(row.platformId, caption, input),
+            contentFormat: quickPostFormatName(row.platformId, kind, format),
+            destinationUrl: safeQuickPostUrl(input.destinationUrl),
+            destination: campaignDestinationForPlatform(platformById(row.platformId) || { id: row.platformId }, { destinationUrl: input.destinationUrl, destinationCta: input.cta }),
+            media: clone(media),
+            scheduledFor: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+            updatedAt: now
+          }))
+        };
+        model.quickPosts = Array.isArray(model.quickPosts) ? model.quickPosts : [];
+        model.quickPosts.unshift(batch);
+        model.quickPosts = model.quickPosts.slice(0, 50);
+        saveModel(`Prepared ${batch.variants.length} one-shot ${kind} post${batch.variants.length === 1 ? "" : "s"}.`);
+        setQuickPostUploadState(`${file.name} is private, verified, and ready for approval.`, { progress: 100, busy: false, tone: "success" });
+        showAppResult("Quick post prepared", `${batch.variants.length} platform-native draft${batch.variants.length === 1 ? " is" : "s are"} ready for approval.`, "success");
+      } catch (error) {
+        setQuickPostUploadState(error.name === "AbortError" ? "Upload canceled." : error.message, { progress: 0, busy: false, tone: "error" });
+        showAppResult("Quick post could not be prepared", error.message, "error");
+      } finally {
+        quickPostUploadController = null;
+        buttons.forEach(button => { button.disabled = false; });
+      }
     }
 
     async function createRawVideoRenderJob(campaign, rawVideo) {
@@ -6553,6 +6894,8 @@
       $("#themeInput").value = model.settings?.theme || "auto";
       $("#languageInput").value = model.settings?.language || "auto";
       $("#contentLanguageInput").value = model.settings?.contentLanguage || "interface";
+      const quickDestination = $("#quickPostDestinationInput");
+      if (quickDestination && !quickDestination.value) quickDestination.value = model.onboarding?.website || "";
       $("#openaiStatusInput").value = backendService("openai")?.ready ? "Connected in backend" : model.integrations?.openai || "Needed";
       $("#stripeStatusInput").value = backendService("stripe")?.ready ? "Stripe Checkout ready" : model.integrations?.stripe || "Needed";
       $("#discordStatusInput").value = backendService("discord")?.ready ? "Discord community OAuth/API ready" : model.integrations?.discord || "Needed";
@@ -6974,7 +7317,10 @@
         return ["queued", "scheduled", "queued-review-only"].includes(item.status)
           && (!item.scheduledFor || Date.parse(item.scheduledFor) <= Date.now());
       }).slice(0, 5);
-      const draftNeeds = model.campaigns.flatMap(c => (c.variants || []).filter(v => v.status === "draft" || v.status === "needs revision").map(v => ({ ...v, campaignTitle: c.title }))).slice(0, 5);
+      const draftNeeds = [
+        ...model.campaigns.flatMap(c => (c.variants || []).filter(v => v.status === "draft" || v.status === "needs revision").map(v => ({ ...v, campaignTitle: c.title }))),
+        ...(model.quickPosts || []).flatMap(batch => (batch.variants || []).filter(v => v.status === "draft" || v.status === "needs revision").map(v => ({ ...v, campaignTitle: batch.title || "Quick post" })))
+      ].slice(0, 5);
       $("#dashboardQueue").innerHTML = deliveryNeeds.length
         ? deliveryNeeds.map(deliveryHistoryCard).join("")
         : draftNeeds.length
@@ -7069,8 +7415,8 @@
         </div>
         ${redditHandoff ? "" : `<label class="field-label">Publish time (your local timezone)<input type="datetime-local" data-variant-schedule="${id}" value="${escapeHtml(formatDateTimeInput(v.scheduledFor))}"></label>`}
         <div class="variant-tools">
-          <button data-variant-action="attach-launch-asset" data-variant-id="${id}">Attach launch video</button>
-          <button data-variant-action="upload-media" data-variant-id="${id}">Local preview</button>
+          <button data-variant-action="upload-media" data-variant-id="${id}">Choose image or video</button>
+          <button data-variant-action="attach-launch-asset" data-variant-id="${id}">Use coming-soon asset</button>
           <button data-variant-action="attach-hosted-video" data-variant-id="${id}">Hosted video URL</button>
           <button data-variant-action="generate-media" data-variant-id="${id}" data-media-kind="Social Cues">Generate concept</button>
           <button data-variant-action="generate-media" data-variant-id="${id}" data-media-kind="Graphic">Graphic concept</button>
@@ -7085,7 +7431,131 @@
       const campaign = activeCampaign();
       const html = campaign?.variants.length ? campaign.variants.map(variantCard).join("") : `<div class="empty">Generate variants for the active campaign.</div>`;
       $("#variantList").innerHTML = html;
-      $("#approvalList").innerHTML = campaign?.variants.length ? campaign.variants.map(variantCard).join("") : `<div class="empty">No variants to approve yet.</div>`;
+      const quickApprovals = (model.quickPosts || []).flatMap(batch => (batch.variants || [])
+        .filter(variant => ["draft", "approved", "queued", "failed", "blocked"].includes(String(variant.status || "").toLowerCase()))
+        .map(variant => quickPostVariantCard(batch, variant)));
+      const campaignApprovals = campaign?.variants.length ? campaign.variants.map(variantCard) : [];
+      $("#approvalList").innerHTML = [...quickApprovals, ...campaignApprovals].join("") || `<div class="empty">No variants to approve yet.</div>`;
+    }
+
+    function quickPostBatchForVariant(variantId = "") {
+      for (const batch of model.quickPosts || []) {
+        const variant = (batch.variants || []).find(item => item.id === variantId);
+        if (variant) return { batch, variant };
+      }
+      return null;
+    }
+
+    function syncQuickPostCopy(variantId = "", value) {
+      const item = quickPostBatchForVariant(variantId);
+      if (!item) return;
+      if (value !== undefined) item.variant.copy = String(value);
+      item.variant.updatedAt = new Date().toISOString();
+      persistModelSnapshot(model);
+    }
+
+    function setQuickPostStatus(variantId, status) {
+      const item = quickPostBatchForVariant(variantId);
+      if (!item) return;
+      syncQuickPostCopy(variantId);
+      if (status === "queued" && item.variant.status !== "approved") {
+        showAppResult("Approval required", "Approve this one-shot draft before queueing it.", "error");
+        return;
+      }
+      item.variant.status = status;
+      item.variant.updatedAt = new Date().toISOString();
+      if (status === "queued") {
+        item.variant.queuedAt = item.variant.updatedAt;
+        const scheduledAt = Date.parse(item.variant.scheduledFor || "");
+        item.variant.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
+          ? item.variant.scheduledFor
+          : new Date(Date.now() + 2 * 60 * 1000).toISOString();
+      }
+      item.batch.updatedAt = item.variant.updatedAt;
+      saveModel(`${platformName(item.variant.platform)} quick post marked ${status}.`);
+    }
+
+    function setQuickPostSchedule(variantId, value) {
+      const item = quickPostBatchForVariant(variantId);
+      if (!item) return;
+      const scheduled = value ? new Date(value) : null;
+      if (scheduled && !Number.isNaN(scheduled.getTime())) item.variant.scheduledFor = scheduled.toISOString();
+      else delete item.variant.scheduledFor;
+      item.variant.updatedAt = new Date().toISOString();
+      item.batch.updatedAt = item.variant.updatedAt;
+      saveModel(item.variant.scheduledFor
+        ? `${platformName(item.variant.platform)} quick post scheduled for ${formatDateTime(item.variant.scheduledFor)}.`
+        : `${platformName(item.variant.platform)} quick post schedule cleared.`);
+    }
+
+    function approveAndQueueQuickPost(batchId = "") {
+      const batch = (model.quickPosts || []).find(item => item.id === batchId);
+      if (!batch) return;
+      const now = new Date().toISOString();
+      (batch.variants || []).forEach(variant => {
+        syncQuickPostCopy(variant.id);
+        variant.status = "queued";
+        variant.queuedAt = now;
+        const scheduledAt = Date.parse(variant.scheduledFor || "");
+        variant.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
+          ? variant.scheduledFor
+          : new Date(Date.now() + 2 * 60 * 1000).toISOString();
+        variant.updatedAt = now;
+      });
+      batch.updatedAt = now;
+      saveModel(`Approved and queued ${batch.variants.length} one-shot post${batch.variants.length === 1 ? "" : "s"}.`);
+    }
+
+    function removeQuickPost(batchId = "") {
+      const batch = (model.quickPosts || []).find(item => item.id === batchId);
+      if (!batch || !confirm(`Remove the ${batch.title || "quick post"} drafts from this workspace?`)) return;
+      model.quickPosts = model.quickPosts.filter(item => item.id !== batchId);
+      saveModel("Removed one-shot post drafts.");
+    }
+
+    function quickPostVariantCard(batch, variant) {
+      const platform = platformById(variant.platform) || { name: variant.platform || "Platform", accent: "#28d7ee" };
+      const media = variant.media || {};
+      const mediaPreview = media.url
+        ? `<div class="media-preview">${media.type === "video" ? `<video src="${escapeHtml(media.url)}" controls preload="metadata"></video>` : `<img src="${escapeHtml(media.url)}" alt="${escapeHtml(media.name || "Post media")}">`}<div class="media-copy">${escapeHtml(media.name || "Media")}<br>${escapeHtml(variant.contentFormat || media.type || "post")}</div></div>`
+        : `<div class="notice">${escapeHtml(media.name || "Private media")}</div>`;
+      return `<article class="variant" style="--accent:${escapeHtml(platform.accent || "#28d7ee")}">
+        <div class="variant-head">
+          <div>
+            <h3>${escapeHtml(platform.name)}: ${escapeHtml(variant.postingIdentity || "selected account")}</h3>
+            <p>${escapeHtml(batch.title || "Quick post")} - ${escapeHtml(variant.contentFormat || "one-shot post")}</p>
+          </div>
+          <span class="pill ${escapeHtml(statusClass(variant.status))}">${escapeHtml(variant.status || "draft")}</span>
+        </div>
+        <textarea data-quick-copy="${escapeHtml(variant.id)}">${escapeHtml(variant.copy || "")}</textarea>
+        ${mediaPreview}
+        ${variant.destinationUrl ? `<div class="notice"><strong>Primary link</strong><br><a href="${escapeHtml(variant.destinationUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(variant.destinationUrl)}</a></div>` : ""}
+        <label class="field-label">Publish time (your local timezone)<input type="datetime-local" data-quick-schedule="${escapeHtml(variant.id)}" value="${escapeHtml(formatDateTimeInput(variant.scheduledFor))}"></label>
+        <div class="variant-tools">
+          <button data-quick-action="approve" data-quick-variant="${escapeHtml(variant.id)}">Approve</button>
+          <button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Draft</button>
+          <button data-quick-action="queue" data-quick-variant="${escapeHtml(variant.id)}" ${variant.status === "approved" ? "" : "disabled"}>Queue</button>
+        </div>
+      </article>`;
+    }
+
+    function renderQuickPosts() {
+      renderQuickPostTargetOptions();
+      const target = $("#quickPostList");
+      if (!target) return;
+      const batches = (model.quickPosts || []).slice(0, 10);
+      target.innerHTML = batches.length ? batches.map(batch => `
+        <div class="stack" data-quick-batch="${escapeHtml(batch.id)}">
+          <div class="row">
+            <div><h3>${escapeHtml(batch.title || "Quick post")}</h3><p>${escapeHtml(batch.mode === "everywhere" ? "Every compatible connected account" : "One connected account")} - ${escapeHtml(batch.mediaKind || "media")}</p></div>
+            <div class="actions">
+              <button class="primary" data-quick-batch-action="queue-all" data-quick-batch-id="${escapeHtml(batch.id)}">Approve &amp; queue all</button>
+              <button class="danger" data-quick-batch-action="remove" data-quick-batch-id="${escapeHtml(batch.id)}">Remove</button>
+            </div>
+          </div>
+          ${(batch.variants || []).map(variant => quickPostVariantCard(batch, variant)).join("")}
+        </div>
+      `).join("") : `<div class="empty">Prepared one-shot posts will appear here.</div>`;
     }
 
     function renderRules() {
@@ -7112,14 +7582,17 @@
       const campaignRows = model.campaigns.flatMap(c => (c.variants || [])
         .filter(v => trackedStatuses.has(String(v.status || "").toLowerCase()))
         .map(v => ({ ...v, campaignId: c.id, campaignTitle: c.title, variantId: v.id, source: "campaign-variant" })));
+      const quickPostRows = (model.quickPosts || []).flatMap(batch => (batch.variants || [])
+        .filter(v => trackedStatuses.has(String(v.status || "").toLowerCase()))
+        .map(v => ({ ...v, campaignId: batch.id, campaignTitle: batch.title || "Quick post", variantId: v.id, source: "quick-post-variant" })));
       const queueRows = Array.isArray(metaState.publishQueue?.rows) ? metaState.publishQueue.rows : [];
       const byVariant = new Map();
-      [...campaignRows, ...queueRows].forEach(item => {
+      [...campaignRows, ...quickPostRows, ...queueRows].forEach(item => {
         const key = item.variantId || item.id || `${item.campaignId || "campaign"}:${item.platform || "provider"}:${item.scheduledFor || item.queuedAt || "unscheduled"}`;
         const previous = byVariant.get(key);
         const previousTime = Date.parse(previous?.updatedAt || previous?.publishedAt || previous?.blockedAt || previous?.scheduledFor || previous?.queuedAt || "") || 0;
         const nextTime = Date.parse(item.updatedAt || item.publishedAt || item.blockedAt || item.scheduledFor || item.queuedAt || "") || 0;
-        if (!previous || item.source === "campaign-variant" || nextTime >= previousTime) byVariant.set(key, { ...previous, ...item });
+        if (!previous || ["campaign-variant", "quick-post-variant"].includes(item.source) || nextTime >= previousTime) byVariant.set(key, { ...previous, ...item });
       });
       return [...byVariant.values()].sort((left, right) => {
         const leftTime = Date.parse(left.updatedAt || left.publishedAt || left.blockedAt || left.scheduledFor || left.queuedAt || "") || 0;
@@ -12283,7 +12756,10 @@
     }
 
     function renderRightRail() {
-      const approved = model.campaigns.flatMap(c => (c.variants || []).filter(v => ["approved", "queued", "published"].includes(v.status)).map(v => ({ ...v, campaignTitle: c.title }))).slice(0, 6);
+      const approved = [
+        ...model.campaigns.flatMap(c => (c.variants || []).filter(v => ["approved", "queued", "published"].includes(v.status)).map(v => ({ ...v, campaignTitle: c.title }))),
+        ...(model.quickPosts || []).flatMap(batch => (batch.variants || []).filter(v => ["approved", "queued", "published"].includes(v.status)).map(v => ({ ...v, campaignTitle: batch.title || "Quick post" })))
+      ].slice(0, 6);
       $("#launchRoom").innerHTML = approved.length ? approved.map(v => miniCard(v, v.campaignTitle)).join("") : `<div class="empty">Approve variants to fill the launch room.</div>`;
     }
 
@@ -12352,6 +12828,7 @@
       renderDashboard();
       setStudioMode(studioMode);
       renderRules();
+      renderQuickPosts();
       renderRawVideoPlan();
       renderElevenlabsVoiceoverStudio();
       renderVariants();
@@ -12428,6 +12905,15 @@
     $("#saveCampaign").addEventListener("click", saveCampaignFromForm);
     $("#createComingSoonShot").addEventListener("click", createComingSoonShotCampaign);
     $("#generateVariants").addEventListener("click", generateVariants);
+    $("#prepareQuickPostOne").addEventListener("click", () => prepareQuickPost("single"));
+    $("#prepareQuickPostEverywhere").addEventListener("click", () => prepareQuickPost("everywhere"));
+    $("#cancelQuickPostUpload").addEventListener("click", () => quickPostUploadController?.abort());
+    $("#quickPostMediaInput").addEventListener("change", () => {
+      renderQuickPostTargetOptions();
+      const file = $("#quickPostMediaInput")?.files?.[0];
+      if (file) setQuickPostUploadState(`${file.name} selected.`, { progress: 0, busy: false });
+    });
+    $("#quickPostFormatInput").addEventListener("change", renderQuickPostTargetOptions);
     $("#planRawVideoPack").addEventListener("click", buildRawVideoPack);
     $("#cancelRawVideoUpload").addEventListener("click", () => rawVideoUploadController?.abort());
     $("#createRawVideoFollowups").addEventListener("click", createRawVideoFollowups);
@@ -12673,6 +13159,18 @@
         selectCampaign(campaignButton.dataset.campaignId);
         return;
       }
+      const quickBatchButton = event.target.closest("[data-quick-batch-action]");
+      if (quickBatchButton) {
+        if (quickBatchButton.dataset.quickBatchAction === "queue-all") approveAndQueueQuickPost(quickBatchButton.dataset.quickBatchId);
+        if (quickBatchButton.dataset.quickBatchAction === "remove") removeQuickPost(quickBatchButton.dataset.quickBatchId);
+        return;
+      }
+      const quickVariantButton = event.target.closest("[data-quick-action][data-quick-variant]");
+      if (quickVariantButton) {
+        const status = { approve: "approved", draft: "draft", queue: "queued" }[quickVariantButton.dataset.quickAction];
+        if (status) setQuickPostStatus(quickVariantButton.dataset.quickVariant, status);
+        return;
+      }
       const variantButton = event.target.closest("[data-variant-action]");
       if (variantButton) {
         const variantId = variantButton.dataset.variantId;
@@ -12701,10 +13199,12 @@
     });
     document.addEventListener("input", event => {
       if (event.target.matches("[data-copy]")) syncCopy(event.target.dataset.copy);
+      if (event.target.matches("[data-quick-copy]")) syncQuickPostCopy(event.target.dataset.quickCopy, event.target.value);
     });
     document.addEventListener("change", event => {
       if (event.target.matches("[data-media-input]")) attachMedia(event.target.dataset.mediaInput, event.target);
       if (event.target.matches("[data-variant-schedule]")) setVariantSchedule(event.target.dataset.variantSchedule, event.target.value);
+      if (event.target.matches("[data-quick-schedule]")) setQuickPostSchedule(event.target.dataset.quickSchedule, event.target.value);
       if (event.target.matches("#discordGuildSelect")) {
         loadDiscordChannelsForGuild(String(event.target.value || "").trim());
       }

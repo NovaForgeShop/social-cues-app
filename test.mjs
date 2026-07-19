@@ -10,7 +10,8 @@ const localPromoCodes = [
   { code: "SC-LOCAL-BEACON-4M7Q", label: "Local test account 1", days: 120, active: true },
   { code: "SC-LOCAL-SIGNAL-9X2P", label: "Local test account 2", days: 120, active: true },
   { code: "SC-LOCAL-PULSE-6R8N", label: "Local test account 3", days: 120, active: true },
-  { code: "SC-LOCAL-LAUNCH-3V5K", label: "Local test account 4", days: 120, active: true }
+  { code: "SC-LOCAL-LAUNCH-3V5K", label: "Local test account 4", days: 120, active: true },
+  { code: "SC-LOCAL-MEMBER-8N4Q", label: "Email-bound member account", email: "mr.barton+member-promo@socialcuesapp.com", days: 120, memberOnly: true, active: true }
 ];
 const server = spawn(process.execPath, ["server.mjs"], {
   cwd: new URL(".", import.meta.url),
@@ -120,7 +121,10 @@ try {
   }
 
   const appHtml = await readFile(new URL("./social-cues-app.html", import.meta.url), "utf8");
-  if (!appHtml.includes("Attach launch video") || !appHtml.includes("Local preview only")) throw new Error("publish media UI must distinguish hosted launch assets from local previews");
+  if (!appHtml.includes("Choose image or video") || !appHtml.includes("Use coming-soon asset") || !appHtml.includes('accept="image/*,video/*"')) throw new Error("publish media UI must expose a general image/video picker and keep the approved launch asset optional");
+  for (const quickPostContract of ['data-studio-mode="post"', 'id="quickPostMediaInput"', 'id="prepareQuickPostOne"', 'id="prepareQuickPostEverywhere"', "function prepareQuickPost", "function quickPostDescription", "function renderQuickPosts"]) {
+    if (!appHtml.includes(quickPostContract)) throw new Error(`quick post foreground contract missing: ${quickPostContract}`);
+  }
   if (!appHtml.includes('data-variant-schedule=') || !appHtml.includes("function setVariantSchedule") || !appHtml.includes("scheduledAt > Date.now()") || !appHtml.includes("schedule cleared")) {
     throw new Error("campaign variants must preserve a user-selected local publish time when queued");
   }
@@ -172,6 +176,7 @@ try {
   if (/Cory Barton|ForgePilot|Forge Pilot|FPv2/i.test(appHtml)) throw new Error("app HTML contains stale personal or old brand defaults");
   if (/localStorage\.setItem\((SESSION_TOKEN_KEY|tokenKey|legacyTokenKey)/.test(`${appHtml}\n${serverSource}`)) throw new Error("session token should not be persisted into browser storage");
   if (!serverSource.includes("SOCIAL_CUES_PROMO_CODES") || /SC-TEST-[A-Z]+-[A-Z0-9]+/.test(serverSource)) throw new Error("active tester promo codes must be supplied through server environment, not deployed source");
+  if (!serverSource.includes("promo.email !== normalizedEmail") || !serverSource.includes("memberOnly: Boolean(promo.memberOnly)") || !serverSource.includes("if (entitlement.memberOnly) return \"Member\"")) throw new Error("email-bound member promo codes must not inherit owner/admin access");
   if (!serverSource.includes("REDDIT_DEVVIT_PROJECT_READY") || !serverSource.includes("redditDevvitProjectDeclaredReady") || !serverSource.includes('if (runtimeMode === "vercel") return redditDevvitProjectDeclaredReady')) throw new Error("production Reddit readiness must use verified flags instead of packaging the Devvit toolchain");
   if (serverSource.includes("promoFromSupabaseUser") || /raw_user_meta_data[\s\S]{0,400}promo/i.test(serverSource)) throw new Error("user-editable Supabase metadata must never grant promo authorization");
   if (!serverSource.includes('if (runtimeMode === "vercel") {\n        return { ok: false, status: 401, error: "Email or password did not match a verified Social Cues account." };')) throw new Error("hosted Supabase login must never fall back to a legacy local password hash");
@@ -233,7 +238,7 @@ try {
   if (!serverSource.includes("const [rows, normalizedRows] = await Promise.all") || !serverSource.includes("name: normalizedWorkspace.name")) throw new Error("workspace loading must preserve the normalized customer workspace name");
   if (!serverSource.includes("hasLegacySharedWorkspaceContamination") || !serverSource.includes('source: "legacy-shared-seed-quarantine"')) throw new Error("legacy shared-seed workspaces must be quarantined before customer delivery");
   if (/async function ensureWorkspaceBootstrap[\s\S]{0,500}getSeedModel\(\)/.test(serverSource)) throw new Error("customer workspace bootstrap must never clone the shared product seed");
-  if (!/async function clientWorkspaceModelForUser[\s\S]{0,2600}activeCampaignId: ""[\s\S]{0,100}campaigns: \[\][\s\S]{0,100}actions: \[\]/.test(serverSource) || /async function ensureWorkspaceBootstrap[\s\S]{0,1800}model\.campaigns\.push/.test(serverSource)) throw new Error("new customer workspaces must remain blank across creation and bootstrap");
+  if (!/async function clientWorkspaceModelForUser[\s\S]{0,2600}activeCampaignId: ""[\s\S]{0,100}campaigns: \[\][\s\S]{0,100}quickPosts: \[\][\s\S]{0,100}actions: \[\]/.test(serverSource) || /async function ensureWorkspaceBootstrap[\s\S]{0,1800}model\.campaigns\.push/.test(serverSource)) throw new Error("new customer workspaces must remain blank across creation and bootstrap");
   if (!serverSource.includes("function blankClientIntegrations") || !serverSource.includes("copySharedRegistryFields(model, sharedModel, { includeIntegrations: false })")) throw new Error("new customer workspaces must not inherit another user's provider-status labels");
   if (!/activeCampaignId: "",\s*campaigns: \[\]/.test(appHtml)) throw new Error("the browser default must not invent a starter campaign");
   if (/const first = defaultModel\.campaigns\[0\]/.test(appHtml)) throw new Error("browser boot must not generate content from a nonexistent starter campaign");
@@ -359,6 +364,8 @@ try {
   }
   if (!renderWorkerDeploySource.includes("MEDIA_RENDER_WORKER_CONFIGURED=false") || !renderWorkerDeploySource.includes("one uploaded source produces private completed outputs")) throw new Error("Cloud Run deployment must keep production renderer readiness false until a real private render passes");
   if (!serverSource.includes("createSignedSupabaseMediaUpload") || !serverSource.includes("/object/upload/sign/") || !serverSource.includes("/object/info/") || !serverSource.includes('url.pathname === "/api/media/assets/complete"')) throw new Error("private media intake must authorize and verify owner-bound Supabase uploads");
+  if (!serverSource.includes("providerMediaDeliveryToken") || !serverSource.includes("providerMediaDeliveryPayload") || !serverSource.includes("publishableVariantMediaUrl") || !serverSource.includes("Readable.fromWeb(upstream.body)")) throw new Error("provider delivery must stream owner-approved private media through an expiring signed capability URL");
+  if (!serverSource.includes('item.variant.platform === "threads"') || !serverSource.includes('media_type: "VIDEO"') || !serverSource.includes('media_type: "IMAGE"')) throw new Error("the shared publish queue must support Threads text, image, and video posts");
   if (!serverSource.includes('asset.status === "uploaded"') || !serverSource.includes('status: sourceUploadRequired ? "source-upload-required"') || !serverSource.includes('job.status = "queue-write-failed"')) throw new Error("render jobs must require a verified source and expose durable queue write failures");
   if (!appHtml.includes("uploadRawVideoTus") || !appHtml.includes('"Upload-Metadata"') || !appHtml.includes('"x-signature"') || !appHtml.includes("6 * 1024 * 1024") || !appHtml.includes("rawVideoUploadProgress") || !appHtml.includes("cancelRawVideoUpload")) throw new Error("raw video intake must expose resumable progress, retry recovery, and cancellation");
   if (!appHtml.includes("stripConsumedAuthCredentials") || !appHtml.includes('["verify", "token", "token_hash", "access_token", "refresh_token"]') || !/const oauthReturn = currentOAuthReturn\(\);\s+stripConsumedAuthCredentials\(\);/.test(appHtml)) throw new Error("consumed one-time authentication credentials must be removed from the app URL before session restoration");
@@ -605,7 +612,7 @@ try {
   if (!appHtml.includes("function authoritativeProviderAccount") || !appHtml.includes("providerAccountSelectionRow(canonical)") || !appHtml.includes("providerAccountOptionLabel(account)")) throw new Error("accounts GUI must use the authoritative provider-account selection response");
   if (!appHtml.includes('return `${identity} is connected. Additional provider access is still pending.`') || !/function providerPrimaryAction[\s\S]*?if \(connected \|\| label\.includes\("connected"\)\)[\s\S]*?label: "Reconnect"/.test(appHtml) || !appHtml.includes("providerPrimaryAction(readiness, connected)")) throw new Error("connected provider cards must use customer summaries and avoid stale first-time connection language");
   if (!appHtml.includes('"google_growth", "google_business"') || !appHtml.includes("selectedPlatformIds") || !appHtml.includes("primaryPlatforms") || !appHtml.includes("More services")) throw new Error("Accounts must keep selected services in the focused account queue and move unused Google/provider lanes behind setup disclosure");
-  if (!appHtml.includes('data-studio-mode="video"') || !appHtml.includes("function setStudioMode") || !appHtml.includes("visibleCreationPlatforms().map(platform => platform.id)")) throw new Error("Create must expose video as a first-class mode and generate only for active workspace platforms");
+  if (!appHtml.includes('data-studio-mode="post"') || !appHtml.includes('data-studio-mode="video"') || !appHtml.includes("function setStudioMode") || !appHtml.includes("visibleCreationPlatforms().map(platform => platform.id)")) throw new Error("Create must expose one-shot posting and video campaigns as distinct first-class modes");
   if (!appHtml.includes("function providerSourceIsActive") || !appHtml.includes("visibleSources")) throw new Error("Audience, library, and commerce sources must follow selected or connected workspace services");
   if (!appHtml.includes("Analytics lanes ready - refresh live insights") || !appHtml.includes("Accounts connected - analytics permission still needed") || !appHtml.includes("escapeHtml(analysisStatus)")) throw new Error("Audience analysis must not say it is waiting for accounts after canonical connected assets are present");
   if (!appHtml.includes('data-account-lane="reddit"') || !appHtml.includes("Reddit installed-community lane") || !appHtml.includes("Open Reddit workflow")) throw new Error("Accounts must expose the Reddit installed-community workflow without pretending it is OAuth");
@@ -622,8 +629,12 @@ try {
   const termsResponse = await fetch(base + "/terms");
   if (!termsResponse.ok || !(await termsResponse.text()).includes("Social Cues Terms of Service")) throw new Error("terms route failed");
 
+  const forgedMediaResponse = await fetch(base + "/api/media/provider/forged.signature");
+  const forgedMedia = await forgedMediaResponse.json();
+  if (forgedMediaResponse.status !== 403 || !/invalid or expired/i.test(forgedMedia.error || "")) throw new Error("forged provider media capability should be rejected before storage access");
+
   const model = await request("/api/model");
-  if (!model.workspace || !Array.isArray(model.campaigns)) throw new Error("bad model shape");
+  if (!model.workspace || !Array.isArray(model.campaigns) || !Array.isArray(model.quickPosts)) throw new Error("bad model shape");
   if (!Array.isArray(model.connectedAccounts)) throw new Error("bad accounts shape");
   if (Object.prototype.hasOwnProperty.call(model, "authUsers")) throw new Error("model exposed auth user ledger");
   if (JSON.stringify(model).includes('"token":') || JSON.stringify(model).includes('"accessToken":') || JSON.stringify(model).includes('"refreshToken":')) throw new Error("model leaked token material");
@@ -652,6 +663,15 @@ try {
   });
   if (!ownerSignup.ok || ownerSignup.entitlement?.source !== "owner-allowlist" || !ownerSignup.entitlement?.subscriptionPaid || !ownerSignup.entitlement?.appFeePaid) throw new Error("owner email signup should bypass invite lock and receive full access");
   if (ownerSignup.user?.role !== "Owner") throw new Error("owner signup should resolve to the Owner role");
+
+  const memberPromoSignup = await request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Workspace Member", email: "mr.barton+member-promo@socialcuesapp.com", password: "test-password-2026", promoCode: "SC-LOCAL-MEMBER-8N4Q", workspaceName: "Fresh Member Workspace" })
+  });
+  if (!memberPromoSignup.ok || memberPromoSignup.user?.role !== "Member" || memberPromoSignup.entitlement?.memberOnly !== true) throw new Error("member-only promo must override the owner-email alias rule");
+  const memberWorkspace = await request("/api/model", { headers: { Authorization: `Bearer ${memberPromoSignup.session.token}` } });
+  if (memberWorkspace.campaigns?.length || memberWorkspace.quickPosts?.length || memberWorkspace.connectedAccounts?.some(account => account.status === "connected")) throw new Error("member promo signup must receive a fresh blank isolated workspace");
 
   const accountEmail = `alpha-${Date.now()}@socialcuesapp.com`;
   const accountPassword = "test-password-2026";

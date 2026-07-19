@@ -69,6 +69,12 @@ test('local workstation navigation and safe buttons respond', async ({ page }) =
   await expect(page.locator('[data-view="integrations"]')).toBeHidden();
 
   await page.locator('[data-view="studio"]').click();
+  await expect(page.locator('[data-studio-mode="post"]')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('[data-studio-lane="post"]')).toBeVisible();
+  await expect(page.locator('#quickPostMediaInput')).toHaveAttribute('accept', 'image/*,video/*');
+  await expect(page.locator('#prepareQuickPostOne')).toBeVisible();
+  await expect(page.locator('#prepareQuickPostEverywhere')).toBeVisible();
+  await page.locator('[data-studio-mode="video"]').click();
   await expect(page.locator('[data-studio-mode="video"]')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('[data-studio-lane="video"]')).toBeVisible();
   await expect(page.locator('#rawVideoMessageInput')).toBeVisible();

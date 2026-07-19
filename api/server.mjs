@@ -11,6 +11,7 @@ import crypto from "node:crypto";
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import webpush from "web-push";
 
@@ -317,8 +318,10 @@ function configuredPromoCodes(raw = process.env.SOCIAL_CUES_PROMO_CODES || "") {
     .map((item, index) => ({
       code: normalizePromoCode(typeof item === "string" ? item : item?.code),
       label: String(item?.label || `Test account ${index + 1}`).slice(0, 80),
+      email: normalizeEmail(typeof item === "string" ? "" : item?.email),
       access: "highest-tier-test",
       days: Math.max(1, Math.min(365, Number(item?.days || 120))),
+      memberOnly: item?.memberOnly === true,
       active: item?.active !== false
     }))
     .filter(item => item.code);
@@ -2648,9 +2651,16 @@ function providerPublishCheck(model = {}, providerId = "") {
   return checks[providerId]?.publishProbe || null;
 }
 
+function contentVariantBatches(model = {}) {
+  return [
+    ...(Array.isArray(model.campaigns) ? model.campaigns : []),
+    ...(Array.isArray(model.quickPosts) ? model.quickPosts : [])
+  ];
+}
+
 function latestProviderPublishAttempt(model = {}, provider = "") {
   let latest = null;
-  for (const campaign of model.campaigns || []) {
+  for (const campaign of contentVariantBatches(model)) {
     for (const variant of campaign.variants || []) {
       if (variant.platform !== provider) continue;
       const attempt = variant.lastPublishAttempt || (Array.isArray(variant.publishAttempts) ? variant.publishAttempts[0] : null);
@@ -3150,7 +3160,7 @@ function queueRecordFromVariant(item = {}, session = null) {
         : "queued";
   return {
     id: `variant-${item.variant?.id || uid("queue")}`,
-    source: "campaign-variant",
+    source: item.campaign?.type === "quick-post" ? "quick-post-variant" : "campaign-variant",
     campaignId: item.campaign?.id || "",
     campaignTitle: item.campaign?.title || "",
     variantId: item.variant?.id || "",
@@ -3183,7 +3193,7 @@ function scheduledVariantLedgerItems(model = {}, options = {}) {
   const trackedStatuses = new Set(["approved", "queued", "retrying", "processing", "submitted", "published", "blocked", "failed"]);
   const terminalStatuses = new Set(["published", "blocked", "failed"]);
   const items = [];
-  for (const campaign of model.campaigns || []) {
+  for (const campaign of contentVariantBatches(model)) {
     for (const variant of campaign.variants || []) {
       const status = String(variant.status || "").toLowerCase();
       if (!trackedStatuses.has(status)) continue;
@@ -5404,6 +5414,38 @@ async function signedSupabaseMediaUrl(storagePath, expiresIn = 300) {
   return new URL(body.signedURL, supabaseUrl).toString();
 }
 
+function providerMediaDeliveryToken(asset = {}, expiresIn = 7200) {
+  if (!authSessionSecret || !asset.storagePath || asset.status !== "uploaded") return "";
+  const payload = Buffer.from(JSON.stringify({
+    path: String(asset.storagePath),
+    type: String(asset.contentType || "application/octet-stream"),
+    exp: Math.floor(Date.now() / 1000) + Math.max(300, Math.min(Number(expiresIn || 7200), 21600))
+  })).toString("base64url");
+  const signature = crypto.createHmac("sha256", authSessionSecret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function providerMediaDeliveryUrl(asset = {}, expiresIn = 7200) {
+  const token = providerMediaDeliveryToken(asset, expiresIn);
+  return token ? `${brandHomeUrl}/api/media/provider/${token}` : "";
+}
+
+function providerMediaDeliveryPayload(token = "") {
+  const [payload, signature] = String(token || "").split(".");
+  if (!payload || !signature || !authSessionSecret) return null;
+  const expected = crypto.createHmac("sha256", authSessionSecret).update(payload).digest("base64url");
+  const expectedBuffer = Buffer.from(expected);
+  const signatureBuffer = Buffer.from(signature);
+  if (expectedBuffer.length !== signatureBuffer.length || !crypto.timingSafeEqual(expectedBuffer, signatureBuffer)) return null;
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (!decoded.path || Number(decoded.exp || 0) <= Math.floor(Date.now() / 1000)) return null;
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
 function supabaseStorageOrigin() {
   const url = new URL(supabaseUrl);
   if (/\.supabase\.(co|in|red)$/i.test(url.hostname) && !url.hostname.includes(".storage.supabase.")) {
@@ -6259,7 +6301,7 @@ function workspaceModelIdForUser(user = {}) {
   return [user.workspaceId, user.supabaseUserId, user.id].find(isUuid) || "";
 }
 
-const workspaceScopedCollectionKeys = ["campaigns", "actions", "proof", "mediaAssets", "mediaRenderJobs", "publishQueue", "analyticsSnapshots", "providerStateSnapshots", "activity"];
+const workspaceScopedCollectionKeys = ["campaigns", "quickPosts", "actions", "proof", "mediaAssets", "mediaRenderJobs", "publishQueue", "analyticsSnapshots", "providerStateSnapshots", "activity"];
 const sharedRegistryKeys = ["authUsers", "deviceSessions", "oauthStates", "oauthEvents", "metaDeletionRequests", "billing", "integrations"];
 
 function cloneJson(value) {
@@ -6306,6 +6348,7 @@ function serverRegistryModel(model = {}) {
     },
     workspaces: [],
     campaigns: [],
+    quickPosts: [],
     actions: [],
     proof: [],
     mediaAssets: [],
@@ -6428,6 +6471,7 @@ async function clientWorkspaceModelForUser(user = {}, input = {}, sharedModel = 
     },
     activeCampaignId: "",
     campaigns: [],
+    quickPosts: [],
     actions: [],
     proof: [],
     mediaAssets: [],
@@ -6781,7 +6825,7 @@ async function mirrorNormalizedWorkspaceRows(model, user = {}, workspaceRows = {
   }
 
   const receiptRows = [];
-  for (const campaign of model.campaigns || []) {
+  for (const campaign of contentVariantBatches(model)) {
     for (const variant of campaign.variants || []) {
       const recordedReceipts = Array.isArray(variant.publishReceipts) ? [...variant.publishReceipts] : [];
       if (variant.status === "published" && variant.providerPostId && !recordedReceipts.some(receipt => String(receipt.providerPostId || "") === String(variant.providerPostId))) {
@@ -7336,7 +7380,7 @@ async function getModel() {
     model.analytics = seed.analytics || { metrics: [] };
     changed = true;
   }
-  for (const key of ["publishQueue", "analyticsSnapshots", "providerStateSnapshots", "mediaRenderJobs"]) {
+  for (const key of ["quickPosts", "publishQueue", "analyticsSnapshots", "providerStateSnapshots", "mediaRenderJobs"]) {
     if (!Array.isArray(model[key])) {
       model[key] = [];
       changed = true;
@@ -7849,6 +7893,9 @@ function promoLedgerClaimForEmail(model, email) {
 function validatePromoClaim(model, promo, email) {
   if (!promo) return { ok: true };
   const normalizedEmail = normalizeEmail(email);
+  if (promo.email && promo.email !== normalizedEmail) {
+    return { ok: false, status: 403, error: "That Social Cues promo code is assigned to a different email address." };
+  }
   const userClaim = activePromoUserClaim(model, promo.code);
   if (userClaim && normalizeEmail(userClaim.email) !== normalizedEmail) {
     return { ok: false, status: 409, error: "That Social Cues promo code has already been assigned to a tester." };
@@ -7960,13 +8007,15 @@ function publicEntitlement(user) {
     appFeePaid: Boolean(active && (entitlement.appFeePaid || entitlement.fullAccess)),
     paymentStatus: entitlement.paymentStatus || (entitlement.active ? "active" : "unpaid"),
     alphaHonorDiscountPercent: Number(entitlement.alphaHonorDiscountPercent || 0),
-    deactivatesBeforeAlpha: Boolean(entitlement.deactivatesBeforeAlpha)
+    deactivatesBeforeAlpha: Boolean(entitlement.deactivatesBeforeAlpha),
+    memberOnly: Boolean(entitlement.memberOnly)
   };
 }
 
 function resolvedAppUserRole(user = null) {
   if (!user) return "Guest";
   const entitlement = publicEntitlement(user);
+  if (entitlement.memberOnly) return "Member";
   if (isSignupOwnerEmail(user.email) || entitlement.source === "owner-allowlist" || entitlement.tier === "owner") return "Owner";
   if (entitlement.source === "promo-code") return "Alpha tester";
   if (entitlement.source === "stripe") return "Customer";
@@ -8698,7 +8747,7 @@ async function processScheduledPublishWorkerJob(job, registry) {
   }
   const variantId = String(job.payload?.variantId || job.payload?.externalKey || "").replace(/^variant-/, "");
   let item = null;
-  for (const campaign of model.campaigns || []) {
+  for (const campaign of contentVariantBatches(model)) {
     const variant = (campaign.variants || []).find(candidate => String(candidate.id || "") === variantId);
     if (variant) { item = { campaign, variant }; break; }
   }
@@ -8781,7 +8830,7 @@ async function processProviderPublishStatusWorkerJob(job, registry) {
   const data = response?.data || response || {};
   const status = String(data.status || "");
   let target = null;
-  for (const campaign of model.campaigns || []) {
+  for (const campaign of contentVariantBatches(model)) {
     if (job.payload.campaignId && String(campaign.id) !== String(job.payload.campaignId)) continue;
     const variant = (campaign.variants || []).find(candidate => String(candidate.id || "") === String(job.payload.variantId || ""));
     if (variant) { target = { campaign, variant }; break; }
@@ -9184,6 +9233,7 @@ function applyPromoEntitlement(user, promo, input = {}) {
     subscriptionPaid: true,
     appFeePaid: true,
     paymentStatus: "promo-paid",
+    memberOnly: Boolean(promo.memberOnly),
     alphaHonorDiscountPercent: 10,
     alphaPremiumPercent: 25,
     deactivatesBeforeAlpha: false,
@@ -9226,6 +9276,7 @@ function applyPaidEntitlementForEmail(model, email) {
 
 function applyOwnerEntitlement(user) {
   if (!user || !isSignupOwnerEmail(user.email)) return null;
+  if (user.entitlement?.memberOnly) return user.entitlement;
   if (publicEntitlement(user).active) return user.entitlement;
   user.entitlement = {
     access: "owner-full-access",
@@ -13046,7 +13097,7 @@ async function createAppAccount(model, input = {}) {
   }
   const promoClaim = validatePromoClaim(model, promo, email);
   if (!promoClaim.ok) return promoClaim;
-  const ownerSignup = isSignupOwnerEmail(email);
+  const ownerSignup = isSignupOwnerEmail(email) && !promo?.memberOnly;
   if (!ownerSignup && !promo) {
     return {
       ok: false,
@@ -16867,7 +16918,7 @@ function queuedVariants(model, options = {}) {
   const includeFuture = Boolean(options.includeFuture);
   const platforms = new Set((options.platforms || []).filter(Boolean));
   const items = [];
-  for (const campaign of model.campaigns || []) {
+  for (const campaign of contentVariantBatches(model)) {
     for (const variant of campaign.variants || []) {
       const hasSchedule = Boolean(variant.scheduledFor || variant.queuedAt);
       const queueEligible = variant.status === "queued" || (variant.status === "approved" && hasSchedule);
@@ -16894,6 +16945,20 @@ function variantMediaUrl(variant, type = "") {
   if (!raw || !/^https:\/\//i.test(raw)) return "";
   if (type && media.type && media.type !== type) return "";
   return raw;
+}
+
+async function publishableVariantMediaUrl(model = {}, variant = {}, type = "", user = null) {
+  const direct = variantMediaUrl(variant, type);
+  if (direct) return direct;
+  const media = variant.media || {};
+  const assetId = String(media.assetId || variant.mediaAssetId || "");
+  const storagePath = String(media.storagePath || variant.mediaStoragePath || "");
+  const asset = (model.mediaAssets || []).find(item => (
+    (assetId && item.id === assetId) || (storagePath && item.storagePath === storagePath)
+  ) && (!user || ownedByUser(item, user.id)));
+  if (!asset || asset.status !== "uploaded" || !asset.storagePath) return "";
+  if (type && asset.kind && asset.kind !== type) return "";
+  return providerMediaDeliveryUrl(asset, 7200);
 }
 
 function publishBlocked(provider, item, error, extra = {}) {
@@ -17063,8 +17128,8 @@ async function attemptQueuedVariantPublish(model, item, options = {}) {
     if (item.variant.platform === "facebook") {
       const gate = metaGate(model, "facebook_pages_publish", { platform: "facebook" });
       const page = selectedProviderAccount(model, "facebook", options.user || null);
-      const videoUrl = variantMediaUrl(item.variant, "video");
-      const imageUrl = variantMediaUrl(item.variant, "image");
+      const videoUrl = await publishableVariantMediaUrl(model, item.variant, "video", options.user || null);
+      const imageUrl = await publishableVariantMediaUrl(model, item.variant, "image", options.user || null);
       if (!gate.ready) return publishBlocked("meta", item, "Facebook Page publishing is gated.", { gate });
       if (!page) return publishBlocked("meta", item, "No connected Facebook Page with stored token was found.", { connectRoute: "/api/oauth/meta/start?platform=facebook" });
       if (!textValue) return publishBlocked("meta", item, "Facebook message is empty.");
@@ -17080,8 +17145,8 @@ async function attemptQueuedVariantPublish(model, item, options = {}) {
     if (item.variant.platform === "instagram") {
       const gate = metaGate(model, "instagram_publish", { platform: "instagram" });
       const ig = selectedProviderAccount(model, "instagram", options.user || null);
-      const imageUrl = variantMediaUrl(item.variant, "image");
-      const videoUrl = variantMediaUrl(item.variant, "video");
+      const imageUrl = await publishableVariantMediaUrl(model, item.variant, "image", options.user || null);
+      const videoUrl = await publishableVariantMediaUrl(model, item.variant, "video", options.user || null);
       if (!gate.ready) return publishBlocked("meta", item, "Instagram publishing is gated.", { gate });
       if (!ig) return publishBlocked("meta", item, "No connected Instagram professional account with stored token was found.", { connectRoute: "/api/oauth/instagram/start" });
       if (!imageUrl && !videoUrl) return publishBlocked("meta", item, "Instagram publishing requires a hosted HTTPS image or video URL.");
@@ -17094,7 +17159,7 @@ async function attemptQueuedVariantPublish(model, item, options = {}) {
     }
 
     if (item.variant.platform === "youtube") {
-      const videoUrl = variantMediaUrl(item.variant, "video");
+      const videoUrl = await publishableVariantMediaUrl(model, item.variant, "video", options.user || null);
       const title = String(item.variant.title || item.campaign.title || textValue.split("\n")[0] || "Social Cues upload").trim().slice(0, 100);
       if (!videoUrl) return publishBlocked("youtube", item, "YouTube upload requires a hosted HTTPS video URL.", { requiredAsset: "Upload/attach a hosted video file before publishing to YouTube." });
       let account = null;
@@ -17113,6 +17178,32 @@ async function attemptQueuedVariantPublish(model, item, options = {}) {
       if (!live) return { ok: true, provider: "youtube", dryRun: true, account: publicAccount(account), wouldUpload: { videoUrl, metadata }, ...base };
       const upload = await uploadYouTubeHostedVideo(account, { title, description: textValue, videoUrl, tags: metadata.snippet.tags, privacyStatus: metadata.status.privacyStatus });
       return { ok: true, provider: "youtube", dryRun: false, account: publicAccount(account), response: upload.response, upload, ...base };
+    }
+
+    if (item.variant.platform === "threads") {
+      const gate = metaGate(model, "threads_publish");
+      const account = selectedProviderAccount(model, "threads", options.user || null);
+      const imageUrl = await publishableVariantMediaUrl(model, item.variant, "image", options.user || null);
+      const videoUrl = await publishableVariantMediaUrl(model, item.variant, "video", options.user || null);
+      if (!gate.ready) return publishBlocked("threads", item, "Threads publishing is gated.", { gate });
+      if (!account || !isRealConnectedAccount(account) || !tokenForThreadsAccount(account)) {
+        return publishBlocked("threads", item, "Connect Threads OAuth before Social Cues can publish.", { connectRoute: "/api/oauth/threads/start", requiredScopes: ["threads_basic", "threads_content_publish"] });
+      }
+      if (!hasAllScopes(account, ["threads_basic", "threads_content_publish"])) {
+        return publishBlocked("threads", item, "Reconnect Threads with content publishing permission.", { connectRoute: "/api/oauth/threads/start", requiredScopes: ["threads_basic", "threads_content_publish"], grantedScopes: account.scopes || [] });
+      }
+      const threadText = textValue.replace(/\s+/g, " ").slice(0, 500);
+      if (!threadText && !imageUrl && !videoUrl) return publishBlocked("threads", item, "Threads requires text, an image, or a video.");
+      const payload = videoUrl
+        ? { media_type: "VIDEO", video_url: videoUrl, text: threadText }
+        : imageUrl
+          ? { media_type: "IMAGE", image_url: imageUrl, text: threadText }
+          : { media_type: "TEXT", text: threadText };
+      if (!live) return { ok: true, provider: "threads", dryRun: true, account: publicAccount(account), wouldCreate: payload, ...base };
+      const token = tokenForThreadsAccount(account);
+      const container = await threadsApi(`/${account.providerAccountId}/threads`, payload, token, { method: "POST" });
+      const publish = await threadsApi(`/${account.providerAccountId}/threads_publish`, { creation_id: container.id }, token, { method: "POST" });
+      return { ok: true, provider: "threads", dryRun: false, account: publicAccount(account), container, publish, providerPostId: publish.id || null, ...base };
     }
 
     if (item.variant.platform === "x") {
@@ -17183,7 +17274,8 @@ async function attemptQueuedVariantPublish(model, item, options = {}) {
         return publishBlocked("linkedin", item, "LinkedIn has not granted both the Company posting scope and an eligible Page role to this selected asset.", { requiredScopes: ["w_organization_social"], allowedPageRoles: [...linkedInOrganizationPostRoles], grantedRoles: linkedInOrganizationRoles(account), connectRoute: "/api/oauth/linkedin/start" });
       }
       if (!textValue) return publishBlocked("linkedin", item, "LinkedIn post commentary is empty.");
-      const mediaUrl = variantMediaUrl(item.variant, "image") || variantMediaUrl(item.variant, "video");
+      const mediaUrl = await publishableVariantMediaUrl(model, item.variant, "image", options.user || null)
+        || await publishableVariantMediaUrl(model, item.variant, "video", options.user || null);
       if (mediaUrl) {
         return publishBlocked("linkedin", item, "LinkedIn media publishing needs the separate Images/Videos upload workflow. This adapter is text-only until that asset upload is implemented and tested.", { mediaUrl, textOnlyReady: true });
       }
@@ -17205,7 +17297,7 @@ async function attemptQueuedVariantPublish(model, item, options = {}) {
     }
 
     if (item.variant.platform === "tiktok") {
-      const videoUrl = variantMediaUrl(item.variant, "video");
+      const videoUrl = await publishableVariantMediaUrl(model, item.variant, "video", options.user || null);
       if (!videoUrl) return publishBlocked("tiktok", item, "TikTok publishing requires a hosted HTTPS video URL or photo URL from a verified domain/prefix.", { requiredAsset: "Attach hosted video media first." });
       const account = selectedProviderAccount(model, "tiktok", options.user || null);
       if (!account || !isRealConnectedAccount(account) || !tokenForTikTokAccount(account)) return publishBlocked("tiktok", item, "Connect TikTok OAuth before Social Cues can publish or upload drafts to TikTok.", { connectRoute: "/api/oauth/tiktok/start" });
@@ -17223,7 +17315,9 @@ async function attemptQueuedVariantPublish(model, item, options = {}) {
       if (!hasAnyScope(account, ["pins:write"])) return publishBlocked("pinterest", item, "Reconnect Pinterest with pins:write before Social Cues can prepare approved Pins.", { connectRoute: "/api/oauth/pinterest/start", requiredScopes: ["pins:write"] });
       const title = String(item.variant.title || item.campaign.title || textValue.split("\n")[0] || "Social Cues Pin").replace(/\s+/g, " ").trim().slice(0, 100);
       const description = (textValue || item.campaign.brief || "Social Cues evergreen campaign Pin.").slice(0, 500);
-      const mediaUrl = variantMediaUrl(item.variant, "image") || variantMediaUrl(item.variant, "video") || item.variant.imageUrl || item.variant.videoUrl || "";
+      const mediaUrl = await publishableVariantMediaUrl(model, item.variant, "image", options.user || null)
+        || await publishableVariantMediaUrl(model, item.variant, "video", options.user || null)
+        || item.variant.imageUrl || item.variant.videoUrl || "";
       const destinationLink = item.variant.destinationUrl || item.campaign.destinationUrl || brandHomeUrl;
       const pinDraft = {
         board_id: item.variant.pinterestBoardId || null,
@@ -17346,7 +17440,7 @@ function rememberPublishAttempt(item, result) {
 
 function latestProviderPublishBlocker(model, provider) {
   let latest = null;
-  for (const campaign of model.campaigns || []) {
+  for (const campaign of contentVariantBatches(model)) {
     for (const variant of campaign.variants || []) {
       if (variant.platform !== provider) continue;
       const attempt = variant.lastPublishAttempt;
@@ -19902,6 +19996,51 @@ async function route(req, res) {
         ? [...["SUPABASE_URL"].filter(name => !envPresent(name)), ...missingSupabaseServiceEnv()]
         : ["VERCEL_BLOB_READ_WRITE_TOKEN"].filter(name => !envPresent(name))
     });
+  }
+
+  const providerMediaMatch = url.pathname.match(/^\/api\/media\/provider\/([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/);
+  if (providerMediaMatch && ["GET", "HEAD"].includes(req.method)) {
+    const payload = providerMediaDeliveryPayload(providerMediaMatch[1]);
+    if (!payload) return json(res, 403, { ok: false, error: "This provider media link is invalid or expired." });
+    try {
+      const signedUrl = await signedSupabaseMediaUrl(payload.path, 300);
+      const headers = {};
+      if (req.headers.range) headers.Range = req.headers.range;
+      const upstream = await fetch(signedUrl, { method: req.method, headers });
+      if (!upstream.ok && upstream.status !== 206) return json(res, upstream.status, { ok: false, error: "Private media could not be delivered to the provider." });
+      const responseHeaders = {
+        "Content-Type": upstream.headers.get("content-type") || payload.type || "application/octet-stream",
+        "Cache-Control": "private, max-age=60",
+        "X-Content-Type-Options": "nosniff",
+        "Accept-Ranges": upstream.headers.get("accept-ranges") || "bytes"
+      };
+      for (const name of ["content-length", "content-range", "etag", "last-modified"]) {
+        const value = upstream.headers.get(name);
+        if (value) responseHeaders[name] = value;
+      }
+      res.writeHead(upstream.status, responseHeaders);
+      if (req.method === "HEAD" || !upstream.body) return res.end();
+      Readable.fromWeb(upstream.body).pipe(res);
+      return;
+    } catch (error) {
+      return json(res, 502, { ok: false, error: `Private media delivery failed: ${error.message}` });
+    }
+  }
+
+  const mediaPreviewMatch = url.pathname.match(/^\/api\/media\/assets\/([^/]+)\/content$/);
+  if (mediaPreviewMatch && req.method === "GET") {
+    const sharedModel = await getModel();
+    const session = await entitledSessionFromRequest(sharedModel, req);
+    if (!session?.user) return appAccessRequiredResponse(res);
+    const model = await modelForSession(session, sharedModel);
+    const asset = (model.mediaAssets || []).find(item => item.id === mediaPreviewMatch[1] && ownedByUser(item, session.user.id));
+    if (!asset || asset.status !== "uploaded" || !asset.storagePath) return json(res, 404, { ok: false, error: "This private media asset is not available." });
+    try {
+      res.writeHead(302, { Location: await signedSupabaseMediaUrl(asset.storagePath, 300), "Cache-Control": "private, no-store" });
+      return res.end();
+    } catch (error) {
+      return json(res, 502, { ok: false, error: `Private media preview failed: ${error.message}` });
+    }
   }
 
   if (url.pathname === "/api/media/assets" && req.method === "POST") {
