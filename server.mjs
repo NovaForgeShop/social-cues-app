@@ -6665,12 +6665,65 @@ async function cleanupNormalizedProviderPlaceholders(workspaceId, ownerUserId, a
   return { deleted: staleIds.length };
 }
 
+function providerPersistenceAccountKey(account = {}) {
+  const providerAccountId = String(account.providerAccountId || account.id || "");
+  if (!providerAccountId || !providerIdentityEvidence(account).verified) return "";
+  return [
+    String(account.ownerUserId || account.createdBy || ""),
+    String(account.oauthProvider || account.provider || account.platform || ""),
+    String(account.platform || ""),
+    providerAccountId
+  ].join("|");
+}
+
+function providerAccountFreshness(account = {}) {
+  return [account.credentialUpdatedAt, account.connectedAt, account.updatedAt]
+    .map(value => Date.parse(value || ""))
+    .filter(Number.isFinite)
+    .reduce((latest, value) => Math.max(latest, value), 0);
+}
+
+function providerAccountPersistenceRank(account = {}) {
+  const state = providerAccountConnectionState(account);
+  return (state.tokenStored ? 8 : 0)
+    + (state.connected ? 4 : 0)
+    + (state.refreshStored ? 2 : 0)
+    + (state.identityVerified ? 1 : 0);
+}
+
+function dedupeProviderAccounts(accounts = []) {
+  const deduped = [];
+  const keyedIndexes = new Map();
+  for (const account of Array.isArray(accounts) ? accounts : []) {
+    const key = providerPersistenceAccountKey(account);
+    if (!key) {
+      deduped.push(account);
+      continue;
+    }
+    const existingIndex = keyedIndexes.get(key);
+    if (existingIndex === undefined) {
+      keyedIndexes.set(key, deduped.length);
+      deduped.push(account);
+      continue;
+    }
+    const existing = deduped[existingIndex];
+    const candidateFreshness = providerAccountFreshness(account);
+    const existingFreshness = providerAccountFreshness(existing);
+    const candidateWins = candidateFreshness > existingFreshness
+      || (candidateFreshness === existingFreshness && providerAccountPersistenceRank(account) > providerAccountPersistenceRank(existing));
+    const winner = candidateWins ? account : existing;
+    const fallback = candidateWins ? existing : account;
+    deduped[existingIndex] = mergeServerOnlyAccountFields(cloneJson(winner), fallback);
+  }
+  return deduped;
+}
+
 async function mirrorNormalizedWorkspaceRows(model, user = {}, workspaceRows = {}) {
   const workspaceId = workspaceRows.workspaceId || workspaceModelIdForUser(user);
   const ownerUserId = workspaceRows.ownerUserId || supabaseUserIdForUser(user);
   if (!workspaceId || !ownerUserId) return { ok: false, skipped: true };
   const now = new Date().toISOString();
-  const normalizedConnectedAccounts = visibleConnectedAccounts(model);
+  const normalizedConnectedAccounts = dedupeProviderAccounts(visibleConnectedAccounts(model));
 
   const accounts = normalizedConnectedAccounts
     .filter(account => ownedByUser(account, user.id)
@@ -7000,6 +7053,11 @@ async function rehydrateProviderTokenAccounts(model = {}, user = {}) {
     }
     delete account.connected;
     delete account.tokenStored;
+    changed = true;
+  }
+  const dedupedAccounts = dedupeProviderAccounts(model.connectedAccounts);
+  if (dedupedAccounts.length !== model.connectedAccounts.length) {
+    model.connectedAccounts = dedupedAccounts;
     changed = true;
   }
   if (reconcileProviderAccountEvidence(model)) changed = true;
@@ -15559,21 +15617,36 @@ function accountOwnerPatch(user) {
   return user ? { ownerUserId: user.id, workspaceId: workspaceIdForUser(user) } : {};
 }
 
-function renewOAuthReturnSession(res, sharedModel, workspaceModel, owner, record = {}, req = null) {
+function renewOAuthReturnSession(res, sharedModel, workspaceModel, owner, record = {}, req = null, session = null) {
   if (!owner?.id || !authSessionSecret) return null;
-  const token = crypto.randomBytes(32).toString("base64url");
-  const deviceInput = {
-    deviceId: record.deviceId || `oauth-return-${owner.id}`,
-    deviceName: record.deviceName || "OAuth return device",
-    deviceKind: record.deviceKind || "device",
-    userAgent: req?.headers?.["user-agent"] || "",
-    platform: record.devicePlatform || "",
-    language: record.deviceLanguage || "",
-    screen: record.deviceScreen || "",
-    timeZone: record.deviceTimeZone || "",
-    trusted: true
-  };
-  const device = upsertDeviceSession(sharedModel, owner, deviceInput, token, { sessionProvider: "oauth-return" });
+  let token = session?.token || (session?.device ? bearerToken(req) : "");
+  const tokenHash = token ? hashSecret(token) : "";
+  let device = session?.device && String(session.device.userId || "") === String(owner.id) && !session.device.revokedAt
+    ? session.device
+    : (sharedModel.deviceSessions || []).find(item =>
+        tokenHash
+        && item.sessionTokenHash === tokenHash
+        && String(item.userId || "") === String(owner.id)
+        && !item.revokedAt
+        && (!item.expiresAt || Date.parse(item.expiresAt) > Date.now())
+      ) || null;
+  const preservedSession = Boolean(device && token);
+  if (!device && !supabaseAuthEnabled()) {
+    token = crypto.randomBytes(32).toString("base64url");
+    const deviceInput = {
+      deviceId: record.deviceId || `oauth-return-${owner.id}`,
+      deviceName: record.deviceName || "OAuth return device",
+      deviceKind: record.deviceKind || "device",
+      userAgent: req?.headers?.["user-agent"] || "",
+      platform: record.devicePlatform || "",
+      language: record.deviceLanguage || "",
+      screen: record.deviceScreen || "",
+      timeZone: record.deviceTimeZone || "",
+      trusted: true
+    };
+    device = upsertDeviceSession(sharedModel, owner, deviceInput, token, { sessionProvider: "oauth-return" });
+  }
+  if (device) device.lastSeenAt = new Date().toISOString();
   setCurrentUser(sharedModel, owner);
   if (workspaceModel && workspaceModel !== sharedModel) {
     workspaceModel.authUsers = cloneJson(sharedModel.authUsers || []);
@@ -15595,11 +15668,13 @@ function renewOAuthReturnSession(res, sharedModel, workspaceModel, owner, record
       accountPlatform: account?.platform || "",
       providerAccountIdPresent: Boolean(account?.providerAccountId),
       tokenStored: Boolean(account && hasStoredToken(account)),
-      status: account?.status || ""
+      status: account?.status || "",
+      appSessionPreserved: preservedSession
     }
   });
+  if (!device || !token) return null;
   setCookie(res, sessionCookieValue(token, device.expiresAt));
-  return { token, device };
+  return { token, device, preserved: preservedSession };
 }
 
 function metaOAuthUrl(platform = "meta", state = "", redirectUri = metaRedirectUri(), options = {}) {
@@ -18760,7 +18835,7 @@ async function route(req, res) {
       account.connectionEvidence = `Threads token exchange failed: ${exchangeError.message}`;
       model.integrations.threads = account.connectionEvidence;
     }
-    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
+    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     if (exchangeSucceeded) {
@@ -18872,7 +18947,7 @@ async function route(req, res) {
       account.connectionEvidence = `X token exchange failed: ${exchangeError.message}`;
       model.integrations.x = account.connectionEvidence;
     }
-    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
+    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     if (exchangeSucceeded && owner) {
@@ -18986,7 +19061,7 @@ async function route(req, res) {
         error: exchangeError.message
       });
     }
-    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
+    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     oauthRuntimeLog("tiktok", "callback_saved", {
@@ -19066,7 +19141,7 @@ async function route(req, res) {
       account.connectionEvidence = `Pinterest token exchange failed: ${exchangeError.message}`;
       model.integrations.pinterest = account.connectionEvidence;
     }
-    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
+    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     return html(res, 200, oauthReturnBody("Pinterest", model.integrations.pinterest, { provider: "pinterest" }), "/app");
@@ -19146,7 +19221,7 @@ async function route(req, res) {
       account.connectionEvidence = `Etsy token exchange failed: ${exchangeError.message}`;
       model.integrations.etsy = account.connectionEvidence;
     }
-    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
+    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     if (exchangeSucceeded && owner) {
@@ -19270,7 +19345,7 @@ async function route(req, res) {
     } catch (exchangeError) {
       model.integrations.linkedin = `LinkedIn token exchange failed: ${exchangeError.message}`;
     }
-    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
+    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     if (exchangeSucceeded && owner && primaryAccount) {
@@ -19384,7 +19459,7 @@ async function route(req, res) {
     } catch (exchangeError) {
       model.integrations.patreon = `Patreon connection failed: ${exchangeError.message}`;
     }
-    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
+    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     if (exchangeSucceeded && owner && primaryAccount) {
@@ -19472,7 +19547,7 @@ async function route(req, res) {
       account.connectionEvidence = `Shopify token exchange failed: ${exchangeError.message}`;
       model.integrations.shopify = account.connectionEvidence;
     }
-    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
+    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     return html(res, 200, oauthReturnBody("Shopify", model.integrations.shopify, { provider: "shopify" }), "/app");
@@ -19545,7 +19620,7 @@ async function route(req, res) {
       account.connectionEvidence = `Twitch token exchange failed: ${exchangeError.message}`;
       model.integrations.twitch = account.connectionEvidence;
     }
-    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
+    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     return html(res, 200, oauthReturnBody("Twitch", model.integrations.twitch, { provider: "twitch" }), "/app");
@@ -19619,7 +19694,7 @@ async function route(req, res) {
       account.connectionEvidence = `Canva token exchange failed: ${exchangeError.message}`;
       model.integrations.canva = account.connectionEvidence;
     }
-    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
+    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     return html(res, 200, oauthReturnBody("Canva", model.integrations.canva, { provider: "canva" }), "/app");
@@ -19737,7 +19812,7 @@ async function route(req, res) {
       account.connectionEvidence = `${googleBusinessMode ? "Google Business Profile" : "YouTube"} token exchange failed: ${exchangeError.message}`;
       model.integrations[googleBusinessMode ? "google_business" : "youtube"] = account.connectionEvidence;
     }
-    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
+    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     if (account?.status === "connected" && owner) {
@@ -19828,7 +19903,7 @@ async function route(req, res) {
         instagramScopes: stateCheck.record.requestedScopes || metaInstagramScopes
       };
     }
-    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
+    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     if (account) {
@@ -19876,7 +19951,7 @@ async function route(req, res) {
         scopes: stateCheck.record.requestedScopes || metaScopesForPlatform(stateCheck.record.platform || platform)
       };
     }
-    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
+    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     if (connected.length) {
@@ -22694,7 +22769,7 @@ async function route(req, res) {
       account.connectionEvidence = `Discord token exchange failed: ${exchangeError.message}`;
       model.integrations.discord = account.connectionEvidence;
     }
-    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
+    renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     return html(res, 200, oauthReturnBody("Discord", model.integrations.discord, { provider: "discord" }), "/app");

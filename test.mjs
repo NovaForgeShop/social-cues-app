@@ -322,7 +322,7 @@ try {
   if (!serverSource.includes("x: account.providerAccountId") || !serverSource.includes("etsy: account.providerAccountId")) throw new Error("successful X and Etsy OAuth must activate the newly authorized posting identity");
   if (!serverSource.includes('billing_entitlements?on_conflict=workspace_id,user_id') || !serverSource.includes('resolution=merge-duplicates,return=minimal')) throw new Error("Supabase entitlement mirroring must be idempotent");
   if (!serverSource.includes('status: entitlement.active ? "active" : "inactive"') || !serverSource.includes("stripe_subscription_id")) throw new Error("Supabase entitlement mirroring must persist inactive Stripe lifecycle states");
-  if (!/function mirrorNormalizedWorkspaceRows[\s\S]*?const normalizedConnectedAccounts = visibleConnectedAccounts\(model\)[\s\S]*?for \(const account of normalizedConnectedAccounts\)/.test(serverSource)) throw new Error("normalized provider persistence must omit stale placeholders when a real provider identity exists");
+  if (!/function mirrorNormalizedWorkspaceRows[\s\S]*?const normalizedConnectedAccounts = dedupeProviderAccounts\(visibleConnectedAccounts\(model\)\)[\s\S]*?for \(const account of normalizedConnectedAccounts\)/.test(serverSource)) throw new Error("normalized provider persistence must omit stale placeholders and duplicate assets when a real provider identity exists");
   if (!serverSource.includes("cleanupNormalizedProviderPlaceholders") || !serverSource.includes("reconcileProviderAccountEvidence")) throw new Error("provider persistence must remove invalid placeholder siblings after a verified identity is stored");
   if (!serverSource.includes("connectionReason: connectionState.reason") || !serverSource.includes("scopeEvidence: { requested: requestedScopes, granted: grantedScopes, missing: missingScopes }") || !serverSource.includes("credentialFamily: providerCredentialFamily(account)")) throw new Error("public account truth must expose safe reason, scope, provider-family, and asset evidence");
   if (!serverSource.includes("function scrubPublicAccountValue") || !serverSource.includes("nested]) => [key, scrubPublicAccountValue(nested)]")) throw new Error("public account secret scrubber must recursively remove nested secret fields");
@@ -576,6 +576,9 @@ try {
   if (!appHtml.includes("currentOAuthReturn") || !appHtml.includes("acknowledgeOAuthReturn") || !appHtml.includes('jump("accounts")')) throw new Error("app should consume OAuth return markers, refresh provider state, and land users on accounts");
   if (!appHtml.includes("if (platform?.name) return platform.name;")) throw new Error("provider cards should keep provider names separate from connected identity names");
   if (!serverSource.includes("function renewOAuthReturnSession") || !serverSource.includes('sessionProvider: "oauth-return"')) throw new Error("OAuth callbacks should renew the app session cookie after a provider return");
+  if (!serverSource.includes("let token = session?.token") || !serverSource.includes("const preservedSession = Boolean(device && token)") || !serverSource.includes("if (!device && !supabaseAuthEnabled())")) throw new Error("hosted OAuth callbacks must preserve a validated Supabase session instead of replacing it with a random local token");
+  if ((serverSource.match(/renewOAuthReturnSession\(res, sharedModel, model, owner, stateCheck\.record, req, session\)/g) || []).length < 14) throw new Error("every provider callback must pass its validated app session through the OAuth return");
+  if (!serverSource.includes("function dedupeProviderAccounts") || !serverSource.includes("dedupeProviderAccounts(visibleConnectedAccounts(model))") || !serverSource.includes("model.connectedAccounts = dedupedAccounts")) throw new Error("provider persistence must collapse duplicate asset rows before normalized token writes and workspace rehydration");
   if (!/url\.pathname === "\/api\/analyze"[\s\S]*?modelForSession\(session, sharedModel\)[\s\S]*?saveModelForUser\(model, session\.user\)/.test(serverSource)) throw new Error("analytics refresh must read and save the signed-in user's workspace model");
   if (!serverSource.includes("function inspectInstagramPageLinks") || !serverSource.includes("connected_instagram_account")) throw new Error("Instagram diagnostics should check Page-linked IG fields instead of only saying no assets");
   if (!serverSource.includes("page.instagram_business_account || page.connected_instagram_account") || !serverSource.includes("pageBody.instagram_business_account || pageBody.connected_instagram_account")) throw new Error("Meta sync should store Instagram assets from both Page IG link fields");
@@ -1354,16 +1357,19 @@ try {
   const ownedYouTubeAuthUrl = new URL(ownedYouTubeStart.headers.get("location"));
   const ownedYouTubeState = ownedYouTubeAuthUrl.searchParams.get("state");
   if (!ownedYouTubeState) throw new Error("signed-in youtube start did not issue OAuth state");
-  const ownedYouTubeCallback = await fetch(base + `/api/oauth/youtube/callback?code=fake-code&state=${encodeURIComponent(ownedYouTubeState)}`);
+  const ownedYouTubeCallback = await fetch(base + `/api/oauth/youtube/callback?code=fake-code&state=${encodeURIComponent(ownedYouTubeState)}`, {
+    headers: { Cookie: `sc_session=${encodeURIComponent(secondSignup.session.token)}` }
+  });
   const oauthReturnCookie = ownedYouTubeCallback.headers.get("set-cookie") || "";
   const ownedYouTubeCallbackText = await ownedYouTubeCallback.text();
   if (ownedYouTubeCallback.status !== 200 || !ownedYouTubeCallbackText.includes("YouTube token exchange failed")) throw new Error("owned youtube callback should handle the provider return");
   if (!oauthReturnCookie.includes("sc_session=") || !oauthReturnCookie.includes("HttpOnly")) throw new Error("owned provider callback did not renew the app session cookie");
+  if (!oauthReturnCookie.startsWith(`sc_session=${encodeURIComponent(secondSignup.session.token)};`)) throw new Error("OAuth return replaced the validated app session token");
   const renewedSessionResponse = await fetch(base + "/api/auth/session", {
     headers: { Cookie: oauthReturnCookie.split(";")[0] }
   });
   const renewedSession = await renewedSessionResponse.json();
-  if (!renewedSessionResponse.ok || renewedSession.user?.email !== secondEmail || renewedSession.device?.sessionProvider !== "oauth-return") throw new Error("OAuth return cookie did not restore the signed-in workspace session");
+  if (!renewedSessionResponse.ok || renewedSession.user?.email !== secondEmail || renewedSession.device?.sessionProvider === "oauth-return") throw new Error("OAuth return cookie did not preserve the signed-in workspace session");
 
   const generated = await request("/api/generate/platform-variants", {
     method: "POST",
