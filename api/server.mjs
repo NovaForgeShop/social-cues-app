@@ -8158,14 +8158,33 @@ function publicWorkerJob(row = {}) {
   };
 }
 
-function workerUserForJob(registry = {}, job = {}) {
+async function workerUserForJob(registry = {}, job = {}) {
   const payload = job.payload || {};
   const userId = String(job.user_id || payload.userId || "");
   const workspaceId = String(job.workspace_id || payload.workspaceId || "");
-  return (registry.authUsers || []).find(user =>
+  const registered = (registry.authUsers || []).find(user =>
     String(supabaseUserIdForUser(user) || user.id || "") === userId
     || String(workspaceModelIdForUser(user) || workspaceIdForUser(user) || "") === workspaceId
   ) || null;
+  if (registered) return registered;
+  if (!supabaseEnabled || !isUuid(userId) || !isUuid(workspaceId)) return null;
+  const profileRows = await optionalSupabaseRequest(`/profiles?id=eq.${encodeURIComponent(userId)}&workspace_id=eq.${encodeURIComponent(workspaceId)}&select=id,workspace_id,display_name,email,role,created_at&limit=1`);
+  const profile = Array.isArray(profileRows) ? profileRows[0] || null : null;
+  if (!profile) return null;
+  const user = {
+    id: userId,
+    supabaseUserId: userId,
+    workspaceId,
+    name: profile.display_name || "Social Cues User",
+    email: normalizeEmail(profile.email),
+    role: profile.role || "Member",
+    authProvider: "supabase",
+    createdAt: profile.created_at || null
+  };
+  await hydrateNormalizedSupabaseAccountState(registry, user);
+  registry.authUsers = Array.isArray(registry.authUsers) ? registry.authUsers : [];
+  registry.authUsers.push(user);
+  return user;
 }
 
 function workerRetryAt(job = {}, minimumSeconds = 30) {
@@ -8251,13 +8270,14 @@ async function discoverWorkerJobs() {
   const reconciliation = await reconcileTerminalTokenRefreshJobs();
   const now = new Date().toISOString();
   const refreshBefore = new Date(Date.now() + tokenRefreshLeadMinutes * 60 * 1000).toISOString();
-  const [scheduledRows, notificationRows, tokenRows, workspaceRows] = await Promise.all([
+  const [scheduledRows, notificationRows, tokenRows, workspaceRows, entitlementRows] = await Promise.all([
     automaticPublishingEnabled
       ? optionalSupabaseRequest(`/scheduled_posts?status=in.(queued,retrying)&scheduled_for=lte.${encodeURIComponent(now)}&select=id,workspace_id,external_key,platform,status,scheduled_for,idempotency_key,retry_count,max_attempts,next_retry_at&order=scheduled_for.asc&limit=100`)
       : Promise.resolve([]),
     optionalSupabaseRequest(`/notification_outbox?status=in.(pending,retrying)&next_attempt_at=lte.${encodeURIComponent(now)}&select=id,workspace_id,user_id,idempotency_key,channel,next_attempt_at,attempts&order=next_attempt_at.asc&limit=100`),
     optionalSupabaseRequest(`/provider_tokens?expires_at=not.is.null&expires_at=lte.${encodeURIComponent(refreshBefore)}&encrypted_refresh_token=not.is.null&select=id,connected_account_id,workspace_id,user_id,provider,expires_at,refresh_expires_at&order=expires_at.asc&limit=100`),
-    optionalSupabaseRequest("/workspace_models?select=workspace_id,owner_user_id,updated_at&order=updated_at.desc&limit=100")
+    optionalSupabaseRequest("/workspace_models?select=workspace_id,owner_user_id,updated_at&order=updated_at.desc&limit=100"),
+    optionalSupabaseRequest("/billing_entitlements?status=in.(active,trialing,paid,promo-paid,owner-verified)&select=workspace_id,user_id,status&limit=500")
   ]);
 
   const tokenAccountIds = (Array.isArray(tokenRows) ? tokenRows : []).map(row => row.connected_account_id).filter(isUuid);
@@ -8277,9 +8297,11 @@ async function discoverWorkerJobs() {
   const jobs = [];
   const hourKey = now.slice(0, 13).replace(/[-T:]/g, "");
   const dayKey = now.slice(0, 10).replace(/-/g, "");
+  const activeWorkspaceOwners = new Set((Array.isArray(entitlementRows) ? entitlementRows : []).map(row => `${row.workspace_id}:${row.user_id}`));
 
   for (const row of Array.isArray(workspaceRows) ? workspaceRows : []) {
     if (!isUuid(row.workspace_id) || !isUuid(row.owner_user_id)) continue;
+    if (!activeWorkspaceOwners.has(`${row.workspace_id}:${row.owner_user_id}`)) continue;
     jobs.push({
       workspace_id: row.workspace_id,
       user_id: row.owner_user_id,
@@ -8548,7 +8570,7 @@ async function processNotificationWorkerJob(job) {
 }
 
 async function processTokenRefreshWorkerJob(job, registry) {
-  const user = workerUserForJob(registry, job);
+  const user = await workerUserForJob(registry, job);
   if (!user) throw new WorkerJobError("The token owner no longer exists.", { blocked: true });
   const model = await modelForSession({ user }, registry);
   const platform = job.payload?.platform;
@@ -8613,7 +8635,7 @@ async function processScheduledPublishWorkerJob(job, registry) {
   if (!automaticPublishingEnabled) {
     throw new WorkerJobError("Automatic publishing is disabled at the operator level.", { blocked: true });
   }
-  const user = workerUserForJob(registry, job);
+  const user = await workerUserForJob(registry, job);
   if (!user) throw new WorkerJobError("The scheduled post owner no longer exists.", { blocked: true });
   const model = await modelForSession({ user }, registry);
   if (automationPreferences(model).livePublishingPaused) {
@@ -8691,7 +8713,7 @@ async function processScheduledPublishWorkerJob(job, registry) {
 
 async function processProviderPublishStatusWorkerJob(job, registry) {
   if (job.payload?.platform !== "tiktok") throw new WorkerJobError(`Unsupported publish-status provider: ${job.payload?.platform || "unknown"}`, { blocked: true });
-  const user = workerUserForJob(registry, job);
+  const user = await workerUserForJob(registry, job);
   if (!user) throw new WorkerJobError("The provider-status owner no longer exists.", { blocked: true });
   const model = await modelForSession({ user }, registry);
   const account = (model.connectedAccounts || []).find(item =>
@@ -8760,7 +8782,7 @@ async function processProviderPublishStatusWorkerJob(job, registry) {
 }
 
 async function processAnalyticsCollectionWorkerJob(job, registry) {
-  const user = workerUserForJob(registry, job);
+  const user = await workerUserForJob(registry, job);
   if (!user) throw new WorkerJobError("The analytics workspace owner no longer exists.", { blocked: true });
   if (!hasActiveAppAccess(user)) return { skipped: true, reason: "The workspace does not have an active entitlement." };
   const model = await modelForSession({ user }, registry);
@@ -8879,7 +8901,7 @@ function localAudienceBrief(model = {}, events = [], briefDate = "") {
 }
 
 async function processAudienceBriefWorkerJob(job, registry) {
-  const user = workerUserForJob(registry, job);
+  const user = await workerUserForJob(registry, job);
   if (!user) throw new WorkerJobError("The audience brief workspace owner no longer exists.", { blocked: true });
   if (!hasActiveAppAccess(user)) return { skipped: true, reason: "The workspace does not have an active entitlement." };
   const workspaceId = workspaceModelIdForUser(user);
