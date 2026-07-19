@@ -13095,9 +13095,23 @@ async function createAppAccount(model, input = {}) {
   if (enteredPromoCode && (!promo || promo.active === false)) {
     return { ok: false, status: 400, error: "That Social Cues promo code is not active." };
   }
+  const assignedMemberPromo = testPromoCodes.find(item => (
+    item.active
+    && item.memberOnly
+    && item.email
+    && item.email === email
+  ));
+  if (assignedMemberPromo && promo?.code !== assignedMemberPromo.code) {
+    return {
+      ok: false,
+      status: 403,
+      signupLocked: true,
+      error: "Use the Social Cues member promo code assigned to this email address."
+    };
+  }
   const promoClaim = validatePromoClaim(model, promo, email);
   if (!promoClaim.ok) return promoClaim;
-  const ownerSignup = isSignupOwnerEmail(email) && !promo?.memberOnly;
+  const ownerSignup = isSignupOwnerEmail(email) && !assignedMemberPromo && !promo?.memberOnly;
   if (!ownerSignup && !promo) {
     return {
       ok: false,

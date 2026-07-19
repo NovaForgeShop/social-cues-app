@@ -176,7 +176,7 @@ try {
   if (/Cory Barton|ForgePilot|Forge Pilot|FPv2/i.test(appHtml)) throw new Error("app HTML contains stale personal or old brand defaults");
   if (/localStorage\.setItem\((SESSION_TOKEN_KEY|tokenKey|legacyTokenKey)/.test(`${appHtml}\n${serverSource}`)) throw new Error("session token should not be persisted into browser storage");
   if (!serverSource.includes("SOCIAL_CUES_PROMO_CODES") || /SC-TEST-[A-Z]+-[A-Z0-9]+/.test(serverSource)) throw new Error("active tester promo codes must be supplied through server environment, not deployed source");
-  if (!serverSource.includes("promo.email !== normalizedEmail") || !serverSource.includes("memberOnly: Boolean(promo.memberOnly)") || !serverSource.includes("if (entitlement.memberOnly) return \"Member\"")) throw new Error("email-bound member promo codes must not inherit owner/admin access");
+  if (!serverSource.includes("promo.email !== normalizedEmail") || !serverSource.includes("memberOnly: Boolean(promo.memberOnly)") || !serverSource.includes("if (entitlement.memberOnly) return \"Member\"") || !serverSource.includes("const assignedMemberPromo = testPromoCodes.find")) throw new Error("email-bound member promo codes must not inherit owner/admin access");
   if (!serverSource.includes("REDDIT_DEVVIT_PROJECT_READY") || !serverSource.includes("redditDevvitProjectDeclaredReady") || !serverSource.includes('if (runtimeMode === "vercel") return redditDevvitProjectDeclaredReady')) throw new Error("production Reddit readiness must use verified flags instead of packaging the Devvit toolchain");
   if (serverSource.includes("promoFromSupabaseUser") || /raw_user_meta_data[\s\S]{0,400}promo/i.test(serverSource)) throw new Error("user-editable Supabase metadata must never grant promo authorization");
   if (!serverSource.includes('if (runtimeMode === "vercel") {\n        return { ok: false, status: 401, error: "Email or password did not match a verified Social Cues account." };')) throw new Error("hosted Supabase login must never fall back to a legacy local password hash");
@@ -663,6 +663,14 @@ try {
   });
   if (!ownerSignup.ok || ownerSignup.entitlement?.source !== "owner-allowlist" || !ownerSignup.entitlement?.subscriptionPaid || !ownerSignup.entitlement?.appFeePaid) throw new Error("owner email signup should bypass invite lock and receive full access");
   if (ownerSignup.user?.role !== "Owner") throw new Error("owner signup should resolve to the Owner role");
+
+  const missingMemberPromoResponse = await fetch(base + "/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Workspace Member", email: "mr.barton+member-promo@socialcuesapp.com", password: "test-password-2026", workspaceName: "Fresh Member Workspace" })
+  });
+  const missingMemberPromo = await missingMemberPromoResponse.json();
+  if (missingMemberPromoResponse.status !== 403 || !missingMemberPromo.signupLocked || !/member promo code assigned/i.test(missingMemberPromo.error || "")) throw new Error("an email assigned to a member-only promo must never fall through to owner signup");
 
   const memberPromoSignup = await request("/api/auth/signup", {
     method: "POST",
