@@ -235,8 +235,6 @@ const googleClientSecret = envValue("GOOGLE_CLIENT_SECRET");
 const youtubeKnownChannelId = process.env.YOUTUBE_CHANNEL_ID || process.env.youtube_channel_id || "UC-hAyPwzwXBGTyK7nsmfcJA";
 const googleAdsDeveloperToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN || "";
 const googleAdsCustomerId = process.env.GOOGLE_ADS_CUSTOMER_ID || "";
-const googleBusinessAccountId = process.env.GOOGLE_BUSINESS_ACCOUNT_ID || "";
-const googleBusinessLocationId = process.env.GOOGLE_BUSINESS_LOCATION_ID || "";
 const googleSearchConsoleSiteUrl = process.env.GOOGLE_SEARCH_CONSOLE_SITE_URL || brandHomeUrl;
 const googleAnalyticsPropertyId = process.env.GOOGLE_ANALYTICS_PROPERTY_ID || "";
 const openaiApiKey = process.env.OPENAI_API_KEY || "";
@@ -627,6 +625,23 @@ const youtubeScopes = [
   "https://www.googleapis.com/auth/yt-analytics.readonly"
 ];
 
+const googleBusinessScopes = [
+  "https://www.googleapis.com/auth/business.manage"
+];
+
+const googleBusinessLocationReadMask = [
+  "name",
+  "title",
+  "storeCode",
+  "websiteUri",
+  "metadata",
+  "profile",
+  "phoneNumbers",
+  "categories",
+  "openInfo",
+  "serviceArea"
+].join(",");
+
 const googleGrowthApis = [
   {
     id: "youtube_data",
@@ -648,9 +663,9 @@ const googleGrowthApis = [
     id: "google_business_profile",
     name: "Google Business Profile APIs",
     fit: "Local profile posts, offers/events, media, reviews, and location trust signals.",
-    env: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_BUSINESS_ACCOUNT_ID", "GOOGLE_BUSINESS_LOCATION_ID"],
+    env: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"],
     scopes: ["business.manage"],
-    status: "ready-to-wire"
+    status: "oauth-wired"
   },
   {
     id: "google_ads",
@@ -913,7 +928,7 @@ const providerServiceStack = [
     name: "Google Growth Suite",
     purpose: "Combined Google lane for YouTube, Business Profile, Ads, Search Console, Analytics, and Drive-backed launch/profile kits.",
     env: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"],
-    optionalEnv: ["GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ADS_CUSTOMER_ID", "GOOGLE_BUSINESS_ACCOUNT_ID", "GOOGLE_BUSINESS_LOCATION_ID", "GOOGLE_SEARCH_CONSOLE_SITE_URL", "GOOGLE_ANALYTICS_PROPERTY_ID"],
+    optionalEnv: ["GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ADS_CUSTOMER_ID", "GOOGLE_SEARCH_CONSOLE_SITE_URL", "GOOGLE_ANALYTICS_PROPERTY_ID"],
     configured: () => Boolean(googleClientId && googleClientSecret),
     firstUse: "/api/google/growth-suite"
   },
@@ -921,9 +936,9 @@ const providerServiceStack = [
     id: "google_business",
     name: "Google Business Profile",
     purpose: "Local/profile posts, offers, location media, review monitoring, and business profile feedback.",
-    env: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_BUSINESS_ACCOUNT_ID", "GOOGLE_BUSINESS_LOCATION_ID"],
+    env: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"],
     optionalEnv: [],
-    configured: () => Boolean(googleClientId && googleClientSecret && googleBusinessAccountId && googleBusinessLocationId),
+    configured: () => Boolean(googleClientId && googleClientSecret),
     firstUse: "/api/google/business/readiness"
   },
   {
@@ -1105,7 +1120,7 @@ function providerSetupScopes(providerId = "") {
     tiktok: tiktokScopes,
     youtube: youtubeScopes,
     google_growth: youtubeScopes,
-    google_business: youtubeScopes,
+    google_business: googleBusinessScopes,
     pinterest: pinterestScopes,
     canva: canvaScopes,
     shopify: shopifyScopes,
@@ -1457,7 +1472,7 @@ const providerTruthRoutes = {
   facebook: { connect: "/api/oauth/meta/start?platform=facebook&testing=pages", status: "/api/meta/assets" },
   x: { connect: "/api/oauth/x/start", status: "/api/x/account" },
   google_growth: { connect: "/api/oauth/youtube/start", status: "/api/google/growth-suite" },
-  google_business: { connect: "/api/oauth/youtube/start", status: "/api/google/business/readiness" },
+  google_business: { connect: "/api/oauth/youtube/start?service=business", status: "/api/google/business/readiness" },
   pinterest: { connect: "/api/oauth/pinterest/start", status: "/api/pinterest/readiness" },
   shopify: { connect: "/api/oauth/shopify/start", status: "/api/shopify/readiness" },
   etsy: { connect: "/api/oauth/etsy/start", status: "/api/etsy/readiness" },
@@ -1575,12 +1590,18 @@ function bestProviderAccountFromList(accounts = [], platform = "") {
 
 const selectableProviderPlatforms = new Set([
   "facebook", "instagram", "threads", "youtube", "x", "tiktok", "pinterest",
-  "twitch", "discord", "etsy", "shopify", "canva", "manychat", "linkedin", "patreon"
+  "twitch", "discord", "etsy", "shopify", "canva", "manychat", "linkedin", "patreon",
+  "google_business"
 ]);
 
 function canonicalProviderAssetPlatform(platform = "") {
-  if (["google_growth", "google_business"].includes(platform)) return "youtube";
+  if (platform === "google_growth") return "youtube";
   return String(platform || "").trim().toLowerCase();
+}
+
+function selectableProviderAsset(account = {}, platform = "") {
+  if (platform !== "google_business") return true;
+  return account.accountType === "google_business_location" || account.profile?.assetType === "location";
 }
 
 function providerAccountSelectionGroups(model = {}, platform = "", user = null) {
@@ -1590,6 +1611,7 @@ function providerAccountSelectionGroups(model = {}, platform = "", user = null) 
     && (!user?.id || ownedByUser(account, user.id))
     && providerAccountConnectionState(account).connected
     && account.providerAccountId
+    && selectableProviderAsset(account, canonical)
   );
   const groups = new Map();
   for (const account of candidates) {
@@ -2164,7 +2186,8 @@ function providerProbeAccount(providerId, model = {}, session = null) {
   const user = session?.user || null;
   const accounts = visibleConnectedAccounts(model)
     .filter(account => !user || !hasOwnerMarker(account) || ownedByUser(account, user.id));
-  if (providerId === "google_growth" || providerId === "google_business") return accountForTruth("youtube", accounts, model);
+  if (providerId === "google_growth") return accountForTruth("youtube", accounts, model);
+  if (providerId === "google_business") return accountForTruth("google_business", accounts, model);
   return accountForTruth(providerId, accounts, model);
 }
 
@@ -2216,7 +2239,38 @@ async function providerLiveProbe(providerId, model = {}, session = null, row = {
         }
       };
     }
-    if (providerId === "youtube" || providerId === "google_growth" || providerId === "google_business") {
+    if (providerId === "google_business") {
+      let businessAccount = googleBusinessAccountWithScope(model, session?.user || null);
+      if (!businessAccount) return providerProbeSkipped(providerId, "Connect Google Business Profile and approve business.manage before running a live location probe.");
+      if (tokenExpiresSoon(businessAccount.tokenExpiresAt) || !tokenForYouTubeAccount(businessAccount)) {
+        businessAccount = await refreshYouTubeAccount(model, businessAccount, session?.user || null);
+      }
+      const accessToken = tokenForYouTubeAccount(businessAccount);
+      if (syntheticProbeToken(accessToken)) throw new Error("Synthetic test token; provider network probe intentionally skipped.");
+      const locationResource = safeGoogleBusinessLocationResource(account.providerAccountId || account.googleBusinessLocationResource);
+      if (!locationResource) return providerProbeSkipped(providerId, "Select a discovered Google Business Profile location before running a live probe.");
+      const location = await googleApi("https://mybusinessbusinessinformation.googleapis.com", `/v1/${locationResource}`, {
+        readMask: googleBusinessLocationReadMask
+      }, accessToken);
+      return {
+        attempted: true,
+        ok: Boolean(location?.name),
+        provider: providerId,
+        endpoint: `GET /v1/${locationResource}`,
+        summary: location?.title ? `Google Business Profile responded for ${location.title}.` : "Google Business Profile returned the selected location.",
+        evidence: {
+          locationResource: safeGoogleBusinessLocationResource(location?.name) || locationResource,
+          title: location?.title || account.name || "",
+          storeCode: location?.storeCode || "",
+          websiteUri: location?.websiteUri || "",
+          mapsUri: location?.metadata?.mapsUri || "",
+          placeId: location?.metadata?.placeId || "",
+          canOperateLocalPost: Boolean(location?.metadata?.canOperateLocalPost),
+          hasVoiceOfMerchant: Boolean(location?.metadata?.hasVoiceOfMerchant)
+        }
+      };
+    }
+    if (providerId === "youtube" || providerId === "google_growth") {
       const youtubeAccount = await usableYouTubeAccount(model, { refresh: true, user: session?.user || null });
       const accessToken = tokenForYouTubeAccount(youtubeAccount);
       if (syntheticProbeToken(accessToken)) throw new Error("Synthetic test token; provider network probe intentionally skipped.");
@@ -2673,7 +2727,7 @@ function providerPublishProbeSkipped(providerId = "", summary = "") {
 async function providerPublishDryRunProbe(providerId, model = {}, session = null, row = {}) {
   if (!row.connected || !row.tokenStored) return providerPublishProbeSkipped(providerId, "Publish dry-run skipped until OAuth and token storage are proven.");
   if (!row.canPublish) return providerPublishProbeSkipped(providerId, "Publish dry-run skipped until the provider grants the publish scope/lane.");
-  if (providerId === "google_business") return providerPublishProbeSkipped(providerId, "Google Business Profile publish checks need Business Profile account and location IDs.");
+  if (providerId === "google_business") return providerPublishProbeSkipped(providerId, "Google Business Profile publish checks need business.manage consent, an approved Google Cloud project, and a selected discovered location.");
   const item = syntheticProviderPublishItem(providerId);
   const providerAccount = providerProbeAccount(providerId, model, session) || row.account || null;
   const result = await attemptQueuedVariantPublish(model, item, { live: false, user: session?.user || null, providerAccount });
@@ -3680,10 +3734,11 @@ function providerPermissionGapExplainer(providerId = "", row = {}, account = nul
       permission: "YouTube can connect a channel, but uploads and analytics need the granted YouTube scopes and may require Google API compliance review before public automation."
     },
     google_growth: {
-      permission: "Google growth data is split across YouTube, Business Profile, Ads, Search Console, and Analytics; each API needs its own project setup and OAuth/account IDs."
+      permission: "Google growth data is split across YouTube, Business Profile, Ads, Search Console, and Analytics; each API needs its own project setup, consent, and provider approval."
     },
     google_business: {
-      asset: "Google Business Profile needs the customer account and location IDs before Social Cues can act on local profile posts or reviews."
+      permission: "Business Profile requires separate business.manage consent and Google Cloud project approval; YouTube sign-in does not grant this scope.",
+      asset: "The signed-in Google identity must own or manage a verified Business Profile location. Social Cues discovers and lets the user select those locations after consent."
     },
     pinterest: {
       permission: "Pinterest organic Pins and analytics depend on the released app secret and approved scopes; ads/catalog lanes remain review-gated."
@@ -4637,8 +4692,8 @@ function developerPortalAudit() {
       ready: Boolean(googleClientId && googleClientSecret),
       callback: youtubeRedirectUri(),
       evidence: "Google OAuth and YouTube readiness are configured with read, upload, and analytics scopes.",
-      blocker: "Google Business Profile account/location IDs are not configured; public upload automation may require Google API Services audit approval.",
-      nextAction: "Verify OAuth consent, redirect URI, enabled YouTube APIs, test users, and Google Business Profile IDs when available."
+      blocker: "Google Business Profile requires separate business.manage consent and Google Cloud project approval; public YouTube upload automation may separately require a Google API Services audit.",
+      nextAction: "Verify OAuth consent, redirect URI, enabled YouTube APIs, then connect Business Profile separately so Social Cues can discover managed locations."
     },
     {
       id: "discord",
@@ -4853,9 +4908,9 @@ function platformDepthCapabilities() {
       deeperUse: "Search intelligence, playlist architecture, captions, comments/moderation, channel sections, watermarks, activity feeds, memberships, analytics/reporting, Business Profile posts/reviews, Ads, Search Console, and GA4 attribution.",
       dataSignals: ["channel activity", "video metadata", "playlists", "comments", "captions", "analytics reports", "search results", "Business Profile locations"],
       requiredProducts: ["YouTube Data API", "YouTube Analytics API", "YouTube Reporting API", "Google Business Profile API", "Google Ads API", "Search Console API", "GA4 Data API"],
-      requiredEnv: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "YOUTUBE_CHANNEL_ID", "GOOGLE_BUSINESS_ACCOUNT_ID", "GOOGLE_BUSINESS_LOCATION_ID", "GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ANALYTICS_PROPERTY_ID"],
+      requiredEnv: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "YOUTUBE_CHANNEL_ID", "GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ANALYTICS_PROPERTY_ID"],
       routes: ["/api/youtube/readiness", "/api/youtube/channel", "/api/youtube/analytics", "/api/youtube/search", "/api/youtube/playlists", "/api/youtube/comments", "/api/youtube/activity", "/api/google/growth-suite", "/api/google/business/readiness"],
-      nextBuild: "Connect a signed-in YouTube channel, then bank read-only search, playlist, comment, channel-activity, and analytics checks before expanding to public uploads or Business Profile actions."
+      nextBuild: "Keep YouTube and Business Profile as separate Google consent lanes; discover each user's managed Business Profile locations after business.manage approval."
     },
     {
       provider: "pinterest",
@@ -10940,7 +10995,10 @@ async function googleApi(baseUrl, pathname, params = {}, accessToken = "", optio
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body.error) {
     const message = body.error_description || body.error?.message || body.error || `Google API ${response.status}`;
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    error.providerCode = body.error?.status || body.error?.code || "";
+    throw error;
   }
   return body;
 }
@@ -11327,7 +11385,14 @@ async function exchangeCanvaCode(code, verifier, redirectUri = canvaRedirectUri(
   };
 }
 
-async function exchangeGoogleCode(code, redirectUri = youtubeRedirectUri()) {
+function normalizedGoogleScopes(rawScopes = "", fallbackScopes = []) {
+  const values = Array.isArray(rawScopes)
+    ? rawScopes
+    : String(rawScopes || "").split(/[\s,]+/).filter(Boolean);
+  return [...new Set(values.length ? values : fallbackScopes)];
+}
+
+async function exchangeGoogleOAuthCode(code, redirectUri = youtubeRedirectUri(), fallbackScopes = []) {
   if (!googleClientId || !googleClientSecret) throw new Error("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are required for token exchange.");
   const payload = new URLSearchParams({
     code,
@@ -11343,18 +11408,131 @@ async function exchangeGoogleCode(code, redirectUri = youtubeRedirectUri()) {
   });
   const token = await response.json().catch(() => ({}));
   if (!response.ok || token.error) throw new Error(token.error_description || token.error || `Google token exchange ${response.status}`);
-  const channels = await youtubeData("/channels", {
-    part: "id,snippet,statistics,contentDetails,status",
-    mine: "true",
-    fields: "items(id,snippet(title,customUrl,thumbnails),statistics,contentDetails,status/privacyStatus)"
-  }, token.access_token);
-  const channel = channels.items?.[0] || null;
   return {
     accessToken: token.access_token,
     refreshToken: token.refresh_token || "",
     tokenType: token.token_type || "Bearer",
     expiresIn: token.expires_in || null,
-    scope: token.scope || youtubeScopes.join(" "),
+    scope: normalizedGoogleScopes(token.scope, fallbackScopes)
+  };
+}
+
+async function listGoogleBusinessAccounts(accessToken = "") {
+  const accounts = [];
+  let pageToken = "";
+  for (let page = 0; page < 10; page += 1) {
+    const body = await googleApi("https://mybusinessaccountmanagement.googleapis.com", "/v1/accounts", {
+      pageSize: "20",
+      pageToken
+    }, accessToken);
+    accounts.push(...(Array.isArray(body.accounts) ? body.accounts : []));
+    pageToken = String(body.nextPageToken || "");
+    if (!pageToken) break;
+  }
+  return accounts;
+}
+
+function safeGoogleBusinessAccountResource(value = "") {
+  const match = String(value || "").match(/^accounts\/([A-Za-z0-9_-]+)$/);
+  return match ? `accounts/${match[1]}` : "";
+}
+
+function safeGoogleBusinessLocationResource(value = "") {
+  const match = String(value || "").match(/^locations\/([A-Za-z0-9_-]+)$/);
+  return match ? `locations/${match[1]}` : "";
+}
+
+async function listGoogleBusinessLocations(accessToken = "", accounts = []) {
+  const locationsByName = new Map();
+  const warnings = [];
+  for (const account of accounts) {
+    const accountResource = safeGoogleBusinessAccountResource(account?.name);
+    if (!accountResource) continue;
+    let pageToken = "";
+    try {
+      for (let page = 0; page < 10; page += 1) {
+        const body = await googleApi("https://mybusinessbusinessinformation.googleapis.com", `/v1/${accountResource}/locations`, {
+          readMask: googleBusinessLocationReadMask,
+          pageSize: "100",
+          pageToken
+        }, accessToken);
+        for (const location of (Array.isArray(body.locations) ? body.locations : [])) {
+          const locationResource = safeGoogleBusinessLocationResource(location?.name);
+          if (!locationResource) continue;
+          const current = locationsByName.get(locationResource);
+          const normalized = {
+            ...location,
+            name: locationResource,
+            businessAccount: {
+              name: accountResource,
+              accountName: account.accountName || "",
+              type: account.type || "",
+              role: account.role || "",
+              verificationState: account.verificationState || "",
+              vettedState: account.vettedState || ""
+            }
+          };
+          if (!current || account.role === "PRIMARY_OWNER") locationsByName.set(locationResource, normalized);
+        }
+        pageToken = String(body.nextPageToken || "");
+        if (!pageToken) break;
+      }
+    } catch (error) {
+      warnings.push({ accountResource, message: compactProbeError(error), status: Number(error.status || 0) || null, providerCode: error.providerCode || "" });
+    }
+  }
+  if (!locationsByName.size && warnings.length && warnings.length === accounts.filter(account => safeGoogleBusinessAccountResource(account?.name)).length) {
+    const error = new Error(warnings[0].message || "Google Business Profile locations could not be listed.");
+    error.status = warnings[0].status;
+    error.providerCode = warnings[0].providerCode;
+    throw error;
+  }
+  return { locations: [...locationsByName.values()], warnings };
+}
+
+function googleBusinessDiscoveryState(error = null, accountCount = 0, locationCount = 0) {
+  if (!error) return locationCount ? "locations-discovered" : accountCount ? "no-locations" : "no-accounts";
+  const message = compactProbeError(error);
+  if (Number(error.status) === 403 || /permission|quota|access|not been used|disabled/i.test(message)) return "api-access-required";
+  if (Number(error.status) === 401 || /credential|auth|token|scope/i.test(message)) return "reconnect-required";
+  return "discovery-error";
+}
+
+async function exchangeGoogleBusinessCode(code, redirectUri = youtubeRedirectUri()) {
+  const token = await exchangeGoogleOAuthCode(code, redirectUri, googleBusinessScopes);
+  let accounts = [];
+  let locations = [];
+  let warnings = [];
+  let discoveryError = null;
+  try {
+    accounts = await listGoogleBusinessAccounts(token.accessToken);
+    const discovery = await listGoogleBusinessLocations(token.accessToken, accounts);
+    locations = discovery.locations;
+    warnings = discovery.warnings;
+  } catch (error) {
+    discoveryError = error;
+  }
+  return {
+    ...token,
+    accounts,
+    locations,
+    warnings,
+    discoveryError,
+    discoveryState: googleBusinessDiscoveryState(discoveryError, accounts.length, locations.length)
+  };
+}
+
+async function exchangeGoogleCode(code, redirectUri = youtubeRedirectUri()) {
+  const token = await exchangeGoogleOAuthCode(code, redirectUri, youtubeScopes);
+  const channels = await youtubeData("/channels", {
+    part: "id,snippet,statistics,contentDetails,status",
+    mine: "true",
+    fields: "items(id,snippet(title,customUrl,thumbnails),statistics,contentDetails,status/privacyStatus)"
+  }, token.accessToken);
+  const channel = channels.items?.[0] || null;
+  return {
+    ...token,
+    scope: token.scope.join(" "),
     channel
   };
 }
@@ -11834,9 +12012,10 @@ async function verifyTwitchAccount(model, account, user = null) {
 }
 
 async function refreshYouTubeAccount(model, account, user = null) {
-  if (!account) throw new Error("No YouTube account is stored.");
+  const accountLabel = account?.platform === "youtube" ? "YouTube" : "Google";
+  if (!account) throw new Error(`No ${accountLabel} account is stored.`);
   const refreshToken = refreshTokenForYouTubeAccount(account);
-  if (!refreshToken) throw new Error("YouTube refresh token is missing. Reconnect Google OAuth with offline access.");
+  if (!refreshToken) throw new Error(`${accountLabel} refresh token is missing. Reconnect Google OAuth with offline access.`);
   const payload = new URLSearchParams({
     client_id: googleClientId,
     client_secret: googleClientSecret,
@@ -11849,7 +12028,7 @@ async function refreshYouTubeAccount(model, account, user = null) {
     body: payload.toString()
   });
   const token = await response.json().catch(() => ({}));
-  if (!response.ok || token.error) throw new Error(token.error_description || token.error || `YouTube token refresh ${response.status}`);
+  if (!response.ok || token.error) throw new Error(token.error_description || token.error || `${accountLabel} token refresh ${response.status}`);
   account.credential = encryptedToken(token.access_token);
   account.credentialUpdatedAt = new Date().toISOString();
   account.tokenType = token.token_type || account.tokenType || "Bearer";
@@ -11857,7 +12036,7 @@ async function refreshYouTubeAccount(model, account, user = null) {
   account.scopes = String(token.scope || account.scopes?.join(" ") || "").split(/\s+/).filter(Boolean);
   account.status = "connected";
   account.connectedAt = account.connectedAt || new Date().toISOString();
-  account.connectionEvidence = "YouTube access token refreshed server-side.";
+  account.connectionEvidence = `${accountLabel} access token refreshed server-side.`;
   await saveModelForUser(model, user);
   return account;
 }
@@ -12470,6 +12649,183 @@ function upsertConnectedAccount(model, patch) {
   }
   Object.assign(account, patch, { updatedAt: new Date().toISOString() });
   return account;
+}
+
+function googleBusinessLocationAccounts(model = {}, user = null) {
+  return (model.connectedAccounts || []).filter(account =>
+    account.platform === "google_business"
+    && account.accountType === "google_business_location"
+    && (!user?.id || ownedByUser(account, user.id))
+  );
+}
+
+function googleBusinessAuthorizationAccount(model = {}, user = null) {
+  return (model.connectedAccounts || []).find(account =>
+    account.platform === "google_business_auth"
+    && (!user?.id || ownedByUser(account, user.id))
+  ) || null;
+}
+
+function googleBusinessAccountWithScope(model = {}, user = null) {
+  const candidates = [
+    selectedProviderAccount(model, "google_business", user),
+    googleBusinessAuthorizationAccount(model, user),
+    usableProviderAccount(model, "youtube", { user })
+  ].filter(Boolean);
+  return candidates.find(account => hasAnyScope(account, googleBusinessScopes)) || null;
+}
+
+function googleBusinessCredentialPatch(token = {}, existing = null) {
+  const connectedAt = new Date().toISOString();
+  const scopes = normalizedGoogleScopes(token.scope, googleBusinessScopes);
+  return {
+    status: "connected",
+    connectedAt: existing?.connectedAt || connectedAt,
+    oauthProvider: "google",
+    provider: "google",
+    scopes,
+    requestedScopes: googleBusinessScopes,
+    credential: encryptedToken(token.accessToken),
+    credentialUpdatedAt: connectedAt,
+    refreshCredential: token.refreshToken ? encryptedToken(token.refreshToken) : existing?.refreshCredential || null,
+    tokenType: token.tokenType || existing?.tokenType || "Bearer",
+    tokenExpiresAt: token.expiresIn ? new Date(Date.now() + Number(token.expiresIn) * 1000).toISOString() : existing?.tokenExpiresAt || null
+  };
+}
+
+function upsertGoogleBusinessAssets(model = {}, token = {}, owner = null) {
+  const ownerPatch = accountOwnerPatch(owner);
+  const accounts = Array.isArray(token.accounts) ? token.accounts : [];
+  const locations = Array.isArray(token.locations) ? token.locations : [];
+  const now = new Date().toISOString();
+  const firstAccountResource = safeGoogleBusinessAccountResource(accounts[0]?.name);
+  const authKey = firstAccountResource || owner?.id || "google-business";
+  const authId = crypto.createHash("sha256").update(String(authKey)).digest("hex").slice(0, 16);
+  const existingAuth = googleBusinessAuthorizationAccount(model, owner);
+  const discoveryError = token.discoveryError ? compactProbeError(token.discoveryError) : "";
+  const authAccount = upsertConnectedAccount(model, {
+    id: existingAuth?.id || `acct-google-business-auth-${authId}`,
+    platform: "google_business_auth",
+    accountType: "google_business_authorization",
+    name: accounts[0]?.accountName || "Google Business Profile authorization",
+    handle: "",
+    providerAccountId: firstAccountResource || `google-auth-${authId}`,
+    ...googleBusinessCredentialPatch(token, existingAuth),
+    profile: {
+      assetType: "authorization",
+      accountCount: accounts.length,
+      locationCount: locations.length,
+      discoveryState: token.discoveryState || googleBusinessDiscoveryState(token.discoveryError, accounts.length, locations.length),
+      discoveryError,
+      discoveryWarnings: Array.isArray(token.warnings) ? token.warnings.slice(0, 10) : [],
+      lastDiscoveryAt: now
+    },
+    connectionEvidence: locations.length
+      ? `Google Business Profile OAuth and ${locations.length} managed location${locations.length === 1 ? "" : "s"} verified server-side.`
+      : discoveryError
+        ? `Google Business Profile OAuth succeeded; asset discovery is blocked: ${discoveryError}`
+        : "Google Business Profile OAuth succeeded, but no managed locations were returned.",
+    ...ownerPatch
+  });
+
+  const discoveredIds = new Set();
+  const locationAccounts = locations.map(location => {
+    const locationResource = safeGoogleBusinessLocationResource(location?.name);
+    const locationId = locationResource.split("/").pop();
+    const existing = googleBusinessLocationAccounts(model, owner).find(account => String(account.providerAccountId || "") === locationResource);
+    discoveredIds.add(locationResource);
+    return upsertConnectedAccount(model, {
+      id: existing?.id || `acct-google-business-${locationId}`,
+      platform: "google_business",
+      accountType: "google_business_location",
+      name: String(location.title || "Google Business Profile").trim(),
+      displayName: String(location.title || "Google Business Profile").trim(),
+      handle: String(location.storeCode || "").trim(),
+      providerAccountId: locationResource,
+      ...googleBusinessCredentialPatch(token, existing || authAccount),
+      googleBusinessAccountResource: safeGoogleBusinessAccountResource(location.businessAccount?.name),
+      googleBusinessLocationResource: locationResource,
+      profile: {
+        assetType: "location",
+        title: location.title || "Google Business Profile",
+        storeCode: location.storeCode || "",
+        websiteUri: location.websiteUri || "",
+        metadata: location.metadata || {},
+        profile: location.profile || {},
+        phoneNumbers: location.phoneNumbers || {},
+        categories: location.categories || {},
+        openInfo: location.openInfo || {},
+        serviceArea: location.serviceArea || {},
+        businessAccount: location.businessAccount || {},
+        discoveryState: "locations-discovered",
+        lastDiscoveryAt: now
+      },
+      lastSyncedAt: now,
+      connectionEvidence: "Google Business Profile location returned by the Business Information API.",
+      ...ownerPatch
+    });
+  });
+
+  if (!token.discoveryError) {
+    for (const stale of googleBusinessLocationAccounts(model, owner).filter(account => !discoveredIds.has(String(account.providerAccountId || "")))) {
+      stale.status = "not connected";
+      stale.connectedAt = null;
+      stale.connectionEvidence = "This location was not returned by the latest Google Business Profile discovery.";
+      delete stale.credential;
+      delete stale.refreshCredential;
+    }
+  }
+
+  model.activeProviderAccounts = model.activeProviderAccounts || {};
+  const selectedId = String(model.activeProviderAccounts.google_business || "");
+  if (locationAccounts.length && !locationAccounts.some(account => String(account.providerAccountId) === selectedId)) {
+    model.activeProviderAccounts.google_business = locationAccounts[0].providerAccountId;
+  }
+  return { authAccount, locationAccounts };
+}
+
+async function syncGoogleBusinessAssets(model = {}, user = null, options = {}) {
+  let tokenAccount = googleBusinessAccountWithScope(model, user);
+  if (!tokenAccount || !hasStoredToken(tokenAccount)) {
+    return { attempted: false, reason: "business.manage consent is not stored", authAccount: googleBusinessAuthorizationAccount(model, user), locationAccounts: googleBusinessLocationAccounts(model, user) };
+  }
+  const lastDiscoveryAt = Date.parse(tokenAccount.profile?.lastDiscoveryAt || "");
+  const fresh = Number.isFinite(lastDiscoveryAt) && Date.now() - lastDiscoveryAt < 5 * 60 * 1000;
+  if (!options.force && fresh) {
+    return { attempted: false, reason: "recent discovery is still current", authAccount: googleBusinessAuthorizationAccount(model, user), locationAccounts: googleBusinessLocationAccounts(model, user) };
+  }
+  if (tokenExpiresSoon(tokenAccount.tokenExpiresAt) || !tokenForYouTubeAccount(tokenAccount)) {
+    tokenAccount = await refreshYouTubeAccount(model, tokenAccount, user);
+  }
+  const accessToken = tokenForYouTubeAccount(tokenAccount);
+  if (!accessToken) return { attempted: false, reason: "Google access token is unavailable", authAccount: googleBusinessAuthorizationAccount(model, user), locationAccounts: googleBusinessLocationAccounts(model, user) };
+  let accounts = [];
+  let locations = [];
+  let warnings = [];
+  let discoveryError = null;
+  try {
+    accounts = await listGoogleBusinessAccounts(accessToken);
+    const discovery = await listGoogleBusinessLocations(accessToken, accounts);
+    locations = discovery.locations;
+    warnings = discovery.warnings;
+  } catch (error) {
+    discoveryError = error;
+  }
+  const result = upsertGoogleBusinessAssets(model, {
+    accessToken,
+    refreshToken: "",
+    tokenType: tokenAccount.tokenType || "Bearer",
+    expiresIn: null,
+    scope: tokenAccount.scopes || googleBusinessScopes,
+    accounts,
+    locations,
+    warnings,
+    discoveryError,
+    discoveryState: googleBusinessDiscoveryState(discoveryError, accounts.length, locations.length)
+  }, user);
+  if (user?.id) await saveModelForUser(model, user);
+  else await saveModel(model);
+  return { attempted: true, ...result, discoveryError, discoveryState: googleBusinessDiscoveryState(discoveryError, accounts.length, locations.length) };
 }
 
 function publicMetaAccount(account) {
@@ -15649,18 +16005,26 @@ function canvaOAuthUrl(state = "", challenge = "") {
   return `https://www.canva.com/api/oauth/authorize?${params.toString()}`;
 }
 
-function youtubeOAuthUrl(state = "") {
+function googleOAuthUrl(state = "", scopes = youtubeScopes) {
   const params = new URLSearchParams({
     client_id: googleClientId,
     redirect_uri: youtubeRedirectUri(),
     response_type: "code",
-    scope: youtubeScopes.join(" "),
+    scope: [...new Set(scopes)].join(" "),
     state,
     access_type: "offline",
     include_granted_scopes: "true",
     prompt: "consent select_account"
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+}
+
+function youtubeOAuthUrl(state = "") {
+  return googleOAuthUrl(state, youtubeScopes);
+}
+
+function googleBusinessOAuthUrl(state = "") {
+  return googleOAuthUrl(state, googleBusinessScopes);
 }
 
 function envPresent(name) {
@@ -17644,6 +18008,11 @@ async function route(req, res) {
       secureOAuthReady: secureYouTubeOAuthReady(),
       warning: youtubeSecurityWarning(),
       scopes: youtubeScopes,
+      businessProfile: {
+        scopes: googleBusinessScopes,
+        connectRoute: "/api/oauth/youtube/start?service=business",
+        readinessRoute: "/api/google/business/readiness"
+      },
       knownChannelId: youtubeKnownChannelId,
       missingEnv: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"].filter(name => !envPresent(name)),
       acceptedEnv: envAcceptedMap(["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "YOUTUBE_CHANNEL_ID"]),
@@ -18178,8 +18547,10 @@ async function route(req, res) {
     } else if (provider === "youtube") {
       if (!secureYouTubeOAuthReady()) return json(res, 409, { ok: false, error: youtubeSecurityWarning() });
       if (!googleClientId) return json(res, 409, { ok: false, error: "GOOGLE_CLIENT_ID is not configured." });
-      state = createOAuthState(model, "youtube", "youtube", oauthOwnerFields(session));
-      authUrl = youtubeOAuthUrl(state);
+      const googleBusinessMode = platform === "google_business" || url.searchParams.get("service") === "business";
+      const requestedScopes = googleBusinessMode ? googleBusinessScopes : youtubeScopes;
+      state = createOAuthState(model, "youtube", googleBusinessMode ? "google_business" : "youtube", { ...oauthOwnerFields(session), requestedScopes });
+      authUrl = googleBusinessMode ? googleBusinessOAuthUrl(state) : youtubeOAuthUrl(state);
     } else if (provider === "meta") {
       const redirectUri = metaRedirectUri(req);
       if (!secureOAuthReady(req)) return json(res, 409, { ok: false, error: oauthSecurityWarning(req) });
@@ -19147,18 +19518,21 @@ async function route(req, res) {
   }
 
   if (url.pathname === "/api/oauth/youtube/start" && req.method === "GET") {
+    const googleBusinessMode = url.searchParams.get("service") === "business";
+    const requestedScopes = googleBusinessMode ? googleBusinessScopes : youtubeScopes;
+    const oauthLabel = googleBusinessMode ? "Google Business Profile" : "YouTube";
     if (!secureYouTubeOAuthReady()) {
-      return html(res, 200, `<h1>YouTube callback URL needed</h1><p>${youtubeSecurityWarning()}</p><p>Current YouTube callback:</p><p><code>${youtubeRedirectUri()}</code></p><p><a href="/app">Back to Social Cues</a></p>`);
+      return html(res, 200, `<h1>${oauthLabel} callback URL needed</h1><p>${youtubeSecurityWarning()}</p><p>Current Google callback:</p><p><code>${youtubeRedirectUri()}</code></p><p><a href="/app">Back to Social Cues</a></p>`);
     }
     if (!googleClientId) {
-      return html(res, 200, `<h1>Google OAuth client needed</h1><p>Add <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> to Vercel environment variables.</p><p>Use this redirect URI in Google Cloud OAuth client settings:</p><p><code>${youtubeRedirectUri()}</code></p><p>Requested scopes: <code>${youtubeScopes.join(" ")}</code></p><p><a href="/app">Back to Social Cues</a></p>`);
+      return html(res, 200, `<h1>Google OAuth client needed</h1><p>Add <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> to Vercel environment variables.</p><p>Use this redirect URI in Google Cloud OAuth client settings:</p><p><code>${youtubeRedirectUri()}</code></p><p>Requested scopes: <code>${requestedScopes.join(" ")}</code></p><p><a href="/app">Back to Social Cues</a></p>`);
     }
     const model = await getModel();
     const session = await oauthStartSession(model, req);
     if (runtimeMode === "vercel" && !session) return html(res, 401, `<h1>Sign in required</h1><p>Open Social Cues, sign in, then connect YouTube from inside the app.</p><p><a href="/app">Back to Social Cues</a></p>`);
-    const state = createOAuthState(model, "youtube", "youtube", oauthOwnerFields(session));
+    const state = createOAuthState(model, "youtube", googleBusinessMode ? "google_business" : "youtube", { ...oauthOwnerFields(session), requestedScopes });
     await saveModel(model);
-    res.writeHead(302, { Location: youtubeOAuthUrl(state) });
+    res.writeHead(302, { Location: googleBusinessMode ? googleBusinessOAuthUrl(state) : youtubeOAuthUrl(state) });
     return res.end();
   }
 
@@ -19182,66 +19556,92 @@ async function route(req, res) {
     const owner = userFromOAuthRecord(sharedModel, stateCheck.record, session);
     const model = owner ? await modelForSession({ user: owner }, sharedModel) : sharedModel;
     const ownerPatch = accountOwnerPatch(owner);
+    const googleBusinessMode = stateCheck.record.platform === "google_business";
     model.connectedAccounts = model.connectedAccounts || [];
     let account = null;
     model.integrations = model.integrations || {};
     try {
-      const token = await exchangeGoogleCode(code);
-      const channel = token.channel || {};
-      if (!channel.id) throw new Error("Google authorized successfully, but YouTube did not return a channel for the selected identity.");
-      const connectedAt = new Date().toISOString();
-      const existing = model.connectedAccounts.find(item =>
-        item.platform === "youtube"
-        && String(item.providerAccountId || "") === String(channel.id)
-        && (!owner || ownedByUser(item, owner.id))
-      );
-      account = upsertConnectedAccount(model, {
-        id: existing?.id || `acct-youtube-${channel.id}`,
-        platform: "youtube",
-        name: channel.snippet?.title || "YouTube",
-        handle: channel.snippet?.customUrl || channel.snippet?.title || "YouTube channel",
-        status: "connected",
-        connectedAt,
-        oauthProvider: "google",
-        providerAccountId: channel.id,
-        scopes: String(token.scope || "").split(/\s+/).filter(Boolean),
-        credential: encryptedToken(token.accessToken),
-        credentialUpdatedAt: connectedAt,
-        refreshCredential: token.refreshToken ? encryptedToken(token.refreshToken) : existing?.refreshCredential || null,
-        tokenType: token.tokenType,
-        tokenExpiresAt: token.expiresIn ? new Date(Date.now() + token.expiresIn * 1000).toISOString() : null,
-        channel,
-        ...ownerPatch
-      });
-      clearProviderTokenErrors(account);
-      model.activeProviderAccounts = model.activeProviderAccounts || {};
-      model.activeProviderAccounts.youtube = channel.id;
-      model.integrations.youtube = `${account.name} connected and selected for YouTube`;
+      if (googleBusinessMode) {
+        const token = await exchangeGoogleBusinessCode(code);
+        const result = upsertGoogleBusinessAssets(model, token, owner);
+        account = result.locationAccounts.find(item => String(item.providerAccountId) === String(model.activeProviderAccounts?.google_business || ""))
+          || result.locationAccounts[0]
+          || result.authAccount;
+        [result.authAccount, ...result.locationAccounts].filter(Boolean).forEach(clearProviderTokenErrors);
+        if (result.locationAccounts.length) {
+          model.integrations.google_business = `${result.locationAccounts.length} Google Business Profile location${result.locationAccounts.length === 1 ? "" : "s"} discovered; ${account.name} is selected.`;
+        } else if (token.discoveryState === "api-access-required") {
+          model.integrations.google_business = "Google Business Profile consent succeeded, but this Google Cloud project still needs Business Profile API approval and enabled APIs before locations can be discovered.";
+        } else {
+          model.integrations.google_business = "Google Business Profile consent succeeded, but Google returned no managed locations for this identity.";
+        }
+      } else {
+        const token = await exchangeGoogleCode(code);
+        const channel = token.channel || {};
+        if (!channel.id) throw new Error("Google authorized successfully, but YouTube did not return a channel for the selected identity.");
+        const connectedAt = new Date().toISOString();
+        const existing = model.connectedAccounts.find(item =>
+          item.platform === "youtube"
+          && String(item.providerAccountId || "") === String(channel.id)
+          && (!owner || ownedByUser(item, owner.id))
+        );
+        account = upsertConnectedAccount(model, {
+          id: existing?.id || `acct-youtube-${channel.id}`,
+          platform: "youtube",
+          name: channel.snippet?.title || "YouTube",
+          handle: channel.snippet?.customUrl || channel.snippet?.title || "YouTube channel",
+          status: "connected",
+          connectedAt,
+          oauthProvider: "google",
+          providerAccountId: channel.id,
+          scopes: normalizedGoogleScopes(token.scope, youtubeScopes),
+          requestedScopes: youtubeScopes,
+          credential: encryptedToken(token.accessToken),
+          credentialUpdatedAt: connectedAt,
+          refreshCredential: token.refreshToken ? encryptedToken(token.refreshToken) : existing?.refreshCredential || null,
+          tokenType: token.tokenType,
+          tokenExpiresAt: token.expiresIn ? new Date(Date.now() + token.expiresIn * 1000).toISOString() : null,
+          channel,
+          ...ownerPatch
+        });
+        clearProviderTokenErrors(account);
+        model.activeProviderAccounts = model.activeProviderAccounts || {};
+        model.activeProviderAccounts.youtube = channel.id;
+        model.integrations.youtube = `${account.name} connected and selected for YouTube`;
+      }
     } catch (exchangeError) {
-      account = model.connectedAccounts.find(item => item.platform === "youtube" && !item.providerAccountId && (!owner || ownedByUser(item, owner.id)));
+      const failedPlatform = googleBusinessMode ? "google_business_auth" : "youtube";
+      account = model.connectedAccounts.find(item => item.platform === failedPlatform && !item.providerAccountId && (!owner || ownedByUser(item, owner.id)));
       if (!account) {
-        account = { id: owner?.id ? `acct-youtube-${owner.id}` : "acct-youtube", platform: "youtube", name: "YouTube", handle: "", ...ownerPatch };
+        account = {
+          id: owner?.id ? `acct-${failedPlatform}-${owner.id}` : `acct-${failedPlatform}`,
+          platform: failedPlatform,
+          name: googleBusinessMode ? "Google Business Profile" : "YouTube",
+          handle: "",
+          ...ownerPatch
+        };
         model.connectedAccounts.push(account);
       }
       account.status = "not connected";
       account.connectedAt = null;
       account.oauthProvider = "google";
       Object.assign(account, ownerPatch);
-      account.connectionEvidence = `YouTube token exchange failed: ${exchangeError.message}`;
-      model.integrations.youtube = account.connectionEvidence;
+      account.connectionEvidence = `${googleBusinessMode ? "Google Business Profile" : "YouTube"} token exchange failed: ${exchangeError.message}`;
+      model.integrations[googleBusinessMode ? "google_business" : "youtube"] = account.connectionEvidence;
     }
     renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req);
     if (owner && model !== sharedModel) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     if (account?.status === "connected" && owner) {
-      let persistenceCheck = await confirmPersistedProviderAccount(owner, "youtube", account.providerAccountId, sharedModel, account);
+      let persistenceCheck = await confirmPersistedProviderAccount(owner, account.platform, account.providerAccountId, sharedModel, account);
       if (!persistenceCheck.ok) {
         await mirrorWorkspaceModel(model, owner);
-        persistenceCheck = await confirmPersistedProviderAccount(owner, "youtube", account.providerAccountId, sharedModel, account);
+        persistenceCheck = await confirmPersistedProviderAccount(owner, account.platform, account.providerAccountId, sharedModel, account);
       }
-      if (!persistenceCheck.ok) model.integrations.youtube = `${account.name} authorized; secure token storage still needs attention.`;
+      if (!persistenceCheck.ok) model.integrations[googleBusinessMode ? "google_business" : "youtube"] = `${account.name} authorized; secure token storage still needs attention.`;
     }
-    return html(res, 200, oauthReturnBody("YouTube", model.integrations.youtube, { provider: "youtube" }), "/app");
+    const providerKey = googleBusinessMode ? "google_business" : "youtube";
+    return html(res, 200, oauthReturnBody(googleBusinessMode ? "Google Business Profile" : "YouTube", model.integrations[providerKey], { provider: providerKey }), "/app");
   }
 
   if (url.pathname === "/api/oauth/meta/start" && req.method === "GET") {
@@ -20858,7 +21258,7 @@ async function route(req, res) {
         priorityBuildOrder: depth.priorityBuildOrder
       },
       futureApiBacklog: apiBacklog,
-      envRequired: ["OPENAI_API_KEY", "OPENAI_PROJECT_ID", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_PRO_MONTHLY", "DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET", "DISCORD_PUBLIC_KEY", "DISCORD_BOT_TOKEN", "RESEND_API_KEY", "SMTP_FROM", "SUPABASE_URL", "SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY", "MEDIA_STORAGE_BUCKET", "META_APP_ID", "META_APP_SECRET", "INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET", "THREADS_APP_ID", "THREADS_APP_SECRET", "X_CLIENT_ID", "X_CLIENT_SECRET", "TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET", "PINTEREST_APP_ID", "PINTEREST_APP_SECRET", "CANVA_CLIENT_ID", "CANVA_CLIENT_SECRET", "SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET", "ETSY_CLIENT_ID", "ETSY_CLIENT_SECRET", "TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "YOUTUBE_CHANNEL_ID", "GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ADS_CUSTOMER_ID", "GOOGLE_BUSINESS_ACCOUNT_ID", "GOOGLE_BUSINESS_LOCATION_ID", "GOOGLE_SEARCH_CONSOLE_SITE_URL", "GOOGLE_ANALYTICS_PROPERTY_ID", "REDDIT_COMMERCIAL_APPROVED", "REDDIT_ADS_API_CLIENT_ID", "REDDIT_ADS_API_CLIENT_SECRET", "REDDIT_ADS_ACCOUNT_ID"]
+      envRequired: ["OPENAI_API_KEY", "OPENAI_PROJECT_ID", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_PRO_MONTHLY", "DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET", "DISCORD_PUBLIC_KEY", "DISCORD_BOT_TOKEN", "RESEND_API_KEY", "SMTP_FROM", "SUPABASE_URL", "SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY", "MEDIA_STORAGE_BUCKET", "META_APP_ID", "META_APP_SECRET", "INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET", "THREADS_APP_ID", "THREADS_APP_SECRET", "X_CLIENT_ID", "X_CLIENT_SECRET", "TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET", "PINTEREST_APP_ID", "PINTEREST_APP_SECRET", "CANVA_CLIENT_ID", "CANVA_CLIENT_SECRET", "SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET", "ETSY_CLIENT_ID", "ETSY_CLIENT_SECRET", "TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "YOUTUBE_CHANNEL_ID", "GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ADS_CUSTOMER_ID", "GOOGLE_SEARCH_CONSOLE_SITE_URL", "GOOGLE_ANALYTICS_PROPERTY_ID", "REDDIT_COMMERCIAL_APPROVED", "REDDIT_ADS_API_CLIENT_ID", "REDDIT_ADS_API_CLIENT_SECRET", "REDDIT_ADS_ACCOUNT_ID"]
     });
   }
 
@@ -23177,22 +23577,78 @@ async function route(req, res) {
   }
 
   if (url.pathname === "/api/google/business/readiness" && req.method === "GET") {
+    const sharedModel = await getModel();
+    const session = await entitledSessionFromRequest(sharedModel, req);
+    if (runtimeMode === "vercel" && !session) return appAccessRequiredResponse(res);
+    const model = session?.user ? await modelForSession(session, sharedModel) : sharedModel;
+    const forceRefresh = url.searchParams.get("refresh") === "1";
+    let syncResult = null;
+    let syncError = null;
+    try {
+      syncResult = await syncGoogleBusinessAssets(model, session?.user || null, { force: forceRefresh });
+    } catch (error) {
+      syncError = error;
+    }
     const suite = googleGrowthStatus().find(item => item.id === "google_business_profile");
-    const missingEnv = suite?.missingEnv || ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_BUSINESS_ACCOUNT_ID", "GOOGLE_BUSINESS_LOCATION_ID"].filter(name => !envPresent(name));
+    const missingEnv = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"].filter(name => !envPresent(name));
+    const locationAccounts = googleBusinessLocationAccounts(model, session?.user || null)
+      .filter(account => providerAccountConnectionState(account).connected)
+      .map(publicAccount);
+    const authAccount = googleBusinessAuthorizationAccount(model, session?.user || null);
+    const scopedAccount = googleBusinessAccountWithScope(model, session?.user || null);
+    const selected = selectedProviderAccount(model, "google_business", session?.user || null);
+    const grantedScopes = scopedAccount?.scopes || [];
+    const missingScopes = scopedAccount
+      ? googleBusinessScopes.filter(scope => !hasAnyScope(scopedAccount, [scope, "business.manage"]))
+      : [...googleBusinessScopes];
+    const discoveryState = syncResult?.discoveryState || authAccount?.profile?.discoveryState || (locationAccounts.length ? "locations-discovered" : missingScopes.length ? "consent-required" : "not-run");
+    const discoveryError = compactProbeError(syncError || authAccount?.profile?.discoveryError || "");
+    const configured = Boolean(googleClientId && googleClientSecret);
+    const connected = Boolean(selected && providerAccountConnectionState(selected).connected);
+    const ready = Boolean(configured && connected && !missingScopes.length && discoveryState === "locations-discovered");
+    const nextAction = missingEnv.length
+      ? `Configure ${missingEnv.join(", ")} before Google Business Profile OAuth can start.`
+      : missingScopes.length
+        ? "Connect Google Business Profile and approve business.manage so Social Cues can discover the locations this user manages."
+        : discoveryState === "api-access-required"
+          ? "Google consent succeeded. Request Basic API Access for this Google Cloud project, then enable the Business Profile APIs; a 0 QPM quota means approval is still pending."
+          : !locationAccounts.length
+            ? "Google is authorized, but no managed location was returned. Confirm this Google identity is an owner or manager of a verified Business Profile, then refresh discovery."
+            : `${selected?.name || locationAccounts[0]?.name || "Google Business Profile"} is selected and ready for Business Profile workflows.`;
     return json(res, 200, {
       ok: true,
-      ready: Boolean(suite?.ready),
-      configured: Boolean(suite?.ready),
+      ready,
+      configured,
+      connected,
       missingEnv,
-      acceptedEnv: envAcceptedMap(["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_BUSINESS_ACCOUNT_ID", "GOOGLE_BUSINESS_LOCATION_ID"]),
-      api: suite,
-      connectRoute: "/api/oauth/youtube/start",
+      acceptedEnv: envAcceptedMap(["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]),
+      api: { ...suite, ready, missingEnv },
+      connectRoute: "/api/oauth/youtube/start?service=business",
       statusRoute: "/api/google/growth-suite",
+      refreshRoute: "/api/google/business/readiness?refresh=1",
+      requiredScopes: googleBusinessScopes,
+      grantedScopes,
+      missingScopes,
+      discovery: {
+        attempted: Boolean(syncResult?.attempted),
+        state: discoveryState,
+        error: discoveryError,
+        accountCount: Number(authAccount?.profile?.accountCount || 0),
+        locationCount: locationAccounts.length,
+        lastDiscoveryAt: authAccount?.profile?.lastDiscoveryAt || null
+      },
+      account: selected ? publicAccount(selected) : null,
+      accounts: locationAccounts,
+      selectedProviderAccountId: selected?.providerAccountId || null,
       allowedWorkflows: ["Business profile posts", "offer/event/update posts", "location media", "review monitoring/reply when granted"],
-      nextAction: missingEnv.length
-        ? `Add ${missingEnv.join(", ")} before Google Business Profile can move past setup.`
-        : "Connect Google OAuth, select the Business Profile account/location, then run read and post dry-run checks.",
-      note: "Google Business Profile is the Google replacement lane for local/profile posting. It is not Google+."
+      nextAction,
+      approval: {
+        required: discoveryState === "api-access-required",
+        quotaSignal: "0 QPM means the Google Cloud project is not approved; the normal approved quota is 300 QPM.",
+        prerequisite: "Google currently requires a verified, active Business Profile for 60+ days and a business website before Basic API Access can be requested.",
+        requestUrl: "https://developers.google.com/my-business/content/prereqs"
+      },
+      note: "Business Profile authorization is separate from YouTube. Social Cues discovers each signed-in user's managed locations instead of sharing global account IDs."
     });
   }
 

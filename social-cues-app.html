@@ -2514,7 +2514,7 @@
       { id: "twitch", account: "Twitch broadcaster or creator channel", prepare: "Authorize the channel owner or an account with the required broadcaster permissions. Some follower, subscriber, clip, and moderation features require additional consent or Twitch approval.", actsAs: "The authorized Twitch channel", linkage: "Broadcaster identity and application approval jointly determine available channel actions." },
       { id: "discord", account: "Discord user plus the intended server and channel", prepare: "Authorize the user identity. A member with Manage Server permission must install the Social Cues bot/app, then select the authorized server and target channels.", actsAs: "The installed app inside the selected Discord server", linkage: "User OAuth proves identity; bot installation and channel permissions enable server workflows." },
       { id: "reddit", account: "Reddit account plus an installed or moderated community", prepare: "Choose the subreddit/community and confirm the user has the required moderator authority. Devvit playtests work before public release; commercial API and advertising access remain separate approvals.", actsAs: "The installed Social Cues app in the selected community", linkage: "Reddit identity, subreddit moderation, Devvit installation, Data API, and Ads API are separate lanes." },
-      { id: "google_business", account: "Verified Google Business Profile location", prepare: "Use a Google Account with owner or manager rights, verify the business location, and select the exact account and location. Unverified locations are not publicly visible.", actsAs: "The selected Business Profile location", linkage: "The Google login may manage several accounts and locations; Social Cues needs the location ID." },
+      { id: "google_business", account: "Verified Google Business Profile location", prepare: "Use a Google Account with owner or manager rights, verify the business location, and select the exact account and location. Unverified locations are not publicly visible.", actsAs: "The selected Business Profile location", linkage: "The Google login may manage several accounts and locations; Social Cues discovers them and lets the user choose the posting location." },
       { id: "google_growth", account: "Google Account with access to the intended business properties", prepare: "Confirm access to the correct GA4 property, Search Console site, Google Ads account, and YouTube channel. Each Google product has its own property or account selection and API approval.", actsAs: "The selected Google properties", linkage: "One Google login can expose several unrelated properties; each must be bound explicitly." },
       { id: "shopify", account: "The Shopify store owner or authorized staff account", prepare: "Enter the exact store domain and authorize installation with an account allowed to approve app access. Select the store that owns the products, customers, and marketing events for this workspace.", actsAs: "The selected Shopify store", linkage: "A Shopify partner login is not the customer store; each store authorizes its own installation." },
       { id: "etsy", account: "Etsy seller account that owns the shop", prepare: "Authorize the member account that owns the intended Etsy shop. Listing management needs listing scopes, while orders and receipts require transaction access.", actsAs: "The selected Etsy shop", linkage: "The Etsy member signs in; the shop ID is the commerce asset Social Cues uses." },
@@ -3903,6 +3903,7 @@
         source.threadsStatus?.account,
         source.twitchStatus?.account,
         source.discordStatus?.account,
+        ...((source.googleBusinessStatus?.accounts || [])),
         ...((source.providerTruth?.rows || []).map(row => row.account)),
         ...((source.acceptanceLedger?.rows || []).map(row => row.account)),
         ...(source.instagramAssets?.accounts || []),
@@ -4999,7 +5000,7 @@
         return;
       }
       if (SERVER_MODE && ["google_growth", "google_business"].includes(platform)) {
-        startProviderOAuth("youtube", "youtube");
+        startProviderOAuth("youtube", platform === "google_business" ? "google_business" : "youtube");
         return;
       }
       if (SERVER_MODE && platform === "threads") {
@@ -10632,7 +10633,7 @@
     }
 
     function canonicalProviderAssetPlatform(platform = "") {
-      return ["google_growth", "google_business"].includes(platform) ? "youtube" : platform;
+      return platform === "google_growth" ? "youtube" : platform;
     }
 
     function providerAccountSelectionRow(platform = "") {
@@ -10855,30 +10856,41 @@
         const actionPlatform = canonicalProviderAssetPlatform(platform.id);
         const readiness = providerReadiness(platform);
         if (["google_growth", "google_business"].includes(platform.id)) {
-          const googleAccount = authoritativeProviderAccount("youtube", accounts);
+          const businessLane = platform.id === "google_business";
+          const googleAccount = authoritativeProviderAccount(businessLane ? "google_business" : "youtube", accounts);
           const googleConnection = accountConnectionState(googleAccount || {});
-          const googleConfigured = Boolean(metaState.youtubeStatus?.configured || providerTruthRow("youtube")?.configured);
-          const serviceReady = platform.id === "google_business"
-            ? Boolean(metaState.googleBusinessStatus?.ready)
+          const googleConfigured = businessLane
+            ? Boolean(metaState.googleBusinessStatus?.configured || metaState.youtubeStatus?.configured)
+            : Boolean(metaState.youtubeStatus?.configured || providerTruthRow("youtube")?.configured);
+          const serviceReady = businessLane
+            ? Boolean(metaState.googleBusinessStatus?.ready && googleConnection.connected)
             : Boolean((metaState.googleSuite?.apis || []).some(api => api.ready));
+          const businessAuthorized = businessLane && (metaState.googleBusinessStatus?.grantedScopes || [])
+            .some(scope => String(scope).includes("business.manage"));
           const identity = googleConnection.connected
             ? providerPostingIdentityName(platform, googleAccount) || googleAccount?.displayName || googleAccount?.name || "Google account"
-            : "No Google account authorized";
+            : businessAuthorized ? "Google Business consent granted" : "No Google account authorized";
+          const connectRoute = businessLane ? "/api/oauth/youtube/start?service=business" : "/api/oauth/youtube/start";
+          const connectLabel = businessLane
+            ? googleConnection.connected ? "Reconnect Business Profile" : "Connect Business Profile"
+            : googleConnection.connected ? "Reconnect Google" : "Authorize Google";
           return `<article class="variant account-card" data-account-lane="${escapeHtml(platform.id)}" style="--accent:${escapeHtml(platform.accent)}">
             <div class="variant-head">
               <div>
                 <h3>${escapeHtml(platform.name)}</h3>
                 <p>${escapeHtml(readiness.detail || "Google capability status has not loaded yet.")}</p>
               </div>
-              <span class="pill ${serviceReady ? "published" : googleConnection.connected ? "approved" : "revision"}">${serviceReady ? "ready" : googleConnection.connected ? "Google signed in" : readiness.label || "setup"}</span>
+              <span class="pill ${serviceReady ? "published" : googleConnection.connected || businessAuthorized ? "approved" : "revision"}">${serviceReady ? "ready" : googleConnection.connected ? "connected" : businessAuthorized ? "Google authorized" : readiness.label || "setup"}</span>
             </div>
             <div class="tags provider-state-chips">
               <span class="pill ${googleConnection.connected ? "approved" : "draft"}">${escapeHtml(identity)}</span>
               ${(readiness.tags || []).slice(0, 7).map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
             </div>
+            ${businessLane ? renderProviderAccountPicker("google_business", accounts) : ""}
             <div class="variant-tools">
-              ${googleConfigured ? `<button class="connector-route" data-route="/api/oauth/youtube/start">${googleConnection.connected ? "Reconnect Google" : "Authorize Google"}</button>` : `<span class="tag">Google OAuth setup required</span>`}
-              <button class="connector-route" data-route="${escapeHtml(readiness.statusRoute || (platform.id === "google_business" ? "/api/google/business/readiness" : "/api/google/growth-suite"))}">Refresh status</button>
+              ${googleConfigured ? `<button class="connector-route" data-route="${escapeHtml(connectRoute)}">${escapeHtml(connectLabel)}</button>` : `<span class="tag">Google OAuth setup required</span>`}
+              <button class="connector-route" data-route="${escapeHtml(businessLane ? "/api/google/business/readiness?refresh=1" : readiness.statusRoute || "/api/google/growth-suite")}">Refresh status</button>
+              ${businessLane && googleConnection.connected ? `<button class="toggle-button" aria-pressed="${googleAccount?.disabled !== true ? "true" : "false"}" data-account-action="toggle" data-platform="google_business" title="Turning this location off clears its cached data and stored token evidence from this workspace.">${googleAccount?.disabled !== true ? "Active" : "Off"}</button>` : ""}
             </div>
           </article>`;
         }
@@ -11447,16 +11459,25 @@
 
       if (platform.id === "google_business") {
         const businessReady = Boolean(metaState.googleBusinessStatus?.ready);
-        const missingBusinessEnv = metaState.googleBusinessStatus?.missingEnv || (businessReady ? [] : ["GOOGLE_BUSINESS_ACCOUNT_ID", "GOOGLE_BUSINESS_LOCATION_ID"]);
+        const businessConnected = Boolean(metaState.googleBusinessStatus?.connected);
+        const missingBusinessEnv = metaState.googleBusinessStatus?.missingEnv || [];
+        const missingScopes = metaState.googleBusinessStatus?.missingScopes || [];
+        const discovery = metaState.googleBusinessStatus?.discovery || {};
         return {
-          label: businessReady ? "ready" : "needs config",
-          pill: businessReady ? "approved" : "draft",
+          label: businessReady ? "ready" : businessConnected ? "connected" : discovery.state === "api-access-required" ? "API approval needed" : missingScopes.length ? "needs consent" : "needs setup",
+          pill: businessReady ? "approved" : businessConnected ? "published" : "draft",
           detail: businessReady
             ? "Google Business Profile is ready for local/profile posts, reviews, offers, and location media through the Google project/OAuth lane."
-            : (metaState.googleBusinessStatus?.nextAction || "Add the Google Business account and location IDs before this lane can move past setup."),
-          tags: ["business.manage", "profile posts", "reviews", ...missingBusinessEnv.map(name => `missing ${name}`), metaState.googleBusinessStatus?.note || "Google+ is not a current social app"],
+            : (metaState.googleBusinessStatus?.nextAction || "Connect Google Business Profile so Social Cues can discover the locations this user manages."),
+          tags: [
+            "business.manage",
+            `${Number(discovery.locationCount || 0)} location${Number(discovery.locationCount || 0) === 1 ? "" : "s"}`,
+            discovery.state ? `discovery: ${discovery.state}` : "discovery pending",
+            ...missingBusinessEnv.map(name => `missing ${name}`),
+            ...missingScopes.map(scope => `approve ${String(scope).split("/").pop()}`)
+          ],
           statusRoute: "/api/google/business/readiness",
-          connectRoute: "/api/oauth/youtube/start"
+          connectRoute: "/api/oauth/youtube/start?service=business"
         };
       }
 

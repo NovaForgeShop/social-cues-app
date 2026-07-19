@@ -24,6 +24,7 @@ const server = spawn(process.execPath, ["server.mjs"], {
     SOCIAL_CUES_PROMO_CODES: JSON.stringify(localPromoCodes),
     WORKER_SECRET: "test-worker-secret",
     GOOGLE_CLIENT_ID: "test-google-client-id",
+    GOOGLE_CLIENT_SECRET: "test-google-client-secret",
     GOOGLE_PUBLIC_APP_URL: "https://socialcuesapp.com",
     META_APP_ID: "test-meta-app-id",
     META_APP_SECRET: "test-meta-app-secret",
@@ -349,7 +350,7 @@ try {
   if (!serverSource.includes("async function refreshEtsyAccount") || !serverSource.includes('grant_type: "refresh_token"') || !serverSource.includes('etsy: refreshEtsyAccount')) throw new Error("Etsy access tokens must renew from the durable refresh grant");
   if (!/url\.pathname === "\/api\/oauth\/x\/callback"[\s\S]*?account\.credentialUpdatedAt = account\.connectedAt[\s\S]*?confirmPersistedProviderAccount\(owner, "x"/.test(serverSource)) throw new Error("X callback must timestamp and verify normalized token persistence");
   if (!/url\.pathname === "\/api\/oauth\/etsy\/callback"[\s\S]*?account\.credentialUpdatedAt = account\.connectedAt[\s\S]*?confirmPersistedProviderAccount\(owner, "etsy"/.test(serverSource)) throw new Error("Etsy callback must timestamp and verify normalized token persistence");
-  if (!/url\.pathname === "\/api\/oauth\/youtube\/callback"[\s\S]*?credentialUpdatedAt: connectedAt[\s\S]*?confirmPersistedProviderAccount\(owner, "youtube"/.test(serverSource)) throw new Error("YouTube callback must timestamp and verify normalized token persistence");
+  if (!/url\.pathname === "\/api\/oauth\/youtube\/callback"[\s\S]*?credentialUpdatedAt: connectedAt[\s\S]*?confirmPersistedProviderAccount\(owner, account\.platform, account\.providerAccountId/.test(serverSource)) throw new Error("Google callback must timestamp and verify persistence for the actual YouTube or Business Profile asset");
   if (!renderWorkerSource.includes('p_kinds: ["media_render"]') || !renderWorkerSource.includes("runFfmpeg") || !renderWorkerSource.includes("render_heartbeat_failed") || !renderWorkerSource.includes("social_cues_finish_worker_job")) throw new Error("isolated renderer must claim only media work, heartbeat long renders, transcode without a shell, and settle durable jobs");
   if (!renderWorkerSource.includes("startWorkerRun") || !renderWorkerSource.includes("finishWorkerRun") || !renderWorkerSource.includes('trigger: "cloud-run-render"') || !renderWorkerSource.includes('kind: "media_render"')) throw new Error("isolated renderer must write durable run receipts for production observability");
   if (!renderWorkerDockerfile.includes("ffmpeg") || !renderWorkerDockerfile.includes("USER node")) throw new Error("render container must include FFmpeg and run without root privileges");
@@ -560,8 +561,9 @@ try {
   if (!/url\.pathname === "\/api\/twitch\/readiness"[\s\S]*?const session = await sessionFromRequest/.test(serverSource)) throw new Error("Twitch readiness should use signed-in session evidence instead of hiding OAuth success behind entitlement lookup");
   if (!/url\.pathname === "\/api\/youtube\/readiness"[\s\S]*?const session = await sessionFromRequest/.test(serverSource)) throw new Error("YouTube readiness should be public-safe and not hide configuration behind entitlement");
   if (!/url\.pathname === "\/api\/google\/growth-suite"[\s\S]*?const session = await sessionFromRequest/.test(serverSource)) throw new Error("Google Growth readiness should be public-safe and not hide configuration behind entitlement");
-  if (!/id: "google_business"[\s\S]*?env: \["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_BUSINESS_ACCOUNT_ID", "GOOGLE_BUSINESS_LOCATION_ID"\]/.test(serverSource)) throw new Error("Google Business provider readiness should expose account/location IDs as required setup");
-  if (!appHtml.includes("GOOGLE_BUSINESS_ACCOUNT_ID") || !appHtml.includes("GOOGLE_BUSINESS_LOCATION_ID") || !appHtml.includes("missingBusinessEnv.map")) throw new Error("Google Business account card should show missing account/location env names");
+  if (!/id: "google_business"[\s\S]*?env: \["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"\][\s\S]*?configured: \(\) => Boolean\(googleClientId && googleClientSecret\)/.test(serverSource)) throw new Error("Google Business provider readiness should use per-user OAuth discovery instead of global account/location IDs");
+  if (!serverSource.includes("googleBusinessScopes") || !serverSource.includes("listGoogleBusinessAccounts") || !serverSource.includes("listGoogleBusinessLocations") || !serverSource.includes("upsertGoogleBusinessAssets")) throw new Error("Google Business must request business.manage and discover tenant-owned accounts and locations");
+  if (!appHtml.includes('startProviderOAuth("youtube", platform === "google_business" ? "google_business" : "youtube")') || !appHtml.includes('renderProviderAccountPicker("google_business", accounts)') || !appHtml.includes("API approval needed")) throw new Error("Google Business account card should connect, select discovered locations, and explain project approval blockers");
   if (!serverSource.includes("oauthReturnBody") || !serverSource.includes("sc_last_oauth_return") || !serverSource.includes("oauth_provider")) throw new Error("OAuth callbacks should auto-return to the app so provider state refreshes after handshakes");
   if (!appHtml.includes("currentOAuthReturn") || !appHtml.includes("acknowledgeOAuthReturn") || !appHtml.includes('jump("accounts")')) throw new Error("app should consume OAuth return markers, refresh provider state, and land users on accounts");
   if (!appHtml.includes("if (platform?.name) return platform.name;")) throw new Error("provider cards should keep provider names separate from connected identity names");
@@ -1674,9 +1676,15 @@ try {
   if (serverSource.includes("REDDIT_ADS_API_APPROVED") || envExampleSource.includes("REDDIT_ADS_API_APPROVED") || envSyncSource.includes("REDDIT_ADS_API_APPROVED")) throw new Error("deprecated Reddit Ads approval flag should be removed from runtime and env tooling");
   const googleGrowth = await request("/api/google/growth-suite");
   if (!googleGrowth.ok || !Array.isArray(googleGrowth.apis) || !googleGrowth.projectRecommendation?.callback?.includes("/api/oauth/youtube/callback")) throw new Error("google growth suite readiness failed");
-  const googleBusiness = await request("/api/google/business/readiness");
-  if (!googleBusiness.ok || !Array.isArray(googleBusiness.missingEnv) || !googleBusiness.acceptedEnv || !googleBusiness.connectRoute?.includes("/api/oauth/youtube/start")) throw new Error("google business readiness should expose actionable setup details");
-  if (!googleBusiness.ready && (!googleBusiness.missingEnv.includes("GOOGLE_BUSINESS_ACCOUNT_ID") || !googleBusiness.missingEnv.includes("GOOGLE_BUSINESS_LOCATION_ID"))) throw new Error("google business readiness should name missing account/location IDs");
+  const googleBusiness = await request("/api/google/business/readiness", { headers: { Authorization: `Bearer ${login.session.token}` } });
+  if (!googleBusiness.ok || !Array.isArray(googleBusiness.missingEnv) || !googleBusiness.acceptedEnv || googleBusiness.connectRoute !== "/api/oauth/youtube/start?service=business") throw new Error("google business readiness should expose the dedicated consent lane");
+  if (!googleBusiness.requiredScopes?.includes("https://www.googleapis.com/auth/business.manage") || !Array.isArray(googleBusiness.accounts) || !googleBusiness.discovery) throw new Error("google business readiness should expose consent, discovery, and location evidence");
+  if (googleBusiness.missingEnv.includes("GOOGLE_BUSINESS_ACCOUNT_ID") || googleBusiness.missingEnv.includes("GOOGLE_BUSINESS_LOCATION_ID")) throw new Error("google business readiness must not require global account/location IDs for customer assets");
+
+  const googleBusinessStartResponse = await fetch(base + "/api/oauth/youtube/start?service=business", { redirect: "manual", headers: { Authorization: `Bearer ${login.session.token}` } });
+  if (googleBusinessStartResponse.status !== 302) throw new Error("google business OAuth start should redirect to Google consent");
+  const googleBusinessStartUrl = new URL(googleBusinessStartResponse.headers.get("location") || "");
+  if (!googleBusinessStartUrl.searchParams.get("scope")?.includes("https://www.googleapis.com/auth/business.manage")) throw new Error("google business OAuth start must request business.manage");
 
   const xStartResponse = await fetch(base + "/api/oauth/x/start", { redirect: "manual" });
   if (![200, 302].includes(xStartResponse.status)) throw new Error("x start failed");
