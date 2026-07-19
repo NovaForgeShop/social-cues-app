@@ -12,6 +12,7 @@ import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/prom
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import webpush from "web-push";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -165,6 +166,11 @@ const tokenRefreshLeadByPlatformMinutes = Object.freeze({
 });
 const automaticPublishingEnabled = /^(1|true|yes|enabled)$/i.test(process.env.AUTOMATIC_PUBLISHING_ENABLED || "");
 const notificationEmailMaxAgeHours = Math.max(1, Math.min(Number(process.env.NOTIFICATION_EMAIL_MAX_AGE_HOURS || 24), 168));
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY || "";
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || "";
+const vapidSubject = process.env.VAPID_SUBJECT || `mailto:${supportEmail}`;
+const webPushConfigured = Boolean(vapidPublicKey && vapidPrivateKey && /^mailto:|^https:/i.test(vapidSubject));
+if (webPushConfigured) webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
 const mediaRenderWorkerConfigured = /^(1|true|yes|configured)$/i.test(process.env.MEDIA_RENDER_WORKER_CONFIGURED || "");
 const runtimeMode = process.env.VERCEL ? "vercel" : "local";
 const corsOrigin = new URL(publicAppUrl).origin;
@@ -242,6 +248,8 @@ const openaiVideoModel = process.env.OPENAI_VIDEO_MODEL || "";
 const openaiDailyRequestLimit = Math.max(1, Number(process.env.OPENAI_DAILY_REQUEST_LIMIT || 40));
 const openaiMonthlyRequestLimit = Math.max(openaiDailyRequestLimit, Number(process.env.OPENAI_MONTHLY_REQUEST_LIMIT || 500));
 const openaiMonthlyTokenLimit = Math.max(10000, Number(process.env.OPENAI_MONTHLY_TOKEN_LIMIT || 1500000));
+const openaiInputCostPerMillionMicrousd = Math.max(0, Number(process.env.OPENAI_INPUT_COST_PER_MILLION_MICROUSD || 0));
+const openaiOutputCostPerMillionMicrousd = Math.max(0, Number(process.env.OPENAI_OUTPUT_COST_PER_MILLION_MICROUSD || 0));
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
 const stripePublishableKey = process.env.STRIPE_PUBLISHABLE_KEY || "";
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
@@ -5136,6 +5144,67 @@ function recordOpenaiUsage(model = {}, session = null, feature = "generation", r
   return record;
 }
 
+async function claimDurableOpenaiAllowance(session = null, feature = "generation", idempotencyKey = "") {
+  const user = session?.user;
+  const workspaceId = workspaceModelIdForUser(user || {});
+  const ownerUserId = supabaseUserIdForUser(user || {});
+  if (!supabaseEnabled || !isUuid(workspaceId) || !isUuid(ownerUserId)) return { durable: false, allowed: true, ledgerId: "" };
+  const result = await optionalSupabaseRequest("/rpc/social_cues_claim_openai_allowance", {
+    method: "POST",
+    body: JSON.stringify({
+      p_workspace_id: workspaceId,
+      p_user_id: ownerUserId,
+      p_feature: String(feature || "generation").slice(0, 120),
+      p_idempotency_key: String(idempotencyKey || uid("openai-request")).slice(0, 500),
+      p_daily_request_limit: openaiDailyRequestLimit,
+      p_monthly_request_limit: openaiMonthlyRequestLimit,
+      p_monthly_token_limit: openaiMonthlyTokenLimit,
+      p_metadata: { model: openaiModel }
+    })
+  });
+  const decision = Array.isArray(result) ? result[0] || {} : result || {};
+  return {
+    durable: true,
+    allowed: decision.allowed === true,
+    dailyUsed: Number(decision.daily_used || 0),
+    monthlyUsed: Number(decision.monthly_used || 0),
+    monthlyTokens: Number(decision.monthly_tokens || 0),
+    ledgerId: decision.ledger_id || ""
+  };
+}
+
+async function completeDurableOpenaiUsage(claim = {}, result = {}, error = null) {
+  if (!claim.durable || !isUuid(claim.ledgerId)) return null;
+  const usage = result?.usage || {};
+  const inputTokens = Math.max(0, Number(usage.input_tokens || 0));
+  const outputTokens = Math.max(0, Number(usage.output_tokens || 0));
+  const totalTokens = Math.max(0, Number(usage.total_tokens || inputTokens + outputTokens));
+  const estimatedCostMicrousd = Math.round(
+    inputTokens * openaiInputCostPerMillionMicrousd / 1_000_000
+    + outputTokens * openaiOutputCostPerMillionMicrousd / 1_000_000
+  );
+  const now = new Date().toISOString();
+  const rows = await optionalSupabaseRequest(`/provider_usage_ledger?id=eq.${encodeURIComponent(claim.ledgerId)}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({
+      status: error ? "failed" : "completed",
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: totalTokens,
+      estimated_cost_microusd: estimatedCostMicrousd,
+      metadata: {
+        model: result?.model || openaiModel,
+        providerRequestId: String(result?.id || "").slice(0, 160),
+        costEstimateConfigured: Boolean(openaiInputCostPerMillionMicrousd || openaiOutputCostPerMillionMicrousd),
+        error: error ? String(error.message || error).slice(0, 500) : ""
+      },
+      updated_at: now
+    })
+  });
+  return Array.isArray(rows) ? rows[0] || null : null;
+}
+
 async function openaiStructuredResponse({ name, schema, instructions, input, maxOutputTokens = 9000 }) {
   if (!openaiApiKey) throw Object.assign(new Error("OpenAI is not configured for server-side generation."), { status: 503 });
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -5986,6 +6055,145 @@ async function supabaseSaveModel(model) {
 
 function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+}
+
+function responseEventStatus(value = "unread") {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return new Set(["unread", "read", "needs_reply", "drafted", "approved", "replied", "moderated", "ignored", "failed"]).has(normalized)
+    ? normalized
+    : "unread";
+}
+
+function publicResponseEvent(row = {}) {
+  return {
+    id: row.id || "",
+    provider: row.provider || "",
+    platform: row.platform || row.provider || "",
+    providerEventId: row.provider_event_id || "",
+    conversationId: row.conversation_id || "",
+    parentEventId: row.parent_event_id || "",
+    eventType: row.event_type || "response",
+    author: {
+      id: row.author_id || "",
+      name: row.author_name || "",
+      handle: row.author_handle || ""
+    },
+    body: row.body_text || "",
+    media: Array.isArray(row.media) ? row.media : [],
+    status: responseEventStatus(row.status),
+    analysis: row.analysis && typeof row.analysis === "object" ? row.analysis : {},
+    metadata: row.metadata && typeof row.metadata === "object" ? row.metadata : {},
+    observedAt: row.observed_at || row.created_at || null,
+    updatedAt: row.updated_at || null
+  };
+}
+
+async function normalizedConnectedAccountId(user = {}, account = {}) {
+  const workspaceId = workspaceModelIdForUser(user);
+  const ownerUserId = supabaseUserIdForUser(user);
+  const platform = String(account?.platform || "").trim();
+  const providerAccountId = String(account?.providerAccountId || account?.id || "").trim();
+  if (!supabaseEnabled || !isUuid(workspaceId) || !isUuid(ownerUserId) || !platform || !providerAccountId) return "";
+  const rows = await optionalSupabaseRequest(
+    `/connected_accounts?workspace_id=eq.${encodeURIComponent(workspaceId)}&user_id=eq.${encodeURIComponent(ownerUserId)}&platform=eq.${encodeURIComponent(platform)}&provider_account_id=eq.${encodeURIComponent(providerAccountId)}&select=id&limit=1`
+  );
+  return Array.isArray(rows) ? rows[0]?.id || "" : "";
+}
+
+async function persistResponseEvents(user = {}, account = {}, events = []) {
+  const workspaceId = workspaceModelIdForUser(user);
+  const ownerUserId = supabaseUserIdForUser(user);
+  if (!supabaseEnabled || !isUuid(workspaceId) || !isUuid(ownerUserId) || !Array.isArray(events) || !events.length) return [];
+  const connectedAccountId = await normalizedConnectedAccountId(user, account).catch(() => "");
+  const now = new Date().toISOString();
+  const rows = events.slice(0, 250).map(event => ({
+    workspace_id: workspaceId,
+    user_id: ownerUserId,
+    connected_account_id: isUuid(connectedAccountId) ? connectedAccountId : null,
+    provider: String(event.provider || account?.oauthProvider || account?.provider || account?.platform || "unknown").slice(0, 80),
+    platform: String(event.platform || account?.platform || event.provider || "unknown").slice(0, 80),
+    provider_event_id: String(event.providerEventId || event.id || "").slice(0, 500),
+    conversation_id: String(event.conversationId || "").slice(0, 500) || null,
+    parent_event_id: String(event.parentEventId || "").slice(0, 500) || null,
+    event_type: String(event.eventType || "response").slice(0, 80),
+    author_id: String(event.authorId || event.author?.id || "").slice(0, 500) || null,
+    author_name: String(event.authorName || event.author?.name || "").slice(0, 500) || null,
+    author_handle: String(event.authorHandle || event.author?.handle || "").slice(0, 500) || null,
+    body_text: String(event.body || event.text || "").slice(0, 20000) || null,
+    media: Array.isArray(event.media) ? event.media.slice(0, 20) : [],
+    status: responseEventStatus(event.status),
+    analysis: event.analysis && typeof event.analysis === "object" ? event.analysis : {},
+    metadata: event.metadata && typeof event.metadata === "object" ? event.metadata : {},
+    observed_at: event.observedAt || event.createdAt || now,
+    updated_at: now
+  })).filter(row => row.provider_event_id && row.provider !== "unknown");
+  if (!rows.length) return [];
+  const result = await optionalSupabaseRequest("/response_events?on_conflict=workspace_id,provider,provider_event_id&select=id,provider,platform,provider_event_id,status", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+    body: JSON.stringify(rows)
+  });
+  return Array.isArray(result) ? result : [];
+}
+
+async function durableResponseInbox(user = {}, options = {}) {
+  const workspaceId = workspaceModelIdForUser(user);
+  const ownerUserId = supabaseUserIdForUser(user);
+  if (!supabaseEnabled || !isUuid(workspaceId) || !isUuid(ownerUserId)) return [];
+  const limit = Math.max(1, Math.min(200, Number(options.limit || 100)));
+  const status = String(options.status || "").trim();
+  const provider = String(options.provider || "").trim();
+  const filters = [
+    `workspace_id=eq.${encodeURIComponent(workspaceId)}`,
+    `user_id=eq.${encodeURIComponent(ownerUserId)}`,
+    status ? `status=eq.${encodeURIComponent(responseEventStatus(status))}` : "",
+    provider ? `provider=eq.${encodeURIComponent(provider)}` : "",
+    "select=id,provider,platform,provider_event_id,conversation_id,parent_event_id,event_type,author_id,author_name,author_handle,body_text,media,status,analysis,metadata,observed_at,created_at,updated_at",
+    "order=observed_at.desc",
+    `limit=${limit}`
+  ].filter(Boolean).join("&");
+  const rows = await optionalSupabaseRequest(`/response_events?${filters}`);
+  return (Array.isArray(rows) ? rows : []).map(publicResponseEvent);
+}
+
+async function durableResponseEventForUser(user = {}, eventId = "") {
+  const workspaceId = workspaceModelIdForUser(user);
+  const ownerUserId = supabaseUserIdForUser(user);
+  if (!isUuid(eventId) || !isUuid(workspaceId) || !isUuid(ownerUserId)) return null;
+  const rows = await optionalSupabaseRequest(`/response_events?id=eq.${encodeURIComponent(eventId)}&workspace_id=eq.${encodeURIComponent(workspaceId)}&user_id=eq.${encodeURIComponent(ownerUserId)}&select=*&limit=1`);
+  return Array.isArray(rows) ? rows[0] || null : null;
+}
+
+async function recordDurableResponseAction(user = {}, input = {}) {
+  const workspaceId = workspaceModelIdForUser(user);
+  const ownerUserId = supabaseUserIdForUser(user);
+  if (!supabaseEnabled || !isUuid(workspaceId) || !isUuid(ownerUserId)) return null;
+  const event = input.responseEventId ? await durableResponseEventForUser(user, input.responseEventId) : null;
+  const providerEventId = String(input.providerEventId || input.targetId || "").trim();
+  const idempotencyKey = String(input.idempotencyKey || `${input.provider || event?.provider || "response"}:${input.actionType || "action"}:${providerEventId || input.responseEventId || uid("action")}`).slice(0, 500);
+  const now = new Date().toISOString();
+  const rows = await optionalSupabaseRequest("/response_actions?on_conflict=workspace_id,idempotency_key&select=*", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify([{
+      workspace_id: workspaceId,
+      user_id: ownerUserId,
+      response_event_id: event?.id || null,
+      provider: String(input.provider || event?.provider || "unknown").slice(0, 80),
+      platform: String(input.platform || event?.platform || input.provider || "unknown").slice(0, 80),
+      action_type: String(input.actionType || "action").slice(0, 80),
+      idempotency_key: idempotencyKey,
+      draft_text: String(input.draftText || input.text || "").slice(0, 20000) || null,
+      status: String(input.status || "completed").slice(0, 40),
+      approved_by: input.approved ? ownerUserId : null,
+      approved_at: input.approved ? now : null,
+      provider_action_id: String(input.providerActionId || "").slice(0, 500) || null,
+      receipt: input.receipt && typeof input.receipt === "object" ? input.receipt : {},
+      last_error: String(input.lastError || "").slice(0, 2000) || null,
+      updated_at: now
+    }])
+  });
+  return Array.isArray(rows) ? rows[0] || null : null;
 }
 
 function supabaseUserIdForUser(user = {}) {
@@ -7838,6 +8046,80 @@ async function notificationOutboxForUser(user = {}) {
   })) : [];
 }
 
+function normalizePushSubscription(input = {}) {
+  const endpoint = String(input.endpoint || "").trim();
+  let parsedEndpoint;
+  try {
+    parsedEndpoint = new URL(endpoint);
+  } catch {
+    throw new Error("The browser push endpoint is invalid.");
+  }
+  if (parsedEndpoint.protocol !== "https:") throw new Error("The browser push endpoint must use HTTPS.");
+  const p256dh = String(input.keys?.p256dh || "").trim();
+  const auth = String(input.keys?.auth || "").trim();
+  if (!p256dh || !auth) throw new Error("The browser push subscription is missing encryption keys.");
+  if (endpoint.length > 4096 || p256dh.length > 2048 || auth.length > 1024) throw new Error("The browser push subscription is too large.");
+  return { endpoint, expirationTime: Number.isFinite(Number(input.expirationTime)) ? Number(input.expirationTime) : null, keys: { p256dh, auth } };
+}
+
+async function pushStatusForUser(user = {}, deviceId = "") {
+  const workspaceId = workspaceModelIdForUser(user);
+  const userId = supabaseUserIdForUser(user);
+  if (!supabaseEnabled || !isUuid(workspaceId) || !isUuid(userId)) {
+    return { configured: webPushConfigured, enabled: false, subscriptions: 0, deviceEnabled: false };
+  }
+  const rows = await optionalSupabaseRequest(`/push_subscriptions?workspace_id=eq.${encodeURIComponent(workspaceId)}&user_id=eq.${encodeURIComponent(userId)}&status=eq.active&select=device_id,status,last_used_at,created_at`);
+  const subscriptions = Array.isArray(rows) ? rows : [];
+  return {
+    configured: webPushConfigured,
+    enabled: subscriptions.length > 0,
+    subscriptions: subscriptions.length,
+    deviceEnabled: Boolean(deviceId && subscriptions.some(row => row.device_id === deviceId)),
+    publicKey: webPushConfigured ? vapidPublicKey : ""
+  };
+}
+
+async function storePushSubscription(user = {}, deviceId = "", input = {}) {
+  if (!webPushConfigured) throw new Error("Device notifications are not configured on the Social Cues server.");
+  const workspaceId = workspaceModelIdForUser(user);
+  const userId = supabaseUserIdForUser(user);
+  if (!isUuid(workspaceId) || !isUuid(userId)) throw new Error("The workspace identity is incomplete.");
+  const normalizedDeviceId = String(deviceId || "").trim().slice(0, 300);
+  if (!normalizedDeviceId) throw new Error("This remembered device is missing its device id.");
+  const subscription = normalizePushSubscription(input);
+  const endpointHash = hashSecret(subscription.endpoint);
+  const now = new Date().toISOString();
+  await optionalSupabaseRequest("/push_subscriptions?on_conflict=user_id,device_id,endpoint_hash", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify([{
+      workspace_id: workspaceId,
+      user_id: userId,
+      device_id: normalizedDeviceId,
+      endpoint_hash: endpointHash,
+      encrypted_subscription: encryptedToken(JSON.stringify(subscription)),
+      status: "active",
+      last_error: null,
+      updated_at: now
+    }])
+  });
+  return pushStatusForUser(user, normalizedDeviceId);
+}
+
+async function revokePushSubscriptions(user = {}, deviceId = "") {
+  const workspaceId = workspaceModelIdForUser(user);
+  const userId = supabaseUserIdForUser(user);
+  const normalizedDeviceId = String(deviceId || "").trim().slice(0, 300);
+  if (!isUuid(workspaceId) || !isUuid(userId) || !normalizedDeviceId) throw new Error("The device notification identity is incomplete.");
+  const now = new Date().toISOString();
+  await optionalSupabaseRequest(`/push_subscriptions?workspace_id=eq.${encodeURIComponent(workspaceId)}&user_id=eq.${encodeURIComponent(userId)}&device_id=eq.${encodeURIComponent(normalizedDeviceId)}&status=eq.active`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ status: "revoked", updated_at: now })
+  });
+  return pushStatusForUser(user, normalizedDeviceId);
+}
+
 class WorkerJobError extends Error {
   constructor(message, options = {}) {
     super(message);
@@ -7969,12 +8251,13 @@ async function discoverWorkerJobs() {
   const reconciliation = await reconcileTerminalTokenRefreshJobs();
   const now = new Date().toISOString();
   const refreshBefore = new Date(Date.now() + tokenRefreshLeadMinutes * 60 * 1000).toISOString();
-  const [scheduledRows, notificationRows, tokenRows] = await Promise.all([
+  const [scheduledRows, notificationRows, tokenRows, workspaceRows] = await Promise.all([
     automaticPublishingEnabled
       ? optionalSupabaseRequest(`/scheduled_posts?status=in.(queued,retrying)&scheduled_for=lte.${encodeURIComponent(now)}&select=id,workspace_id,external_key,platform,status,scheduled_for,idempotency_key,retry_count,max_attempts,next_retry_at&order=scheduled_for.asc&limit=100`)
       : Promise.resolve([]),
     optionalSupabaseRequest(`/notification_outbox?status=in.(pending,retrying)&next_attempt_at=lte.${encodeURIComponent(now)}&select=id,workspace_id,user_id,idempotency_key,channel,next_attempt_at,attempts&order=next_attempt_at.asc&limit=100`),
-    optionalSupabaseRequest(`/provider_tokens?expires_at=not.is.null&expires_at=lte.${encodeURIComponent(refreshBefore)}&encrypted_refresh_token=not.is.null&select=id,connected_account_id,workspace_id,user_id,provider,expires_at,refresh_expires_at&order=expires_at.asc&limit=100`)
+    optionalSupabaseRequest(`/provider_tokens?expires_at=not.is.null&expires_at=lte.${encodeURIComponent(refreshBefore)}&encrypted_refresh_token=not.is.null&select=id,connected_account_id,workspace_id,user_id,provider,expires_at,refresh_expires_at&order=expires_at.asc&limit=100`),
+    optionalSupabaseRequest("/workspace_models?select=workspace_id,owner_user_id,updated_at&order=updated_at.desc&limit=100")
   ]);
 
   const tokenAccountIds = (Array.isArray(tokenRows) ? tokenRows : []).map(row => row.connected_account_id).filter(isUuid);
@@ -7992,6 +8275,32 @@ async function discoverWorkerJobs() {
   }
   const supportedRefreshPlatforms = new Set(["x", "etsy", "tiktok", "twitch", "discord", "youtube"]);
   const jobs = [];
+  const hourKey = now.slice(0, 13).replace(/[-T:]/g, "");
+  const dayKey = now.slice(0, 10).replace(/-/g, "");
+
+  for (const row of Array.isArray(workspaceRows) ? workspaceRows : []) {
+    if (!isUuid(row.workspace_id) || !isUuid(row.owner_user_id)) continue;
+    jobs.push({
+      workspace_id: row.workspace_id,
+      user_id: row.owner_user_id,
+      kind: "analytics_collection",
+      idempotency_key: `analytics-collection:${hourKey}`,
+      priority: 30,
+      run_at: now,
+      max_attempts: 3,
+      payload: { source: "scheduled-hourly", hourKey }
+    });
+    jobs.push({
+      workspace_id: row.workspace_id,
+      user_id: row.owner_user_id,
+      kind: "audience_brief",
+      idempotency_key: `audience-brief:${dayKey}`,
+      priority: 20,
+      run_at: now,
+      max_attempts: 3,
+      payload: { source: "scheduled-daily", briefDate: now.slice(0, 10) }
+    });
+  }
 
   for (const row of Array.isArray(scheduledRows) ? scheduledRows : []) {
     if (!isUuid(row.workspace_id)) continue;
@@ -8072,7 +8381,7 @@ async function claimWorkerJobs(workerId, limit = workerBatchSize) {
       p_worker_id: workerId,
       p_limit: limit,
       p_lease_seconds: workerLeaseSeconds,
-      p_kinds: ["scheduled_publish", "provider_publish_status", "token_refresh", "notification_delivery"]
+      p_kinds: ["scheduled_publish", "provider_publish_status", "token_refresh", "notification_delivery", "analytics_collection", "audience_brief"]
     })
   });
   return Array.isArray(rows) ? rows : [];
@@ -8128,6 +8437,59 @@ async function processNotificationWorkerJob(job) {
       body: JSON.stringify({ status: "sent", sent_at: sentAt, last_error: null, updated_at: sentAt })
     });
     return { channel: "in-app", sentAt };
+  }
+
+  if (notice.channel === "push") {
+    if (!webPushConfigured) throw new WorkerJobError("VAPID keys are required for device notification delivery.", { blocked: true });
+    const subscriptionRows = await optionalSupabaseRequest(`/push_subscriptions?workspace_id=eq.${encodeURIComponent(notice.workspace_id)}&user_id=eq.${encodeURIComponent(notice.user_id)}&status=eq.active&select=id,device_id,encrypted_subscription`);
+    const subscriptions = Array.isArray(subscriptionRows) ? subscriptionRows : [];
+    if (!subscriptions.length) {
+      const skippedAt = new Date().toISOString();
+      await optionalSupabaseRequest(`/notification_outbox?id=eq.${encodeURIComponent(notice.id)}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ status: "sent", sent_at: skippedAt, last_error: null, updated_at: skippedAt })
+      });
+      return { channel: "push", skipped: true, reason: "No active device subscription." };
+    }
+    const label = String(notice.payload?.label || "Social Cues notice").slice(0, 200);
+    const detail = String(notice.payload?.detail || "").slice(0, 4000);
+    const route = String(notice.payload?.route || "/app");
+    const payload = JSON.stringify({ title: label, body: detail, url: route.startsWith("/") ? route : "/app", tag: String(notice.idempotency_key || notice.id).slice(0, 200) });
+    let delivered = 0;
+    let retryableFailure = null;
+    for (const row of subscriptions) {
+      try {
+        const subscription = JSON.parse(decryptedToken(row.encrypted_subscription));
+        await webpush.sendNotification(subscription, payload, { TTL: 3600, urgency: "normal" });
+        delivered += 1;
+        await optionalSupabaseRequest(`/push_subscriptions?id=eq.${encodeURIComponent(row.id)}`, {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ last_used_at: new Date().toISOString(), last_error: null, updated_at: new Date().toISOString() })
+        });
+      } catch (error) {
+        const statusCode = Number(error.statusCode || error.status || 0);
+        const expired = statusCode === 404 || statusCode === 410;
+        const retryable = statusCode === 429 || statusCode >= 500 || !statusCode;
+        await optionalSupabaseRequest(`/push_subscriptions?id=eq.${encodeURIComponent(row.id)}`, {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ status: expired ? "expired" : retryable ? "active" : "failed", last_error: String(error.message || "Push delivery failed.").slice(0, 1000), updated_at: new Date().toISOString() })
+        }).catch(() => {});
+        if (retryable) retryableFailure = error;
+      }
+    }
+    if (!delivered && retryableFailure) {
+      throw new WorkerJobError(retryableFailure.message || "Device notification delivery failed.", { retryable: true, retryAt: workerRetryAt(job) });
+    }
+    const sentAt = new Date().toISOString();
+    await optionalSupabaseRequest(`/notification_outbox?id=eq.${encodeURIComponent(notice.id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ status: "sent", sent_at: sentAt, last_error: null, updated_at: sentAt })
+    });
+    return { channel: "push", delivered, sentAt };
   }
 
   if (notice.channel !== "email") {
@@ -8397,11 +8759,184 @@ async function processProviderPublishStatusWorkerJob(job, registry) {
   throw new WorkerJobError(`TikTok returned an unknown publish status: ${status || "empty"}.`, { retryable: true, retryAt: new Date(Date.now() + 60_000).toISOString(), result: { publishId: job.payload.publishId, providerStatus: status } });
 }
 
+async function processAnalyticsCollectionWorkerJob(job, registry) {
+  const user = workerUserForJob(registry, job);
+  if (!user) throw new WorkerJobError("The analytics workspace owner no longer exists.", { blocked: true });
+  if (!hasActiveAppAccess(user)) return { skipped: true, reason: "The workspace does not have an active entitlement." };
+  const model = await modelForSession({ user }, registry);
+  const analytics = buildGrowthAnalytics(model);
+  model.analytics = analytics;
+  const snapshot = bankAnalyticsSnapshot(model, analytics, { user }, job.payload?.source || "scheduled-hourly");
+  await saveModelForUser(model, user);
+  return {
+    snapshotId: snapshot?.id || null,
+    metricCount: analytics.metrics?.length || 0,
+    liveMetricCount: (analytics.metrics || []).filter(metric => metric.kind === "live" && metric.observedAt).length,
+    compiledAt: analytics.lastCompiledAt || null
+  };
+}
+
+const audienceBriefStopWords = new Set([
+  "about", "after", "again", "also", "been", "before", "being", "could", "from", "have", "into", "just", "more",
+  "most", "only", "other", "over", "really", "should", "some", "than", "that", "their", "them", "then", "there",
+  "these", "they", "this", "through", "very", "want", "what", "when", "where", "which", "while", "with", "would",
+  "your", "youre", "https", "social", "cues"
+]);
+
+function repeatedAudienceTerms(events = []) {
+  const counts = new Map();
+  for (const event of events) {
+    const words = String(event.body_text || "").toLowerCase().match(/[a-z0-9][a-z0-9'-]{2,}/g) || [];
+    for (const word of words) {
+      if (audienceBriefStopWords.has(word) || /^\d+$/.test(word)) continue;
+      counts.set(word, (counts.get(word) || 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .filter(([, count]) => count >= 2)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 5)
+    .map(([term, count]) => ({ term, count }));
+}
+
+function localAudienceBrief(model = {}, events = [], briefDate = "") {
+  const analytics = model.analytics || buildGrowthAnalytics(model);
+  const liveMetrics = (analytics.metrics || []).filter(metric => metric.kind === "live" && metric.observedAt);
+  const terms = repeatedAudienceTerms(events);
+  const providerCount = new Set(events.map(event => event.provider).filter(Boolean)).size;
+  const replyNeeded = events.filter(event => ["unread", "needs_reply", "drafted"].includes(event.status)).length;
+  const enoughEvidence = events.length >= 8 && providerCount >= 2 && liveMetrics.length >= 2;
+  const someEvidence = events.length >= 3 || liveMetrics.length >= 2;
+  const confidence = enoughEvidence ? "medium" : "low";
+  const evidenceStatus = enoughEvidence ? "mixed" : someEvidence ? "mixed" : "limited";
+  const topTerms = terms.map(item => `${item.term} (${item.count})`).join(", ");
+  const strongestSignals = [];
+  if (events.length) {
+    strongestSignals.push({
+      signal: `${events.length} audience response${events.length === 1 ? "" : "s"} observed in the last 7 days`,
+      evidence: `${providerCount || 1} connected provider${providerCount === 1 ? "" : "s"}; ${replyNeeded} response${replyNeeded === 1 ? "" : "s"} currently need review or follow-up.`
+    });
+  }
+  if (terms.length) {
+    strongestSignals.push({
+      signal: `Repeated audience language: ${topTerms}`,
+      evidence: "Terms are counted only from provider-returned response text and require at least two occurrences."
+    });
+  }
+  if (liveMetrics.length) {
+    strongestSignals.push({
+      signal: `${liveMetrics.length} timestamped provider metric${liveMetrics.length === 1 ? "" : "s"} available`,
+      evidence: liveMetrics.slice(0, 4).map(metric => `${metric.label}: ${metric.value} (${metric.source})`).join("; ")
+    });
+  }
+  if (!strongestSignals.length) {
+    strongestSignals.push({
+      signal: "Audience evidence is not established yet",
+      evidence: "No recent provider responses or timestamped audience metrics were available for this workspace."
+    });
+  }
+  const nextMoves = [];
+  if (replyNeeded) {
+    nextMoves.push({
+      action: `Review ${replyNeeded} response${replyNeeded === 1 ? "" : "s"} that need attention`,
+      reason: "Fast, relevant replies create the next measurable audience signal.",
+      measure: "Resolved responses and reply turnaround time"
+    });
+  }
+  if (terms.length) {
+    nextMoves.push({
+      action: `Build one follow-up around “${terms[0].term}”`,
+      reason: "It is the most repeated term in recent provider-returned audience language.",
+      measure: "Replies, saves, and click-through versus the previous post"
+    });
+  }
+  nextMoves.push({
+    action: someEvidence ? "Publish one controlled follow-up and compare the next snapshot" : "Publish a baseline post on one connected platform",
+    reason: someEvidence ? "A single-variable follow-up makes the next result easier to interpret." : "The audience intelligence layer needs real traffic before it can make behavioral claims.",
+    measure: "Reach, replies, saves, clicks, and follower change after 24 hours"
+  });
+  return {
+    headline: events.length ? "Your audience response brief" : "Build the first audience signal",
+    summary: events.length
+      ? `${events.length} recent response${events.length === 1 ? " is" : "s are"} available. ${terms.length ? `Repeated language points toward ${terms.map(item => item.term).join(", ")}.` : "There is not yet enough repeated language to call a durable theme."}`
+      : "Social Cues has connected capability evidence, but not enough recent audience behavior to infer what people want today.",
+    audienceMood: events.length >= 5 ? "Active, with sentiment intentionally unclassified until response analysis has stronger evidence" : "Not enough evidence",
+    evidenceStatus,
+    confidence,
+    strongestSignals,
+    risks: [
+      ...(confidence === "low" ? ["Sparse evidence can make one comment or one metric look more important than it is."] : []),
+      ...(replyNeeded ? [`${replyNeeded} response${replyNeeded === 1 ? " is" : "s are"} still awaiting a decision.`] : [])
+    ],
+    nextMoves: nextMoves.slice(0, 3),
+    generatedAt: new Date().toISOString(),
+    briefDate,
+    liveMetricCount: liveMetrics.length,
+    responseCount: events.length,
+    providerCount,
+    model: "social-cues-evidence-rules-v1"
+  };
+}
+
+async function processAudienceBriefWorkerJob(job, registry) {
+  const user = workerUserForJob(registry, job);
+  if (!user) throw new WorkerJobError("The audience brief workspace owner no longer exists.", { blocked: true });
+  if (!hasActiveAppAccess(user)) return { skipped: true, reason: "The workspace does not have an active entitlement." };
+  const workspaceId = workspaceModelIdForUser(user);
+  const userId = supabaseUserIdForUser(user);
+  if (!isUuid(workspaceId) || !isUuid(userId)) throw new WorkerJobError("The audience brief workspace identity is incomplete.", { blocked: true });
+  const model = await modelForSession({ user }, registry);
+  model.analytics = model.analytics || buildGrowthAnalytics(model);
+  const evidenceFrom = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const rows = await optionalSupabaseRequest(`/response_events?workspace_id=eq.${encodeURIComponent(workspaceId)}&user_id=eq.${encodeURIComponent(userId)}&observed_at=gte.${encodeURIComponent(evidenceFrom)}&select=provider,status,body_text,observed_at&order=observed_at.desc&limit=500`);
+  const events = Array.isArray(rows) ? rows : [];
+  const briefDate = String(job.payload?.briefDate || new Date().toISOString().slice(0, 10));
+  const brief = localAudienceBrief(model, events, briefDate);
+  model.audienceIntelligence = brief;
+  const evidenceTo = new Date().toISOString();
+  await optionalSupabaseRequest("/audience_briefs?on_conflict=workspace_id,brief_date", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify([{
+      workspace_id: workspaceId,
+      user_id: userId,
+      brief_date: briefDate,
+      evidence_from: events.map(item => item.observed_at).filter(Boolean).sort()[0] || evidenceFrom,
+      evidence_to: evidenceTo,
+      status: "ready",
+      brief,
+      model: brief.model,
+      last_error: null,
+      updated_at: evidenceTo
+    }])
+  });
+  await saveModelForUser(model, user);
+  await enqueueNotificationOutbox(user, {
+    type: "audience-brief-ready",
+    channel: "in-app",
+    label: "Your audience brief is ready",
+    detail: brief.summary,
+    route: "/app",
+    idempotencyKey: `daily-audience-brief:${briefDate}`
+  }).catch(() => {});
+  await enqueueNotificationOutbox(user, {
+    type: "audience-brief-ready",
+    channel: "push",
+    label: "Your audience brief is ready",
+    detail: brief.summary,
+    route: "/app",
+    idempotencyKey: `daily-audience-brief-push:${briefDate}`
+  }).catch(() => {});
+  return { briefDate, confidence: brief.confidence, responseCount: events.length, liveMetricCount: brief.liveMetricCount };
+}
+
 async function processWorkerJob(job, registry) {
   if (job.kind === "scheduled_publish") return processScheduledPublishWorkerJob(job, registry);
   if (job.kind === "provider_publish_status") return processProviderPublishStatusWorkerJob(job, registry);
   if (job.kind === "token_refresh") return processTokenRefreshWorkerJob(job, registry);
   if (job.kind === "notification_delivery") return processNotificationWorkerJob(job);
+  if (job.kind === "analytics_collection") return processAnalyticsCollectionWorkerJob(job, registry);
+  if (job.kind === "audience_brief") return processAudienceBriefWorkerJob(job, registry);
   throw new WorkerJobError(`Unknown worker job kind: ${job.kind}`, { blocked: true });
 }
 
@@ -15751,6 +16286,42 @@ function brandKitTagList(brandKit = {}) {
   return normalizeBrandHashtags(brandKit.signatureHashtags || "");
 }
 
+function safeCampaignDestination(value = "") {
+  try {
+    const parsed = new URL(String(value || "").trim());
+    return parsed.protocol === "https:" ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function campaignDestinationContract(platform = {}, campaign = {}) {
+  const url = safeCampaignDestination(campaign.destinationUrl || "");
+  if (!url) return { url: "", cta: "", placement: "none", line: "" };
+  const labels = {
+    learn_more: "Learn more",
+    shop_now: "Shop now",
+    book_now: "Book now",
+    join_now: "Join now",
+    watch_more: "Watch more",
+    follow: "Follow the story"
+  };
+  const cta = labels[campaign.destinationCta] || labels.learn_more;
+  const profileLinkPlatforms = new Set(["instagram", "tiktok"]);
+  const placement = profileLinkPlatforms.has(platform.id) ? "profile" : "caption";
+  const line = placement === "profile" ? `${cta} through the link in our profile.` : `${cta}: ${url}`;
+  return { url, cta, placement, line };
+}
+
+function withCampaignDestination(platform, campaign, copy = "") {
+  const contract = campaignDestinationContract(platform, campaign);
+  const text = String(copy || "").trim();
+  if (!contract.line) return text;
+  if (contract.placement === "caption" && text.includes(contract.url)) return text;
+  if (contract.placement === "profile" && /link in (our|the) (bio|profile)/i.test(text)) return text;
+  return `${text}\n\n${contract.line}`;
+}
+
 function platformCopy(platform, campaign, profile, brandKit = {}) {
   const brief = campaign.brief || "";
   const role = `${profile?.operator || "Founder"} mode for ${(profile?.outcome || campaign.goal || "growth").toLowerCase()}`;
@@ -15774,7 +16345,11 @@ function platformCopy(platform, campaign, profile, brandKit = {}) {
     brandKit.ctaStyle ? `CTA style: ${String(brandKit.ctaStyle).trim()}` : "",
     brandKit.disclaimer ? `Guardrail: ${String(brandKit.disclaimer).trim()}` : ""
   ].filter(Boolean).join("\n");
-  return `${templates[platform.id] || `${brief}\n\nAdapted for ${platform.name}.`}${brandLayers ? `\n\n${brandLayers}` : ""}`;
+  return withCampaignDestination(
+    platform,
+    campaign,
+    `${templates[platform.id] || `${brief}\n\nAdapted for ${platform.name}.`}${brandLayers ? `\n\n${brandLayers}` : ""}`
+  );
 }
 
 function comingSoonCopy(platform, campaign = {}) {
@@ -15806,6 +16381,8 @@ function buildComingSoonShotCampaign(owner = null) {
     tone: "Founder-led",
     disclosure: "Founder or employee post",
     riskPosture: "Balanced growth",
+    destinationUrl: brandHomeUrl,
+    destinationCta: "learn_more",
     rawVideo: {
       name: "coming-soon-short-video.mp4",
       type: "video/mp4",
@@ -15836,7 +16413,11 @@ function buildComingSoonShotCampaign(owner = null) {
         id: uid(platformId),
         platform: platformId,
         status: platformId === "facebook" ? "approved" : "draft",
-        copy: comingSoonCopy(platform, { title: "Social Cues Coming Soon Shot", brief: "Coming soon launch video", goal: "Launch product" }),
+        copy: withCampaignDestination(
+          platform,
+          { destinationUrl: brandHomeUrl, destinationCta: "learn_more" },
+          comingSoonCopy(platform, { title: "Social Cues Coming Soon Shot", brief: "Coming soon launch video", goal: "Launch product" })
+        ),
         title: platformId === "youtube" ? "Social Cues Is Coming Soon" : "Social Cues Coming Soon",
         tags: platform.tags || [],
         media: {
@@ -19433,6 +20014,39 @@ async function route(req, res) {
     });
   }
 
+  if (url.pathname === "/api/push/status" && req.method === "GET") {
+    const model = await getModel();
+    const session = await entitledSessionFromRequest(model, req);
+    if (!session?.user) return appAccessRequiredResponse(res, 401);
+    return json(res, 200, { ok: true, ...(await pushStatusForUser(session.user, session.device?.deviceId || "")) });
+  }
+
+  if (url.pathname === "/api/push/subscribe" && req.method === "POST") {
+    const input = await bodyJson(req);
+    const model = await getModel();
+    const session = await entitledSessionFromRequest(model, req);
+    if (!session?.user) return appAccessRequiredResponse(res, 401);
+    try {
+      const status = await storePushSubscription(session.user, session.device?.deviceId || input.deviceId, input.subscription || input);
+      return json(res, 200, { ok: true, ...status });
+    } catch (error) {
+      return json(res, /not configured/i.test(error.message || "") ? 409 : 400, { ok: false, error: error.message || "Device notifications could not be enabled." });
+    }
+  }
+
+  if (url.pathname === "/api/push/unsubscribe" && req.method === "POST") {
+    const input = await bodyJson(req);
+    const model = await getModel();
+    const session = await entitledSessionFromRequest(model, req);
+    if (!session?.user) return appAccessRequiredResponse(res, 401);
+    try {
+      const status = await revokePushSubscriptions(session.user, session.device?.deviceId || input.deviceId);
+      return json(res, 200, { ok: true, ...status });
+    } catch (error) {
+      return json(res, 400, { ok: false, error: error.message || "Device notifications could not be disabled." });
+    }
+  }
+
   if (url.pathname === "/api/auth/mfa/status" && req.method === "GET") {
     const model = await getModel();
     const session = await sessionFromRequest(model, req);
@@ -19665,16 +20279,22 @@ async function route(req, res) {
     const availablePlatforms = platforms.filter(platform => !platform.accountOnly);
     const selectedTargetPlatforms = availablePlatforms.filter(platform => requestedPlatformIds.has(platform.id));
     const targetPlatforms = selectedTargetPlatforms.length ? selectedTargetPlatforms : availablePlatforms;
+    const campaignForGeneration = {
+      ...(campaign || {}),
+      destinationUrl: safeCampaignDestination(campaign?.destinationUrl || model.onboarding?.website || ""),
+      destinationCta: String(campaign?.destinationCta || "learn_more")
+    };
     const localVariants = () => targetPlatforms.map(platform => ({
       id: uid(platform.id),
       platform: platform.id,
       status: "draft",
-      copy: platformCopy(platform, campaign, model.profile, model.brandKit || {}),
+      copy: platformCopy(platform, campaignForGeneration, model.profile, model.brandKit || {}),
       tags: platform.tags,
       bestTime: platform.bestTime,
       fit: platform.fit,
       language: targetLanguage,
       locale: targetLocale,
+      destination: campaignDestinationContract(platform, campaignForGeneration),
       flags: claimFlags(campaign?.brief),
       generatedBy: "local-social-cues-engine",
       updatedAt: new Date().toISOString()
@@ -19698,6 +20318,18 @@ async function route(req, res) {
         usage: allowance
       });
     }
+    const durableAllowance = await claimDurableOpenaiAllowance(
+      session,
+      "campaign-variants",
+      String(input.idempotencyKey || `openai:campaign-variants:${req.socialCuesRequestId || uid("request")}`)
+    );
+    if (!durableAllowance.allowed) {
+      return json(res, 429, {
+        ok: false,
+        error: "This workspace has reached its durable Social Cues AI allowance for the current period.",
+        usage: durableAllowance
+      });
+    }
     const platformBrief = targetPlatforms.map(platform => ({
       id: platform.id,
       name: platform.name,
@@ -19717,7 +20349,12 @@ async function route(req, res) {
             goal: String(campaign?.goal || "Build demand").slice(0, 120),
             tone: String(campaign?.tone || "Sharp and useful").slice(0, 120),
             disclosure: String(campaign?.disclosure || "Organic/no material connection").slice(0, 200),
-            riskPosture: String(campaign?.riskPosture || "Balanced growth").slice(0, 120)
+            riskPosture: String(campaign?.riskPosture || "Balanced growth").slice(0, 120),
+            destination: {
+              url: campaignForGeneration.destinationUrl,
+              callToAction: campaignForGeneration.destinationCta,
+              platformRules: "Use direct URLs on link-friendly platforms. On Instagram and TikTok, write link-in-profile language and do not pretend caption URLs are clickable."
+            }
           },
           audience: {
             description: String(model.onboarding?.audience || "").slice(0, 1200),
@@ -19748,7 +20385,7 @@ async function route(req, res) {
           id: uid(platform.id),
           platform: platform.id,
           status: "draft",
-          copy: String(item.copy || "").trim(),
+          copy: withCampaignDestination(platform, campaignForGeneration, String(item.copy || "").trim()),
           tags: Array.from(new Set((item.tags || []).map(tag => String(tag || "").trim()).filter(Boolean))).slice(0, 12),
           bestTime: platform.bestTime,
           fit: platform.fit,
@@ -19756,12 +20393,14 @@ async function route(req, res) {
           mediaDirection: String(item.mediaDirection || "").trim(),
           language: targetLanguage,
           locale: targetLocale,
+          destination: campaignDestinationContract(platform, campaignForGeneration),
           flags: claimFlags(item.copy || campaign?.brief),
           generatedBy: "openai",
           updatedAt: new Date().toISOString()
         };
       });
       const usageRecord = recordOpenaiUsage(model, session, "campaign-variants", generated.result);
+      await completeDurableOpenaiUsage(durableAllowance, generated.result);
       await saveModelForUser(model, session?.user || null);
       return json(res, 200, {
         ok: true,
@@ -19773,6 +20412,7 @@ async function route(req, res) {
         usage: { record: usageRecord, allowance: openaiUsageSummary(model, session) }
       });
     } catch (error) {
+      await completeDurableOpenaiUsage(durableAllowance, {}, error).catch(() => null);
       runtimeRequestLog("warning", "openai_campaign_generation_fallback", req, {
         providerRequestId: error.requestId || "",
         status: error.status || 502,
@@ -19804,6 +20444,12 @@ async function route(req, res) {
     if (session?.user) ensureUserWorkspace(model, session.user);
     const allowance = openaiUsageSummary(model, session);
     if (!allowance.allowed) return json(res, 429, { ok: false, error: "This workspace has reached its Social Cues AI allowance for the current period.", usage: allowance });
+    const durableAllowance = await claimDurableOpenaiAllowance(
+      session,
+      "audience-brief",
+      `openai:audience-brief:${req.socialCuesRequestId || uid("request")}`
+    );
+    if (!durableAllowance.allowed) return json(res, 429, { ok: false, error: "This workspace has reached its durable Social Cues AI allowance for the current period.", usage: durableAllowance });
     const analytics = model.analytics || {};
     const metrics = (analytics.metrics || []).filter(metric => metric.kind !== "manual").slice(0, 80).map(metric => ({
       label: String(metric.label || "").slice(0, 200),
@@ -19837,6 +20483,7 @@ async function route(req, res) {
         })
       });
       const usageRecord = recordOpenaiUsage(model, session, "audience-brief", generated.result);
+      await completeDurableOpenaiUsage(durableAllowance, generated.result);
       model.audienceIntelligence = {
         ...generated.data,
         generatedAt: new Date().toISOString(),
@@ -19844,6 +20491,25 @@ async function route(req, res) {
         model: generated.result.model || openaiModel,
         usageRecordId: usageRecord.id
       };
+      if (session?.user && isUuid(workspaceModelIdForUser(session.user)) && isUuid(supabaseUserIdForUser(session.user))) {
+        const now = new Date().toISOString();
+        await optionalSupabaseRequest("/audience_briefs?on_conflict=workspace_id,brief_date", {
+          method: "POST",
+          headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+          body: JSON.stringify([{
+            workspace_id: workspaceModelIdForUser(session.user),
+            user_id: supabaseUserIdForUser(session.user),
+            brief_date: now.slice(0, 10),
+            evidence_from: metrics.map(item => item.observedAt).filter(Boolean).sort()[0] || null,
+            evidence_to: analytics.lastCompiledAt || now,
+            status: "ready",
+            brief: model.audienceIntelligence,
+            model: generated.result.model || openaiModel,
+            last_error: null,
+            updated_at: now
+          }])
+        });
+      }
       await saveModelForUser(model, session?.user || null);
       return json(res, 200, {
         ok: true,
@@ -19851,6 +20517,7 @@ async function route(req, res) {
         usage: { record: usageRecord, allowance: openaiUsageSummary(model, session) }
       });
     } catch (error) {
+      await completeDurableOpenaiUsage(durableAllowance, {}, error).catch(() => null);
       return json(res, error.status || 502, { ok: false, error: error.message || "Audience intelligence generation failed.", requestId: error.requestId || "" });
     }
   }
@@ -21856,7 +22523,7 @@ async function route(req, res) {
   if (url.pathname === "/api/discord/messages" && req.method === "GET") {
     const context = await requireDiscordAccountForRead(req, res, "read the selected Discord community inbox");
     if (!context) return;
-    const { account, accessToken } = context;
+    const { account, accessToken, session } = context;
     let target;
     try {
       target = discordSavedTarget(account, { channelId: url.searchParams.get("channel_id") || "" });
@@ -21893,6 +22560,21 @@ async function route(req, res) {
       attachmentCount: Array.isArray(message.attachments) ? message.attachments.length : 0,
       reactionCount: (message.reactions || []).reduce((total, reaction) => total + Number(reaction.count || 0), 0)
     }));
+    if (session?.user) {
+      await persistResponseEvents(session.user, account, rows.filter(message => !message.author.bot).map(message => ({
+        provider: "discord",
+        platform: "discord",
+        providerEventId: message.id,
+        conversationId: channelId,
+        eventType: "message",
+        authorId: message.author.id,
+        authorName: message.author.globalName || message.author.username,
+        authorHandle: message.author.username,
+        body: message.content,
+        observedAt: message.createdAt,
+        metadata: { guildId: target.guildId, channelId, pinned: message.pinned, reactionCount: message.reactionCount, attachmentCount: message.attachmentCount }
+      })));
+    }
     return json(res, 200, {
       ok: true,
       account: publicAccount(account),
@@ -21949,6 +22631,20 @@ async function route(req, res) {
       content
     });
     await saveModelForUser(model, session?.user || null);
+    if (session?.user) {
+      await recordDurableResponseAction(session.user, {
+        provider: "discord",
+        platform: "discord",
+        providerEventId: messageId,
+        actionType: "reply",
+        draftText: content,
+        approved: true,
+        status: "sent",
+        providerActionId: message.id || "",
+        idempotencyKey,
+        receipt: publicDiscordActionReceipt(receipt)
+      });
+    }
     return json(res, 200, { ok: true, mode: "sent", guildId: target.guildId, channelId, messageId: message.id || null, receipt: publicDiscordActionReceipt(receipt) });
   }
 
@@ -21986,13 +22682,25 @@ async function route(req, res) {
       targetId: messageId
     });
     await saveModelForUser(model, session?.user || null);
+    if (session?.user) {
+      await recordDurableResponseAction(session.user, {
+        provider: "discord",
+        platform: "discord",
+        providerEventId: messageId,
+        actionType: "moderate_delete",
+        approved: true,
+        status: "completed",
+        idempotencyKey,
+        receipt: publicDiscordActionReceipt(receipt)
+      });
+    }
     return json(res, 200, { ok: true, mode: "deleted", guildId: target.guildId, channelId, messageId, receipt: publicDiscordActionReceipt(receipt) });
   }
 
   if (url.pathname === "/api/discord/user" && req.method === "GET") {
     const context = await requireDiscordAccountForRead(req, res, "read Discord user identity", ["identify"]);
     if (!context) return;
-    const { account, accessToken } = context;
+    const { account, accessToken, session } = context;
     const user = await discordApi("/users/@me", {}, accessToken);
     return json(res, 200, {
       ok: true,
@@ -22858,7 +23566,7 @@ async function route(req, res) {
     const requiredScopes = ["r_organization_social", "r_organization_social_feed"];
     const context = await requireLinkedInOrganizationForRead(req, res, "triage Company Page comments", requiredScopes);
     if (!context) return;
-    const { model, account, accessToken, organizationUrn } = context;
+    const { model, account, accessToken, organizationUrn, session } = context;
     try {
       const postPage = await linkedInApi("/posts", {
         q: "author",
@@ -22879,6 +23587,22 @@ async function route(req, res) {
         }
       }));
       const storedNotifications = (model.linkedinNotifications || []).filter(item => item.organizationId === linkedInOrganizationId(organizationUrn));
+      if (session?.user) {
+        const responseEvents = conversations.flatMap(conversation => (conversation.comments || []).map(comment => ({
+          provider: "linkedin",
+          platform: "linkedin",
+          providerEventId: String(comment.id || comment.comment || ""),
+          conversationId: conversation.postUrn || String(conversation.post?.id || ""),
+          parentEventId: conversation.postUrn || "",
+          eventType: "comment",
+          authorId: String(comment.actor || comment.author || comment.createdBy || ""),
+          authorName: String(comment.actorName || comment.authorName || ""),
+          body: String(comment.message?.text || comment.text || comment.commentary || ""),
+          observedAt: comment.created?.time ? new Date(Number(comment.created.time)).toISOString() : comment.createdAt || null,
+          metadata: { organizationUrn, postUrn: conversation.postUrn || "", rawStatus: comment.state || "" }
+        })).filter(item => item.providerEventId));
+        await persistResponseEvents(session.user, account, responseEvents);
+      }
       return json(res, 200, {
         ok: true,
         provider: "linkedin",
@@ -24430,6 +25154,41 @@ async function route(req, res) {
     else if (channelId) params.allThreadsRelatedToChannelId = channelId;
     else return json(res, 409, { ok: false, error: "A connected channel id or videoId is required before reading YouTube comments.", connectRoute: "/api/oauth/youtube/start" });
     const result = await youtubeData("/commentThreads", params, ctx.accessToken);
+    if (ctx.session?.user) {
+      const events = (result.items || []).flatMap(thread => {
+        const top = thread.snippet?.topLevelComment || {};
+        const topSnippet = top.snippet || {};
+        const topEvent = top.id ? [{
+          provider: "youtube",
+          platform: "youtube",
+          providerEventId: top.id,
+          conversationId: thread.id || topSnippet.videoId || "",
+          eventType: "comment",
+          authorId: topSnippet.authorChannelId?.value || "",
+          authorName: topSnippet.authorDisplayName || "",
+          authorHandle: topSnippet.authorChannelUrl || "",
+          body: topSnippet.textDisplay || topSnippet.textOriginal || "",
+          observedAt: topSnippet.publishedAt || null,
+          metadata: { videoId: topSnippet.videoId || "", likeCount: topSnippet.likeCount || 0, replyCount: thread.snippet?.totalReplyCount || 0 }
+        }] : [];
+        const replyEvents = (thread.replies?.comments || []).filter(reply => reply.id).map(reply => ({
+          provider: "youtube",
+          platform: "youtube",
+          providerEventId: reply.id,
+          conversationId: thread.id || top.id || "",
+          parentEventId: reply.snippet?.parentId || top.id || "",
+          eventType: "reply",
+          authorId: reply.snippet?.authorChannelId?.value || "",
+          authorName: reply.snippet?.authorDisplayName || "",
+          authorHandle: reply.snippet?.authorChannelUrl || "",
+          body: reply.snippet?.textDisplay || reply.snippet?.textOriginal || "",
+          observedAt: reply.snippet?.publishedAt || null,
+          metadata: { videoId: reply.snippet?.videoId || topSnippet.videoId || "", likeCount: reply.snippet?.likeCount || 0 }
+        }));
+        return [...topEvent, ...replyEvents];
+      });
+      await persistResponseEvents(ctx.session.user, ctx.account, events);
+    }
     return json(res, 200, {
       ok: true,
       live: true,
@@ -24456,6 +25215,20 @@ async function route(req, res) {
       return json(res, 409, { ok: false, error: "Set approved:true or confirm:SEND_YOUTUBE_REPLY before sending the reply.", wouldCreate: resource });
     }
     const comment = await youtubeData("/comments", { part: "snippet" }, ctx.accessToken, { method: "POST", body: JSON.stringify(resource) });
+    if (ctx.session?.user) {
+      await recordDurableResponseAction(ctx.session.user, {
+        provider: "youtube",
+        platform: "youtube",
+        providerEventId: parentId,
+        actionType: "reply",
+        draftText: textOriginal,
+        approved: true,
+        status: "sent",
+        providerActionId: comment.id || "",
+        idempotencyKey: String(input.idempotencyKey || `youtube:reply:${parentId}:${hashSecret(textOriginal)}`),
+        receipt: { commentId: comment.id || null, parentId }
+      });
+    }
     return json(res, 200, { ok: true, dryRun: false, provider: "youtube", account: publicAccount(ctx.account), comment });
   }
 
@@ -24475,6 +25248,18 @@ async function route(req, res) {
       return json(res, 409, { ok: false, error: "Set approved:true or confirm:MODERATE_YOUTUBE_COMMENT before changing moderation status.", wouldModerate: params });
     }
     await youtubeData("/comments/setModerationStatus", params, ctx.accessToken, { method: "POST" });
+    if (ctx.session?.user) {
+      await recordDurableResponseAction(ctx.session.user, {
+        provider: "youtube",
+        platform: "youtube",
+        providerEventId: id,
+        actionType: `moderate_${moderationStatus}`,
+        approved: true,
+        status: "completed",
+        idempotencyKey: String(input.idempotencyKey || `youtube:moderate:${id}:${moderationStatus}`),
+        receipt: params
+      });
+    }
     return json(res, 200, { ok: true, dryRun: false, provider: "youtube", account: publicAccount(ctx.account), moderated: params });
   }
 
@@ -24558,7 +25343,7 @@ async function route(req, res) {
   if (url.pathname === "/api/x/me" && req.method === "GET") {
     const context = await requireXAccountForRead(req, res, "read X account identity");
     if (!context) return;
-    const { account, accessToken } = context;
+    const { account, accessToken, session } = context;
     const body = await xApi("/users/me", { "user.fields": "id,name,username,verified,public_metrics,profile_image_url,created_at" }, accessToken);
     const user = body?.data || {};
     return json(res, 200, {
@@ -24663,7 +25448,7 @@ async function route(req, res) {
   if (url.pathname === "/api/x/engagement" && req.method === "GET") {
     const context = await requireXAccountForRead(req, res, "read X posts and mentions");
     if (!context) return;
-    const { account, accessToken } = context;
+    const { account, accessToken, session } = context;
     const userId = String(account.providerAccountId || "");
     const params = {
       max_results: String(Math.max(5, Math.min(Number(url.searchParams.get("limit") || 20), 100))),
@@ -24677,6 +25462,25 @@ async function route(req, res) {
     ]);
     const errors = [mentions.error, posts.error].filter(Boolean);
     const live = errors.length < 2;
+    if (session?.user) {
+      const authors = new Map((mentions.includes?.users || []).map(author => [String(author.id), author]));
+      await persistResponseEvents(session.user, account, (mentions.data || []).map(mention => {
+        const author = authors.get(String(mention.author_id || "")) || {};
+        return {
+          provider: "x",
+          platform: "x",
+          providerEventId: mention.id,
+          conversationId: mention.conversation_id || mention.id,
+          eventType: "mention",
+          authorId: mention.author_id || "",
+          authorName: author.name || "",
+          authorHandle: author.username || "",
+          body: mention.text || "",
+          observedAt: mention.created_at || null,
+          metadata: { publicMetrics: mention.public_metrics || {}, referencedTweets: mention.referenced_tweets || [], entities: mention.entities || {} }
+        };
+      }));
+    }
     return json(res, 200, {
       ok: live,
       live,
@@ -24698,7 +25502,7 @@ async function route(req, res) {
     const input = await bodyJson(req);
     const context = await requireXAccountForRead(req, res, "reply on X", ["tweet.write", "users.read", "offline.access"]);
     if (!context) return;
-    const { account, accessToken } = context;
+    const { account, accessToken, session } = context;
     const inReplyToTweetId = String(input.inReplyToTweetId || input.tweetId || "").trim();
     const textValue = String(input.text || input.message || "").trim().replace(/\s+/g, " ").slice(0, 280);
     if (!inReplyToTweetId || !textValue) return json(res, 400, { ok: false, error: "tweetId and reply text are required." });
@@ -24711,6 +25515,20 @@ async function route(req, res) {
       return json(res, 409, { ok: false, error: "Set approved:true or confirm:SEND_X_REPLY before sending the reply.", wouldPost: payload });
     }
     const response = await xApi("/tweets", payload, accessToken, { method: "POST" });
+    if (session?.user) {
+      await recordDurableResponseAction(session.user, {
+        provider: "x",
+        platform: "x",
+        providerEventId: inReplyToTweetId,
+        actionType: "reply",
+        draftText: textValue,
+        approved: true,
+        status: "sent",
+        providerActionId: response.data?.id || response.id || "",
+        idempotencyKey: String(input.idempotencyKey || `x:reply:${inReplyToTweetId}:${hashSecret(textValue)}`),
+        receipt: { tweetId: response.data?.id || response.id || null, inReplyToTweetId }
+      });
+    }
     return json(res, 200, { ok: true, dryRun: false, provider: "x", account: publicAccount(account), response });
   }
 
@@ -24892,7 +25710,7 @@ async function route(req, res) {
   if (url.pathname === "/api/threads/reactions" && req.method === "GET") {
     const context = await requireThreadsAccountForRead(req, res, "read Threads posts and replies", ["threads_basic", "threads_read_replies"]);
     if (!context) return;
-    const { account, accessToken } = context;
+    const { account, accessToken, session } = context;
     const fields = "id,text,timestamp,media_product_type,media_type,permalink,shortcode,username,is_quote_post,has_replies,is_reply,is_reply_owned_by_me,root_post,replied_to";
     const postsResult = await threadsApi(`/${account.providerAccountId}/threads`, {
       fields,
@@ -24904,6 +25722,24 @@ async function route(req, res) {
       if (!post.id) continue;
       const replies = await threadsApi(`/${post.id}/replies`, { fields, reverse: "false" }, accessToken).catch(error => ({ data: [], error: error.message }));
       conversations.push({ post, replies: replies.data || [], error: replies.error || "", paging: replies.paging || null });
+    }
+    if (session?.user) {
+      const events = conversations.flatMap(conversation => (conversation.replies || [])
+        .filter(reply => reply.id && !reply.is_reply_owned_by_me)
+        .map(reply => ({
+          provider: "threads",
+          platform: "threads",
+          providerEventId: reply.id,
+          conversationId: conversation.post?.id || reply.root_post?.id || reply.replied_to?.id || "",
+          parentEventId: reply.replied_to?.id || conversation.post?.id || "",
+          eventType: "reply",
+          authorHandle: reply.username || "",
+          body: reply.text || "",
+          observedAt: reply.timestamp || null,
+          media: reply.permalink ? [{ type: "permalink", url: reply.permalink }] : [],
+          metadata: { shortcode: reply.shortcode || "", mediaType: reply.media_type || "", isQuotePost: Boolean(reply.is_quote_post) }
+        })));
+      await persistResponseEvents(session.user, account, events);
     }
     return json(res, 200, {
       ok: true,
@@ -24922,7 +25758,7 @@ async function route(req, res) {
   if (url.pathname === "/api/threads/insights" && req.method === "GET") {
     const context = await requireThreadsAccountForRead(req, res, "read Threads insights", ["threads_basic", "threads_manage_insights"]);
     if (!context) return;
-    const { account, accessToken } = context;
+    const { account, accessToken, session } = context;
     const metric = String(url.searchParams.get("metric") || "views,likes,replies,reposts,quotes,clicks,followers_count").slice(0, 300);
     const params = { metric };
     const breakdown = String(url.searchParams.get("breakdown") || "").trim();
@@ -24977,7 +25813,7 @@ async function route(req, res) {
     const input = await bodyJson(req);
     const context = await requireThreadsAccountForRead(req, res, "respond to Threads replies", ["threads_basic", "threads_content_publish", "threads_manage_replies"]);
     if (!context) return;
-    const { account, accessToken } = context;
+    const { account, accessToken, session } = context;
     const replyToId = String(input.replyToId || input.replyId || "").trim();
     const textValue = String(input.text || input.message || "").trim().replace(/\s+/g, " ").slice(0, 500);
     if (!replyToId || !textValue) return json(res, 400, { ok: false, error: "replyToId and reply text are required." });
@@ -24988,6 +25824,20 @@ async function route(req, res) {
     }
     const container = await threadsApi(`/${account.providerAccountId}/threads`, payload, accessToken, { method: "POST" });
     const publish = await threadsApi(`/${account.providerAccountId}/threads_publish`, { creation_id: container.id }, accessToken, { method: "POST" });
+    if (session?.user) {
+      await recordDurableResponseAction(session.user, {
+        provider: "threads",
+        platform: "threads",
+        providerEventId: replyToId,
+        actionType: "reply",
+        draftText: textValue,
+        approved: true,
+        status: "sent",
+        providerActionId: publish.id || container.id || "",
+        idempotencyKey: String(input.idempotencyKey || `threads:reply:${replyToId}:${hashSecret(textValue)}`),
+        receipt: { creationId: container.id || null, threadId: publish.id || null, replyToId }
+      });
+    }
     return json(res, 200, { ok: true, dryRun: false, provider: "threads", account: publicAccount(account), container, publish });
   }
 
@@ -24995,7 +25845,7 @@ async function route(req, res) {
     const input = await bodyJson(req);
     const context = await requireThreadsAccountForRead(req, res, "moderate Threads replies", ["threads_basic", "threads_manage_replies"]);
     if (!context) return;
-    const { account, accessToken } = context;
+    const { account, accessToken, session } = context;
     const replyId = String(input.replyId || input.id || "").trim();
     const action = String(input.action || "hide").trim();
     if (!replyId || !["hide", "unhide", "approve", "ignore"].includes(action)) {
@@ -25009,6 +25859,18 @@ async function route(req, res) {
       return json(res, 409, { ok: false, error: "Set approved:true or confirm:MODERATE_THREADS_REPLY before changing reply visibility.", action, wouldModerate: params });
     }
     const result = await threadsApi(pathname, params, accessToken, { method: "POST" });
+    if (session?.user) {
+      await recordDurableResponseAction(session.user, {
+        provider: "threads",
+        platform: "threads",
+        providerEventId: replyId,
+        actionType: `moderate_${action}`,
+        approved: true,
+        status: "completed",
+        idempotencyKey: String(input.idempotencyKey || `threads:moderate:${replyId}:${action}`),
+        receipt: { action, params, result }
+      });
+    }
     return json(res, 200, { ok: true, dryRun: false, provider: "threads", account: publicAccount(account), action, result });
   }
 
@@ -25035,6 +25897,76 @@ async function route(req, res) {
     const container = await threadsApi(`/${account.providerAccountId}/threads`, payload, token, { method: "POST" });
     const publish = await threadsApi(`/${account.providerAccountId}/threads_publish`, { creation_id: container.id }, token, { method: "POST" });
     return json(res, 200, { ok: true, dryRun: false, provider: "threads", account: publicAccount(account), container, publish });
+  }
+
+  if (url.pathname === "/api/responses" && req.method === "GET") {
+    const sharedModel = await getModel();
+    const session = await entitledSessionFromRequest(sharedModel, req);
+    if (!session?.user) return appAccessRequiredResponse(res);
+    const rows = await durableResponseInbox(session.user, {
+      status: url.searchParams.get("status") || "",
+      provider: url.searchParams.get("provider") || "",
+      limit: url.searchParams.get("limit") || 100
+    });
+    const summary = rows.reduce((result, item) => {
+      result.total += 1;
+      result.byStatus[item.status] = (result.byStatus[item.status] || 0) + 1;
+      result.byProvider[item.provider] = (result.byProvider[item.provider] || 0) + 1;
+      return result;
+    }, { total: 0, byStatus: {}, byProvider: {} });
+    return json(res, 200, {
+      ok: true,
+      durable: supabaseEnabled,
+      observedAt: new Date().toISOString(),
+      rows,
+      summary
+    });
+  }
+
+  if (url.pathname === "/api/responses/actions" && req.method === "POST") {
+    const input = await bodyJson(req);
+    const sharedModel = await getModel();
+    const session = await entitledSessionFromRequest(sharedModel, req);
+    if (!session?.user) return appAccessRequiredResponse(res);
+    const event = await durableResponseEventForUser(session.user, String(input.responseEventId || input.eventId || ""));
+    if (!event) return json(res, 404, { ok: false, error: "This response was not found in the signed-in workspace." });
+    const actionType = String(input.actionType || input.action || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+    const statusByAction = {
+      mark_read: "read",
+      mark_unread: "unread",
+      needs_reply: "needs_reply",
+      ignore: "ignored",
+      save_draft: "drafted"
+    };
+    const nextStatus = statusByAction[actionType];
+    if (!nextStatus) {
+      return json(res, 400, {
+        ok: false,
+        error: "Choose mark_read, mark_unread, needs_reply, ignore, or save_draft. Provider sends use the provider-specific approval route."
+      });
+    }
+    const draftText = String(input.text || input.draftText || "").trim().slice(0, 20000);
+    if (actionType === "save_draft" && !draftText) return json(res, 400, { ok: false, error: "Write a reply before saving the draft." });
+    const workspaceId = workspaceModelIdForUser(session.user);
+    const ownerUserId = supabaseUserIdForUser(session.user);
+    const now = new Date().toISOString();
+    await optionalSupabaseRequest(`/response_events?id=eq.${encodeURIComponent(event.id)}&workspace_id=eq.${encodeURIComponent(workspaceId)}&user_id=eq.${encodeURIComponent(ownerUserId)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ status: nextStatus, updated_at: now })
+    });
+    const receipt = await recordDurableResponseAction(session.user, {
+      responseEventId: event.id,
+      provider: event.provider,
+      platform: event.platform,
+      providerEventId: event.provider_event_id,
+      actionType,
+      draftText,
+      status: actionType === "save_draft" ? "draft" : "completed",
+      idempotencyKey: String(input.idempotencyKey || `${event.provider}:${actionType}:${event.provider_event_id}:${now}`),
+      receipt: { workspaceStatus: nextStatus }
+    });
+    return json(res, 200, { ok: true, event: publicResponseEvent({ ...event, status: nextStatus, updated_at: now }), action: receipt });
   }
 
   if (url.pathname === "/api/accounts" && req.method === "GET") {

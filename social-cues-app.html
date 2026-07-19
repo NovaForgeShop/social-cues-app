@@ -1320,6 +1320,21 @@
                   <option>Educational only</option>
                 </select>
               </label>
+              <label>
+                <span class="small-label">Destination link</span>
+                <input id="campaignDestinationInput" type="url" inputmode="url" placeholder="https://your-site-or-store.com/offer">
+              </label>
+              <label>
+                <span class="small-label">Link purpose</span>
+                <select id="campaignCtaInput">
+                  <option value="learn_more">Learn more</option>
+                  <option value="shop_now">Shop now</option>
+                  <option value="book_now">Book now</option>
+                  <option value="join_now">Join now</option>
+                  <option value="watch_more">Watch more</option>
+                  <option value="follow">Follow the story</option>
+                </select>
+              </label>
             </div>
             <div class="actions">
               <button class="secondary" id="saveCampaign">Save campaign</button>
@@ -1982,6 +1997,14 @@
             <p>This device is remembered by the hosted backend after account creation. Use the same account on phone or laptop to watch the device list update.</p>
             <div style="height:14px"></div>
             <div class="notice" id="deviceSessionNotice">Create or sign in to an account to remember this device.</div>
+            <div style="height:14px"></div>
+            <div class="row">
+              <div>
+                <h3>Device notifications</h3>
+                <p id="pushNotificationStatus">Loading notification readiness...</p>
+              </div>
+              <button class="secondary" id="togglePushNotifications">Enable</button>
+            </div>
             <div style="height:14px"></div>
             <div class="stack" id="rememberedDeviceList"></div>
             <div style="height:14px"></div>
@@ -3139,6 +3162,7 @@
       manychatUsage: null,
       workspaceAccess: null,
       deviceAccess: null,
+      pushStatus: null,
       accountAlerts: [],
       notificationOutbox: [],
       billingStatus: null,
@@ -4047,6 +4071,28 @@
       return true;
     }
 
+    function campaignDestinationForPlatform(platform, campaign = {}) {
+      let url = "";
+      try {
+        const parsed = new URL(String(campaign.destinationUrl || model.onboarding?.website || "").trim());
+        if (parsed.protocol === "https:") url = parsed.toString();
+      } catch {}
+      if (!url) return { url: "", cta: "", placement: "none", line: "" };
+      const labels = { learn_more: "Learn more", shop_now: "Shop now", book_now: "Book now", join_now: "Join now", watch_more: "Watch more", follow: "Follow the story" };
+      const cta = labels[campaign.destinationCta] || labels.learn_more;
+      const placement = ["instagram", "tiktok"].includes(platform.id) ? "profile" : "caption";
+      return { url, cta, placement, line: placement === "profile" ? `${cta} through the link in our profile.` : `${cta}: ${url}` };
+    }
+
+    function appendCampaignDestination(platform, campaign, copy = "") {
+      const destination = campaignDestinationForPlatform(platform, campaign);
+      const text = String(copy || "").trim();
+      if (!destination.line) return text;
+      if (destination.placement === "caption" && text.includes(destination.url)) return text;
+      if (destination.placement === "profile" && /link in (our|the) (bio|profile)/i.test(text)) return text;
+      return `${text}\n\n${destination.line}`;
+    }
+
     function platformCopy(platform, campaign) {
       const brief = clean(campaign.brief);
       const profile = model.profile;
@@ -4072,7 +4118,7 @@
         brandKit.ctaStyle ? `CTA style: ${clean(brandKit.ctaStyle)}` : "",
         brandKit.disclaimer ? `Guardrail: ${clean(brandKit.disclaimer)}` : ""
       ].filter(Boolean).join("\n");
-      return `${templates[platform.id] || `${base}\n\nPlatform angle: ${platform.fit}.`}${brandLayers ? `\n\n${brandLayers}` : ""}`;
+      return appendCampaignDestination(platform, campaign, `${templates[platform.id] || `${base}\n\nPlatform angle: ${platform.fit}.`}${brandLayers ? `\n\n${brandLayers}` : ""}`);
     }
 
     function platformRule(platform) {
@@ -4220,6 +4266,8 @@
         tone: "Sharp and useful",
         disclosure: "Organic/no material connection",
         riskPosture: "Balanced growth",
+        destinationUrl: model.onboarding?.website || "",
+        destinationCta: "learn_more",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         variants: []
@@ -4240,6 +4288,8 @@
         tone: "Founder-led",
         disclosure: "Founder or employee post",
         riskPosture: "Balanced growth",
+        destinationUrl: model.onboarding?.website || "",
+        destinationCta: "learn_more",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         variants: []
@@ -4262,6 +4312,8 @@
       campaign.tone = $("#toneInput").value;
       campaign.disclosure = $("#disclosureInput").value;
       campaign.riskPosture = $("#riskInput").value;
+      campaign.destinationUrl = clean($("#campaignDestinationInput").value);
+      campaign.destinationCta = $("#campaignCtaInput").value;
       campaign.updatedAt = new Date().toISOString();
       saveModel(`Saved campaign: ${campaign.title}.`);
     }
@@ -6327,6 +6379,7 @@
         const discordMessages = await readRouteJson(discordMessagesResponse);
         const renderJobs = await readRouteJson(renderJobsResponse);
         const adsFundingStatus = await readRouteJson(adsFundingResponse);
+        const responseInbox = await authedFetch("/api/responses?limit=100").then(readRouteJson);
         const mergedMetaAccounts = mergeConnectedAccountLists(assets.accounts || [], instagramAssets?.accounts || []);
         const blockers = assets.health?.blockers || assets.metaHealth?.blockers || assets.metaConnection?.blockers || instagramAssets?.health?.blockers || [];
         const freshMetaState = {
@@ -6402,6 +6455,7 @@
             discordCommunity,
             discordMessages
           },
+          responseInbox,
           renderJobs,
           adsFundingStatus
         };
@@ -6476,6 +6530,8 @@
         $("#toneInput").value = campaign.tone;
         $("#disclosureInput").value = campaign.disclosure;
         $("#riskInput").value = campaign.riskPosture;
+        $("#campaignDestinationInput").value = campaign.destinationUrl || model.onboarding?.website || "";
+        $("#campaignCtaInput").value = campaign.destinationCta || "learn_more";
       }
       $("#operatorInput").value = model.profile.operator;
       $("#outcomeInput").value = model.profile.outcome;
@@ -6962,6 +7018,10 @@
       const accent = escapeHtml(p?.accent || "#ff2d78");
       const flags = v.flags?.length ? `<div class="tags">${v.flags.map(flag => `<span class="tag">${escapeHtml(flag)}</span>`).join("")}</div>` : "";
       const campaign = activeCampaign();
+      const destination = v.destination?.url ? v.destination : campaignDestinationForPlatform(p || { id: v.platform }, campaign || {});
+      const destinationHtml = destination?.url
+        ? `<div class="notice"><strong>${escapeHtml(destination.cta || "Destination")}</strong><br>${destination.placement === "profile" ? "Profile link" : "Post link"}: <a href="${escapeHtml(destination.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(destination.url)}</a></div>`
+        : "";
       const media = v.media;
       const mediaUrl = media ? escapeHtml(media.url) : "";
       const publishableMediaUrl = media?.hostedUrl || media?.publicUrl || media?.url || v.videoUrl || v.imageUrl || "";
@@ -6989,6 +7049,7 @@
           <span class="pill ${redditHandoff ? "approved" : statusClass(v.status)}">${escapeHtml(displayStatus)}</span>
         </div>
         <textarea data-copy="${id}">${escapeHtml(v.copy)}</textarea>
+        ${destinationHtml}
         ${redditHandoff ? `<div class="notice"><strong>Manual / Devvit handoff.</strong> Approving keeps this copy ready for an installed Reddit command thread. Social Cues will not add it to the native queue or auto-publish it.</div>` : ""}
         ${mediaHtml}
         ${specHtml}
@@ -7646,11 +7707,12 @@
 
     async function loadWorkspaceAccess() {
       try {
-        const [memberResponse, alertResponse, outboxResponse, deviceResponse] = await Promise.all([authedFetch("/api/workspace/members"), authedFetch("/api/auth/alerts"), authedFetch("/api/notifications/outbox"), authedFetch("/api/devices")]);
-        const [members, alerts, outbox, devices] = await Promise.all([memberResponse.json().catch(() => ({})), alertResponse.json().catch(() => ({})), outboxResponse.json().catch(() => ({})), deviceResponse.json().catch(() => ({}))]);
+        const [memberResponse, alertResponse, outboxResponse, deviceResponse, pushResponse] = await Promise.all([authedFetch("/api/workspace/members"), authedFetch("/api/auth/alerts"), authedFetch("/api/notifications/outbox"), authedFetch("/api/devices"), authedFetch("/api/push/status")]);
+        const [members, alerts, outbox, devices, push] = await Promise.all([memberResponse.json().catch(() => ({})), alertResponse.json().catch(() => ({})), outboxResponse.json().catch(() => ({})), deviceResponse.json().catch(() => ({})), pushResponse.json().catch(() => ({}))]);
         if (!memberResponse.ok || members.ok === false) throw new Error(members.error || "Workspace access could not be loaded.");
         customerSurfaceState.workspaceAccess = members;
         customerSurfaceState.deviceAccess = deviceResponse.ok ? devices : null;
+        customerSurfaceState.pushStatus = pushResponse.ok ? push : null;
         customerSurfaceState.accountAlerts = alertResponse.ok ? alerts.alerts || [] : [];
         customerSurfaceState.notificationOutbox = outboxResponse.ok ? outbox.rows || [] : [];
         renderWorkspaceAccess();
@@ -8207,7 +8269,22 @@
         linkedinComments.ok ? { title: "LinkedIn Company response lane", platform: "LinkedIn", text: "Recent Company Page comments are available for review. Live replies stay disabled until the approved write workflow is verified.", status: "ready", accent: "#0a66c2" } : null,
         discordCommunity.ok ? { title: "Discord community lane", platform: "Discord", text: "Use server context for announcement replies, support-room handoff, and member prompts.", status: "ready", accent: "#5865f2" } : null
       ].filter(Boolean);
-      const inboxItems = [...youtubeItems, ...threadItems, ...xItems, ...linkedinItems, ...discordItems, ...workflowItems];
+      const durableItems = (metaState.responseInbox?.rows || []).map(item => ({
+        title: item.author?.handle ? `@${String(item.author.handle).replace(/^@/, "")}` : item.author?.name || `${platformName(item.platform || item.provider)} response`,
+        platform: platformName(item.platform || item.provider),
+        text: item.body || "Provider returned this response without text.",
+        status: item.status || "unread",
+        accent: customerSourceAccent(item.platform || item.provider),
+        commentId: item.providerEventId || "",
+        responseEventId: item.id || "",
+        channelId: item.metadata?.channelId || "",
+        provider: item.provider || item.platform || "",
+        observedAt: item.observedAt || null,
+        durable: true
+      }));
+      const inboxItems = durableItems.length
+        ? durableItems
+        : [...youtubeItems, ...threadItems, ...xItems, ...linkedinItems, ...discordItems, ...workflowItems];
       $("#responseInbox").innerHTML = inboxItems.length ? inboxItems.map(item => `
         <article class="variant" style="--accent:${escapeHtml(item.accent)}">
           <div class="variant-head">
@@ -8215,9 +8292,21 @@
               <h3>${escapeHtml(item.title)}</h3>
               <p>${escapeHtml(item.platform)}</p>
             </div>
-            <span class="pill ${item.status === "ready" ? "published" : "approved"}">${escapeHtml(item.status)}</span>
+            <span class="pill ${["ready", "read", "replied", "moderated"].includes(item.status) ? "published" : "approved"}">${escapeHtml(String(item.status).replace(/_/g, " "))}</span>
           </div>
           <p>${escapeHtml(item.text)}</p>
+          ${item.observedAt ? `<p>${escapeHtml(new Date(item.observedAt).toLocaleString())}</p>` : ""}
+          ${item.responseEventId ? `
+            <div class="stack" style="margin-top:10px">
+              <textarea rows="2" data-response-draft-input="${escapeHtml(item.responseEventId)}" placeholder="Save a response draft without sending it"></textarea>
+              <div class="variant-tools">
+                <button data-response-action="mark_read" data-response-event-id="${escapeHtml(item.responseEventId)}">Read</button>
+                <button data-response-action="needs_reply" data-response-event-id="${escapeHtml(item.responseEventId)}">Follow up</button>
+                <button data-response-action="save_draft" data-response-event-id="${escapeHtml(item.responseEventId)}">Save draft</button>
+                <button data-response-action="ignore" data-response-event-id="${escapeHtml(item.responseEventId)}">Ignore</button>
+              </div>
+            </div>
+          ` : ""}
           ${item.provider === "youtube" && item.commentId ? `
             <div class="stack" style="margin-top:10px">
               <textarea rows="2" data-youtube-reply-input="${escapeHtml(item.commentId)}" placeholder="Write an approved reply"></textarea>
@@ -8255,6 +8344,30 @@
           ` : ""}
         </article>
       `).join("") : `<div class="empty">No reaction data has returned yet. Connect accounts or refresh after posts begin receiving comments.</div>`;
+    }
+
+    async function updateDurableResponse(button) {
+      const responseEventId = button.dataset.responseEventId || "";
+      const actionType = button.dataset.responseAction || "";
+      if (!responseEventId || !actionType) return;
+      const draft = document.querySelector(`[data-response-draft-input="${CSS.escape(responseEventId)}"]`);
+      const text = String(draft?.value || "").trim();
+      if (actionType === "save_draft" && !text) return alert("Write a response before saving the draft.");
+      button.disabled = true;
+      try {
+        const response = await authedFetch("/api/responses/actions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ responseEventId, actionType, text })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false) throw new Error(data.error || "Social Cues could not update this response.");
+        await refreshMetaState();
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        button.disabled = false;
+      }
     }
 
     async function replyToYouTubeComment(button) {
@@ -8698,6 +8811,51 @@
       `).join("");
     }
 
+    function pushApplicationServerKey(value = "") {
+      const padded = `${value}${"=".repeat((4 - value.length % 4) % 4)}`.replace(/-/g, "+").replace(/_/g, "/");
+      const raw = atob(padded);
+      return Uint8Array.from(raw, character => character.charCodeAt(0));
+    }
+
+    async function togglePushNotifications() {
+      const button = $("#togglePushNotifications");
+      if (!button) return;
+      button.disabled = true;
+      try {
+        const current = customerSurfaceState.pushStatus || {};
+        if (current.deviceEnabled) {
+          const registration = await navigator.serviceWorker.ready;
+          const subscription = await registration.pushManager.getSubscription();
+          if (subscription) await subscription.unsubscribe();
+          const response = await authedFetch("/api/push/unsubscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: deviceId() }) });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || payload.ok === false) throw new Error(payload.error || "Device notifications could not be disabled.");
+          customerSurfaceState.pushStatus = payload;
+          showAppResult("Notifications disabled", "This device will no longer receive Social Cues push notifications.", "success");
+        } else {
+          if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) throw new Error("This browser does not support secure device notifications.");
+          if (!current.configured || !current.publicKey) throw new Error("Device notifications are not configured on the Social Cues server yet.");
+          const permission = await Notification.requestPermission();
+          if (permission !== "granted") throw new Error("Notification permission was not granted for this device.");
+          const registration = await navigator.serviceWorker.ready;
+          let subscription = await registration.pushManager.getSubscription();
+          if (!subscription) {
+            subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: pushApplicationServerKey(current.publicKey) });
+          }
+          const response = await authedFetch("/api/push/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: deviceId(), subscription: subscription.toJSON() }) });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || payload.ok === false) throw new Error(payload.error || "Device notifications could not be enabled.");
+          customerSurfaceState.pushStatus = payload;
+          showAppResult("Notifications enabled", "Audience briefs and action-needed notices can now reach this device.", "success");
+        }
+      } catch (error) {
+        showAppResult("Notification setting not changed", error.message, "warning");
+      } finally {
+        button.disabled = false;
+        renderDevices();
+      }
+    }
+
     function renderDevices() {
       const campaign = activeCampaign();
       const link = model.handoff?.lastLink || handoffUrl();
@@ -8709,6 +8867,21 @@
         notice.textContent = model.currentUser
           ? `Signed in as ${model.currentUser.name || model.currentUser.email}. This ${deviceKind()} is remembered as ${currentDeviceId || "a trusted device"}.`
           : "Create or sign in to an account to remember this device.";
+      }
+      const pushStatus = customerSurfaceState.pushStatus;
+      const pushStatusElement = $("#pushNotificationStatus");
+      const pushButton = $("#togglePushNotifications");
+      if (pushStatusElement && pushButton) {
+        const supported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+        pushStatusElement.textContent = !supported
+          ? "This browser does not support secure push notifications."
+          : !pushStatus?.configured
+            ? "Server keys are not configured yet. In-app notices remain available."
+            : pushStatus.deviceEnabled
+              ? "Enabled for this device."
+              : "Off for this device.";
+        pushButton.textContent = pushStatus?.deviceEnabled ? "Disable" : "Enable";
+        pushButton.disabled = !supported || !pushStatus?.configured;
       }
       const remembered = $("#rememberedDeviceList");
       if (remembered) {
@@ -12228,6 +12401,7 @@
     $("#loadAdDrafts").addEventListener("click", loadAdDrafts);
     $("#loadMetaAdReport").addEventListener("click", loadMetaAdReport);
     $("#refreshWorkspaceAccess").addEventListener("click", loadWorkspaceAccess);
+    $("#togglePushNotifications").addEventListener("click", togglePushNotifications);
     $("#sendWorkspaceInvite").addEventListener("click", sendWorkspaceInvite);
     $("#newCampaignSmall").addEventListener("click", createCampaign);
     $("#saveCampaign").addEventListener("click", saveCampaignFromForm);
@@ -12376,6 +12550,11 @@
       const youtubeModerateButton = event.target.closest("[data-youtube-comment-moderate]");
       if (youtubeModerateButton) {
         moderateYouTubeComment(youtubeModerateButton);
+        return;
+      }
+      const durableResponseButton = event.target.closest("[data-response-action]");
+      if (durableResponseButton) {
+        updateDurableResponse(durableResponseButton);
         return;
       }
       const threadsReplyButton = event.target.closest("[data-threads-comment-reply]");

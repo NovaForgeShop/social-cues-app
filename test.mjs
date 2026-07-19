@@ -148,6 +148,7 @@ try {
   const renderWorkerDockerfile = await readFile(new URL("./render-worker/Dockerfile", import.meta.url), "utf8");
   const renderWorkerDeploySource = await readFile(new URL("./render-worker/deploy-cloud-run.ps1", import.meta.url), "utf8");
   const serviceWorkerSource = await readFile(new URL("./sw.js", import.meta.url), "utf8");
+  const responseIntelligenceMigrationSource = await readFile(new URL("./SUPABASE-RESPONSE-INTELLIGENCE.sql", import.meta.url), "utf8");
   const envExampleSource = await readFile(new URL("./.env.example", import.meta.url), "utf8");
   const envSyncSource = await readFile(new URL("./scripts/sync-vercel-env.mjs", import.meta.url), "utf8");
   const productionEnvAudit = await readFile(new URL("./PRODUCTION-ENV-AUDIT-2026-06-28.md", import.meta.url), "utf8");
@@ -177,6 +178,10 @@ try {
   if (serverSource.includes("Stripe Checkout is live") || !serverSource.includes('id="portalCheckout" disabled') || !serverSource.includes('button.textContent = billing.ready ? "Pay or manage checkout" : "Payments opening soon"')) throw new Error("public payment controls must reflect verified billing readiness instead of exposing a dead checkout");
   if (/localStorage\.setItem\(STORAGE_KEY,\s*JSON\.stringify\(model\)\)/.test(appHtml) || /body:\s*JSON\.stringify\(model\)/.test(appHtml)) throw new Error("browser model persistence must use sanitized snapshots");
   if (!appHtml.includes("SENSITIVE_BROWSER_STORAGE_KEYS") || !appHtml.includes("scrubBrowserStorageValue") || !appHtml.includes("persistModelSnapshot") || !appHtml.includes("sanitizedModelSnapshot(model)")) throw new Error("browser model storage scrubber missing");
+  if (!serverSource.includes('url.pathname === "/api/responses"') || !serverSource.includes('url.pathname === "/api/responses/actions"') || !appHtml.includes("function updateDurableResponse")) throw new Error("durable response inbox and customer actions are incomplete");
+  if (!responseIntelligenceMigrationSource.includes("create table if not exists public.response_events") || !responseIntelligenceMigrationSource.includes("create policy server_only_deny_all") || !responseIntelligenceMigrationSource.includes("revoke all on table public.response_events from public, anon, authenticated")) throw new Error("response intelligence storage must remain explicitly server-only");
+  if (!serverSource.includes('url.pathname === "/api/push/subscribe"') || !serverSource.includes("encrypted_subscription: encryptedToken") || !appHtml.includes('id="togglePushNotifications"') || !serviceWorkerSource.includes('self.addEventListener("push"')) throw new Error("encrypted per-device push notifications are incomplete");
+  if (!serverSource.includes('job.kind === "analytics_collection"') || !serverSource.includes('job.kind === "audience_brief"') || !serverSource.includes("social-cues-evidence-rules-v1")) throw new Error("scheduled analytics and evidence-only audience brief workers are incomplete");
   if (!appHtml.includes("openPaymentUrl") || !appHtml.includes('"checkout.stripe.com", "buy.stripe.com"') || !appHtml.includes('window.open(parsed.toString(), "_blank", "noopener,noreferrer")')) throw new Error("payment links must use the approved-host safe opener");
   if (!appHtml.includes('.replaceAll("\'", "&#39;")')) throw new Error("HTML escaping must encode apostrophes");
   if (!serverSource.includes("SOCIAL_CUES_DATA_DIR") || !serverSource.includes("model.invalid-") || !serverSource.includes("await rename(tempPath, modelPath)") || !serverSource.includes("Recovered malformed local model.json")) throw new Error("local model persistence should isolate tests, recover malformed JSON, and write atomically");
@@ -1332,7 +1337,7 @@ try {
   const generated = await request("/api/generate/platform-variants", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ campaign: model.campaigns[0], contentLanguage: "es", locale: "es" })
+    body: JSON.stringify({ campaign: { ...model.campaigns[0], destinationUrl: "https://socialcuesapp.com", destinationCta: "learn_more" }, contentLanguage: "es", locale: "es" })
   });
   const expectedPlatforms = ["tiktok", "instagram", "threads", "youtube", "facebook", "x", "google_growth", "google_business", "pinterest", "canva", "shopify", "etsy", "linkedin", "patreon", "twitch", "discord", "manychat", "reddit"];
   if (!generated.ok || generated.variants.length !== expectedPlatforms.length) throw new Error("generation failed");
@@ -1340,6 +1345,10 @@ try {
   if (expectedPlatforms.some(platform => !generatedPlatforms.has(platform))) throw new Error("generation missed an active platform");
   if (generated.variants.some(item => !String(item.copy || "").trim())) throw new Error("generation returned a blank platform copy");
   if (generated.variants.some(item => item.language !== "es" || item.locale !== "es")) throw new Error("generation did not preserve language settings");
+  const instagramGenerated = generated.variants.find(item => item.platform === "instagram");
+  const facebookGenerated = generated.variants.find(item => item.platform === "facebook");
+  if (instagramGenerated?.destination?.placement !== "profile" || !/link in (our )?profile/i.test(instagramGenerated.copy || "")) throw new Error("Instagram generation must use profile-link wording instead of an ineffective caption URL");
+  if (facebookGenerated?.destination?.placement !== "caption" || !String(facebookGenerated?.copy || "").includes("https://socialcuesapp.com")) throw new Error("link-friendly platform generation must include the selected destination URL");
 
   const openaiUsage = await request("/api/openai/usage", { headers: { Authorization: `Bearer ${login.session.token}` } });
   if (!openaiUsage.ok || !openaiUsage.serverSideOnly || !openaiUsage.usage?.limits) throw new Error("workspace OpenAI allowance route failed");
