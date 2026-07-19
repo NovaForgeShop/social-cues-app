@@ -3315,8 +3315,8 @@ function rememberQueuePublishResult(model = {}, item = {}, result = {}, session 
     error: result.error || "",
     nextAction: result.nextAction || ""
   };
+  record.idempotencyKey = result.idempotencyKey || publishIdempotencyKey(item);
   if (result.ok && result.dryRun === false) {
-    record.idempotencyKey = result.idempotencyKey || publishIdempotencyKey(item);
     record.providerPostId = result.providerPostId || providerPostIdFromResult(result);
     record.publishedAt = record.updatedAt;
   }
@@ -6302,6 +6302,7 @@ function workspaceModelIdForUser(user = {}) {
 }
 
 const workspaceScopedCollectionKeys = ["campaigns", "quickPosts", "actions", "proof", "mediaAssets", "mediaRenderJobs", "publishQueue", "analyticsSnapshots", "providerStateSnapshots", "activity"];
+const serverRetainedWorkspaceCollectionKeys = new Set(["mediaAssets", "mediaRenderJobs", "publishQueue", "analyticsSnapshots", "providerStateSnapshots"]);
 const sharedRegistryKeys = ["authUsers", "deviceSessions", "oauthStates", "oauthEvents", "metaDeletionRequests", "billing", "integrations"];
 
 function cloneJson(value) {
@@ -13690,11 +13691,8 @@ function publicModel(model, session = null) {
       safe.metaHealth = null;
     }
   }
-  if (Array.isArray(safe.connectedAccounts)) {
-    const sourceAccounts = sessionUser
-      ? safe.connectedAccounts
-      : visibleConnectedAccounts(model);
-    safe.connectedAccounts = sourceAccounts.map(publicAccount);
+  if (!sessionUser && Array.isArray(safe.connectedAccounts)) {
+    safe.connectedAccounts = visibleConnectedAccounts(model).map(publicAccount);
   }
   if (safe.currentUser) safe.currentUser = publicAppUser(safe.currentUser);
   delete safe.authUsers;
@@ -13750,6 +13748,10 @@ function mergeServerOnlyAccountFields(incoming, existing) {
 
 function mergeOwnedArray(key, merged, existing, user, workspaceId) {
   if (!Array.isArray(merged[key])) return;
+  if (serverRetainedWorkspaceCollectionKeys.has(key)) {
+    merged[key] = Array.isArray(existing[key]) ? cloneJson(existing[key]) : [];
+    return;
+  }
   const incomingOwned = merged[key].map(item => stampWorkspaceOwnership(item, user, workspaceId));
   const existingOther = Array.isArray(existing[key])
     ? existing[key].filter(item => !ownedByUser(item, user.id))
@@ -17219,9 +17221,12 @@ async function attemptQueuedVariantPublish(model, item, options = {}) {
       const page = selectedProviderAccount(model, "facebook", options.user || null);
       const videoUrl = await publishableVariantMediaUrl(model, item.variant, "video", options.user || null);
       const imageUrl = await publishableVariantMediaUrl(model, item.variant, "image", options.user || null);
+      const attachedMediaType = String(item.variant.media?.type || "").toLowerCase();
       if (!gate.ready) return publishBlocked("meta", item, "Facebook Page publishing is gated.", { gate });
       if (!page) return publishBlocked("meta", item, "No connected Facebook Page with stored token was found.", { connectRoute: "/api/oauth/meta/start?platform=facebook" });
       if (!textValue) return publishBlocked("meta", item, "Facebook message is empty.");
+      if (attachedMediaType === "video" && !videoUrl) return publishBlocked("meta", item, "The attached Facebook video is not available through verified provider delivery yet.");
+      if (attachedMediaType === "image" && !imageUrl) return publishBlocked("meta", item, "The attached Facebook image is not available through verified provider delivery yet.");
       if (!live) return { ok: true, provider: "meta", dryRun: true, page: publicMetaAccount(page), wouldPost: videoUrl ? { description: textValue, file_url: videoUrl } : imageUrl ? { caption: textValue, url: imageUrl } : { message: textValue }, ...base };
       const response = videoUrl
         ? await metaGraph(`/${page.providerAccountId}/videos`, { description: textValue, file_url: videoUrl }, tokenForMetaAccount(page), { method: "POST" })

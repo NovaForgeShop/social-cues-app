@@ -10,6 +10,7 @@
     "test:tester-loop": "node scripts/run-tester-loop.mjs",
     "test:local-audit": "node scripts/run-tester-loop.mjs tests/social-cues-button-audit.spec.ts tests/social-cues-tester-loop.spec.ts",
     "test:mobile": "set E2E_PROJECTS=mobile-chrome,mobile-safari&& node scripts/run-tester-loop.mjs tests/social-cues-mobile-shell.spec.ts",
+    "test:media-journey": "set E2E_PROJECTS=chromium,mobile-chrome,mobile-safari&& node scripts/run-tester-loop.mjs tests/social-cues-media-publish-journey.spec.ts",
     "test:production-canary": "node scripts/production-canary.mjs",
     "test:render-contract": "node scripts/render-worker-contract-check.mjs",
     "smtp:check": "node scripts/configure-supabase-smtp.mjs",

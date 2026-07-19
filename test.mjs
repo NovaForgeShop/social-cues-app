@@ -289,7 +289,7 @@ try {
   if (!serverSource.includes("function selectedProviderAccount") || !serverSource.includes("model.activeProviderAccounts") || !serverSource.includes("bestProviderAccountFromList(candidates, platform)")) throw new Error("provider account selection should honor the saved posting identity before falling back to a real token-backed account");
   if (!serverSource.includes("function providerAccountSelectionGroups") || !serverSource.includes("alternateCredentialFamilies") || !serverSource.includes("credentialPathCount")) throw new Error("provider account selection should collapse duplicate OAuth paths into one provider asset without discarding credential evidence");
   if (!appHtml.includes("function dedupeSelectableProviderAccounts") || !appHtml.includes("account.alternateCredentialFamilies")) throw new Error("Accounts should present one posting identity per provider asset even when more than one OAuth path proves access");
-  if (!appHtml.includes("function customerDeliveryLedgerRows") || !appHtml.includes("function deliveryHistoryCard") || !appHtml.includes("provider receipt")) throw new Error("customer Calendar and Dashboard should surface normalized delivery history and provider receipt evidence");
+  if (!appHtml.includes("function customerDeliveryLedgerRows") || !appHtml.includes("function deliveryHistoryCard") || !appHtml.includes("provider receipt") || !appHtml.includes("Array.isArray(model.publishQueue)")) throw new Error("customer Calendar and Dashboard should surface durable normalized delivery history and provider receipt evidence");
   if (!appHtml.includes("Campaign source on record") || !appHtml.includes("Choose a file above to replace this saved campaign source")) throw new Error("raw video intake must distinguish a saved campaign source from the empty replacement file picker");
   if (!appHtml.includes("data-delivery-resolve") || !appHtml.includes("function focusAccountLane") || !appHtml.includes('navigateTo("accounts")')) throw new Error("blocked delivery rows must route customers directly to the affected account lane");
   if (!appHtml.includes('["blocked", "failed", "retrying"].includes(item.status)')) throw new Error("Dashboard run queue should prioritize blocked and retrying provider deliveries over ordinary drafts");
@@ -365,6 +365,11 @@ try {
   }
   if (!renderWorkerDeploySource.includes("MEDIA_RENDER_WORKER_CONFIGURED=false") || !renderWorkerDeploySource.includes("one uploaded source produces private completed outputs")) throw new Error("Cloud Run deployment must keep production renderer readiness false until a real private render passes");
   if (!serverSource.includes("createSignedSupabaseMediaUpload") || !serverSource.includes("/object/upload/sign/") || !serverSource.includes("/object/info/") || !serverSource.includes('url.pathname === "/api/media/assets/complete"')) throw new Error("private media intake must authorize and verify owner-bound Supabase uploads");
+  if (!appHtml.includes("function rememberMediaAsset") || !appHtml.includes("rememberMediaAsset(body.asset)")) throw new Error("verified media must remain in the browser workspace model before the next save");
+  if (!appHtml.includes("hostedModelSaveChain") || !appHtml.includes("revisionAtStart !== localModelRevision")) throw new Error("hosted workspace saves must be ordered and stale server syncs must not overwrite newer user actions");
+  if (!appHtml.includes("let hostedModelHydrated = !SERVER_MODE") || !appHtml.includes("SERVER_MODE && hostedModelHydrated") || !/model = serverModel;\s*hostedModelHydrated = true;/.test(appHtml)) throw new Error("hosted workspace writes must stay blocked until the signed-in server model is hydrated");
+  if (!serverSource.includes("serverRetainedWorkspaceCollectionKeys") || !serverSource.includes("The attached Facebook image is not available through verified provider delivery yet.")) throw new Error("client saves must retain server-owned worker/media records and must not silently drop attached Facebook media");
+  if (!/record\.idempotencyKey = result\.idempotencyKey \|\| publishIdempotencyKey\(item\);\s*if \(result\.ok && result\.dryRun === false\)/.test(serverSource)) throw new Error("every publish attempt must retain its idempotency key before a live provider receipt exists");
   if (!serverSource.includes("providerMediaDeliveryToken") || !serverSource.includes("providerMediaDeliveryPayload") || !serverSource.includes("publishableVariantMediaUrl") || !serverSource.includes("Readable.fromWeb(upstream.body)")) throw new Error("provider delivery must stream owner-approved private media through an expiring signed capability URL");
   if (!serverSource.includes('item.variant.platform === "threads"') || !serverSource.includes('media_type: "VIDEO"') || !serverSource.includes('media_type: "IMAGE"')) throw new Error("the shared publish queue must support Threads text, image, and video posts");
   if (!serverSource.includes('asset.status === "uploaded"') || !serverSource.includes('status: sourceUploadRequired ? "source-upload-required"') || !serverSource.includes('job.status = "queue-write-failed"')) throw new Error("render jobs must require a verified source and expose durable queue write failures");
@@ -2140,6 +2145,12 @@ try {
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
     body: JSON.stringify(cachedProviderModel)
   });
+  const serverRetainedModel = await request("/api/model", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
+  if ((serverRetainedModel.providerStateSnapshots || []).some(item => item.id === "provider-state-cache-test") || (serverRetainedModel.analyticsSnapshots || []).some(item => item.id === "analytics-cache-test")) {
+    throw new Error("customer workspace writes must not forge server-owned provider or analytics snapshots");
+  }
 
   const disconnectResponse = await request("/api/accounts/tiktok", {
     method: "POST",
@@ -2147,7 +2158,7 @@ try {
     body: JSON.stringify({ disconnect: true, disabled: true, status: "not connected" })
   });
   if (!disconnectResponse.ok || disconnectResponse.account.connected || disconnectResponse.account.tokenStored) throw new Error("disconnect should clear account evidence");
-  if (!disconnectResponse.cleanup?.purged || disconnectResponse.cleanup.purged.functionChecks < 1 || disconnectResponse.cleanup.purged.providerStateSnapshots < 1 || disconnectResponse.cleanup.purged.analyticsSnapshots < 1 || disconnectResponse.cleanup.purged.activity < 1) throw new Error("disconnect should clear cached provider checks, snapshots, analytics, and activity");
+  if (!disconnectResponse.cleanup?.purged || disconnectResponse.cleanup.purged.functionChecks < 1 || disconnectResponse.cleanup.purged.activity < 1) throw new Error("disconnect should clear cached provider checks and activity");
 
   const accounts = await request("/api/accounts", {
     headers: { Authorization: `Bearer ${login.session.token}` }

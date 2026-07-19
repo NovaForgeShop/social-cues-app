@@ -50,6 +50,10 @@ async function run() {
     AUTH_SESSION_SECRET: process.env.AUTH_SESSION_SECRET || 'social-cues-local-test-session-secret',
     SOCIAL_CUES_PROMO_CODES: process.env.SOCIAL_CUES_PROMO_CODES || localPromoCodes,
     SOCIAL_CUES_DATA_DIR: testDataDir,
+    // Provider payload tests use synthetic configuration and synthetic account tokens.
+    // Never load production Meta credentials into an isolated browser regression run.
+    META_APP_ID: process.env.E2E_META_APP_ID || '123456789012345',
+    META_APP_SECRET: process.env.E2E_META_APP_SECRET || 'social-cues-e2e-meta-secret',
     // Browser regression runs must never inherit a paid production AI key.
     OPENAI_API_KEY: process.env.E2E_OPENAI_API_KEY || ''
   };

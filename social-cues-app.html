@@ -3232,6 +3232,9 @@
     let onboardingRequirementsSignature = "";
     let rawVideoUploadController = null;
     let quickPostUploadController = null;
+    let hostedModelSaveChain = Promise.resolve();
+    let localModelRevision = 0;
+    let hostedModelHydrated = !SERVER_MODE;
     let studioMode = "post";
     let elevenlabsCatalog = { voices: [], models: [] };
     let elevenlabsVoiceoverUrl = "";
@@ -3561,11 +3564,14 @@
 
     async function syncModelFromServer(reason = "Synced server model.") {
       if (!SERVER_MODE) return false;
+      const revisionAtStart = localModelRevision;
       try {
         const response = await authedFetch("/api/model");
         if (!response.ok) return false;
         const serverModel = normalizeModel(await response.json());
+        if (revisionAtStart !== localModelRevision) return false;
         model = serverModel;
+        hostedModelHydrated = true;
         persistModelSnapshot(model);
         if (reason) {
           model.activity = model.activity || [];
@@ -3654,21 +3660,38 @@
       applyLocale();
     }
 
+    function enqueueHostedModelSave(snapshot) {
+      hostedModelSaveChain = hostedModelSaveChain
+        .catch(() => {})
+        .then(async () => {
+          const response = await authedFetch("/api/model", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(snapshot)
+          });
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.error || `Workspace save failed (${response.status}).`);
+          }
+          return response;
+        });
+      hostedModelSaveChain.catch(error => console.error("Social Cues workspace save failed", error));
+      return hostedModelSaveChain;
+    }
+
     function saveModel(message) {
+      localModelRevision += 1;
       model.updatedAt = new Date().toISOString();
       if (message) {
         model.activity.unshift({ at: new Date().toISOString(), message });
         model.activity = model.activity.slice(0, 20);
       }
       persistModelSnapshot(model);
-      if (SERVER_MODE) {
-        authedFetch("/api/model", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(sanitizedModelSnapshot(model))
-        }).catch(() => {});
-      }
+      const pendingSave = SERVER_MODE && hostedModelHydrated
+        ? enqueueHostedModelSave(sanitizedModelSnapshot(model))
+        : Promise.resolve();
       render();
+      return pendingSave;
     }
 
     function deviceId() {
@@ -3745,6 +3768,7 @@
           const auth = await response.json();
           if (!response.ok || !auth.ok) throw new Error(auth.error || "Account sign-in failed.");
           setSessionToken(auth.session?.token || "");
+          hostedModelHydrated = false;
           model = hostedSessionShell(auth);
           onboardingFormHydrated = false;
           onboardingRequirementsSignature = "";
@@ -3811,6 +3835,7 @@
         await authedFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
       }
       setSessionToken("");
+      hostedModelHydrated = !SERVER_MODE;
       model = normalizeModel(clone(defaultModel));
       onboardingFormHydrated = false;
       onboardingRequirementsSignature = "";
@@ -3825,6 +3850,7 @@
         const auth = await response.json();
         if (!response.ok || !auth.ok) throw new Error(auth.error || "Session expired.");
         setSessionToken(auth.session?.token || "");
+        hostedModelHydrated = false;
         model = hostedSessionShell(auth);
         onboardingFormHydrated = false;
         onboardingRequirementsSignature = "";
@@ -3833,6 +3859,7 @@
         return true;
       } catch {
         setSessionToken("");
+        hostedModelHydrated = !SERVER_MODE;
         model = normalizeModel(clone(defaultModel));
         onboardingFormHydrated = false;
         onboardingRequirementsSignature = "";
@@ -5691,6 +5718,15 @@
       };
     }
 
+    function rememberMediaAsset(asset = null) {
+      if (!asset?.id) return null;
+      model.mediaAssets = Array.isArray(model.mediaAssets) ? model.mediaAssets : [];
+      const index = model.mediaAssets.findIndex(item => item.id === asset.id);
+      if (index >= 0) model.mediaAssets[index] = { ...model.mediaAssets[index], ...asset };
+      else model.mediaAssets.unshift({ ...asset });
+      return model.mediaAssets.find(item => item.id === asset.id) || asset;
+    }
+
     async function reserveMediaAsset(file, title = "Media source") {
       if (!SERVER_MODE || !file) return null;
       const response = await authedFetch("/api/media/assets", {
@@ -5706,6 +5742,7 @@
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || !body.ok || !body.asset) throw new Error(body.error || "Private media storage could not be prepared.");
+      rememberMediaAsset(body.asset);
       return body;
     }
 
@@ -5885,7 +5922,7 @@
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || !body.ok || body.asset?.status !== "uploaded") throw new Error(body.error || "The uploaded media could not be verified.");
-      return body.asset;
+      return rememberMediaAsset(body.asset);
     }
 
     function setQuickPostUploadState(message, { progress = 0, busy = false, tone = "info" } = {}) {
@@ -7611,7 +7648,10 @@
       const quickPostRows = (model.quickPosts || []).flatMap(batch => (batch.variants || [])
         .filter(v => trackedStatuses.has(String(v.status || "").toLowerCase()))
         .map(v => ({ ...v, campaignId: batch.id, campaignTitle: batch.title || "Quick post", variantId: v.id, source: "quick-post-variant" })));
-      const queueRows = Array.isArray(metaState.publishQueue?.rows) ? metaState.publishQueue.rows : [];
+      const queueRows = [
+        ...(Array.isArray(model.publishQueue) ? model.publishQueue : []),
+        ...(Array.isArray(metaState.publishQueue?.rows) ? metaState.publishQueue.rows : [])
+      ];
       const byVariant = new Map();
       [...campaignRows, ...quickPostRows, ...queueRows].forEach(item => {
         const key = item.variantId || item.id || `${item.campaignId || "campaign"}:${item.platform || "provider"}:${item.scheduledFor || item.queuedAt || "unscheduled"}`;
