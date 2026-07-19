@@ -144,6 +144,14 @@ test('25-step Social Cues tester loop reaches the workstation and checks safe fu
     expect(copies.join('\n')).toMatch(/campaign|Facebook|social|system|growth/i);
   });
 
+  await test.step('14b - queueing preserves the selected publish time', async () => {
+    const scheduleInput = page.locator('#variantList [data-variant-schedule]').first();
+    await scheduleInput.fill('2030-01-02T09:30');
+    await scheduleInput.blur();
+    await page.locator('#variantList [data-variant-action="set-status"][data-status="queued"]').first().click();
+    await expect(page.locator('#variantList [data-variant-schedule]').first()).toHaveValue('2030-01-02T09:30');
+  });
+
   await test.step('15 - accounts page exposes real provider connection controls', async () => {
     await page.locator('[data-view="accounts"]').click();
     await expect(page.locator('#socialAccountList')).toContainText(/Accounts and posting identities/i);

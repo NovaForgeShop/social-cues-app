@@ -3528,6 +3528,14 @@
       }
     }
 
+    function formatDateTimeInput(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "";
+      const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
+      return offsetDate.toISOString().slice(0, 16);
+    }
+
     function readSettingsInputs() {
       model.settings = {
         ...(model.settings || {}),
@@ -4327,6 +4335,21 @@
       persistModelSnapshot(model);
     }
 
+    function setVariantSchedule(id, value) {
+      syncCopy(id);
+      const campaign = activeCampaign();
+      const variant = campaign?.variants.find(v => v.id === id);
+      if (!variant) return;
+      const scheduled = value ? new Date(value) : null;
+      if (scheduled && !Number.isNaN(scheduled.getTime())) variant.scheduledFor = scheduled.toISOString();
+      else delete variant.scheduledFor;
+      variant.updatedAt = new Date().toISOString();
+      $$(`[data-variant-schedule="${id}"]`).forEach(input => {
+        input.value = formatDateTimeInput(variant.scheduledFor);
+      });
+      persistModelSnapshot(model);
+    }
+
     function setStatus(id, status) {
       syncCopy(id);
       const campaign = activeCampaign();
@@ -4349,7 +4372,10 @@
       }
       if (status === "queued") {
         variant.queuedAt = new Date().toISOString();
-        variant.scheduledFor = nextScheduleTime(variant);
+        const scheduledAt = Date.parse(variant.scheduledFor || "");
+        variant.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
+          ? variant.scheduledFor
+          : nextScheduleTime(variant);
       }
       saveModel(`${platformName(variant.platform)} marked ${status}.`);
     }
@@ -6979,6 +7005,7 @@
           <button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Draft</button>
           ${redditHandoff ? `<span class="tag">Manual / Devvit only</span>` : `<button data-variant-action="set-status" data-variant-id="${id}" data-status="queued">Queue</button>`}
         </div>
+        ${redditHandoff ? "" : `<label class="field-label">Publish time (your local timezone)<input type="datetime-local" data-variant-schedule="${id}" value="${escapeHtml(formatDateTimeInput(v.scheduledFor))}"></label>`}
         <div class="variant-tools">
           <button data-variant-action="attach-launch-asset" data-variant-id="${id}">Attach launch video</button>
           <button data-variant-action="upload-media" data-variant-id="${id}">Local preview</button>
@@ -12477,6 +12504,7 @@
     });
     document.addEventListener("change", event => {
       if (event.target.matches("[data-media-input]")) attachMedia(event.target.dataset.mediaInput, event.target);
+      if (event.target.matches("[data-variant-schedule]")) setVariantSchedule(event.target.dataset.variantSchedule, event.target.value);
       if (event.target.matches("#discordGuildSelect")) {
         loadDiscordChannelsForGuild(String(event.target.value || "").trim());
       }
