@@ -19679,16 +19679,16 @@ async function route(req, res) {
       generatedBy: "local-social-cues-engine",
       updatedAt: new Date().toISOString()
     }));
+    const localVariantResponse = (warning, promptVersion = "social-cues-local-v1") => json(res, 200, {
+      ok: true,
+      provider: "local-social-cues-engine",
+      promptVersion,
+      campaignId: campaign?.id,
+      variants: localVariants(),
+      warning
+    });
     if (!openaiApiKey || input.useAi !== true) {
-      const variants = localVariants();
-      return json(res, 200, {
-        ok: true,
-        provider: "local-social-cues-engine",
-        promptVersion: "social-cues-local-v1",
-        campaignId: campaign?.id,
-        variants,
-        warning: openaiApiKey ? "AI generation was not requested." : "OpenAI is not configured; local platform rules were used."
-      });
+      return localVariantResponse(openaiApiKey ? "AI generation was not requested." : "OpenAI is not configured; local platform rules were used.");
     }
     const allowance = openaiUsageSummary(model, session);
     if (!allowance.allowed) {
@@ -19740,7 +19740,7 @@ async function route(req, res) {
       const byPlatform = new Map((generated.data.variants || []).map(item => [String(item.platform || "").toLowerCase(), item]));
       const missingPlatforms = targetPlatforms.map(item => item.id).filter(id => !byPlatform.has(id));
       if (missingPlatforms.length) {
-        return json(res, 502, { ok: false, error: `OpenAI omitted required platform variants: ${missingPlatforms.join(", ")}. No partial campaign was saved.` });
+        return localVariantResponse("AI generation returned an incomplete platform set; local platform rules produced a complete editable draft set instead.", "social-cues-local-ai-incomplete-v1");
       }
       const variants = targetPlatforms.map(platform => {
         const item = byPlatform.get(platform.id);
@@ -19773,11 +19773,12 @@ async function route(req, res) {
         usage: { record: usageRecord, allowance: openaiUsageSummary(model, session) }
       });
     } catch (error) {
-      return json(res, error.status || 502, {
-        ok: false,
-        error: error.message || "OpenAI campaign generation failed.",
-        requestId: error.requestId || ""
+      runtimeRequestLog("warning", "openai_campaign_generation_fallback", req, {
+        providerRequestId: error.requestId || "",
+        status: error.status || 502,
+        message: String(error.message || "OpenAI campaign generation failed.").slice(0, 240)
       });
+      return localVariantResponse("AI generation was unavailable; local platform rules produced editable drafts instead.", "social-cues-local-ai-fallback-v1");
     }
   }
 

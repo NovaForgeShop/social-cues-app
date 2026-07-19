@@ -4306,7 +4306,7 @@
         campaign.updatedAt = new Date().toISOString();
         if (result.usage?.allowance) customerSurfaceState.openaiUsage = { configured: true, usage: result.usage.allowance };
         saveModel(`Generated ${campaign.variants.length} evidence-safe variants with ${result.provider || "Social Cues"}.`);
-        showAppResult("Campaign variants ready", `${campaign.variants.length} platform-native drafts were created by ${result.provider === "openai" ? "Social Cues AI" : "the local campaign engine"}.`, "success");
+        showAppResult("Campaign variants ready", `${campaign.variants.length} platform-native drafts were created by ${result.provider === "openai" ? "Social Cues AI" : "the local campaign engine"}.${result.warning ? ` ${result.warning}` : ""}`, "success");
       } catch (error) {
         showAppResult("Campaign generation failed", error.message, "error");
       } finally {
