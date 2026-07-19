@@ -3850,6 +3850,15 @@
           body: JSON.stringify(collectDeviceInfo())
         });
         const data = await response.json();
+        if (response.status === 401) {
+          setSessionToken("");
+          model = normalizeModel(clone(defaultModel));
+          onboardingFormHydrated = false;
+          onboardingRequirementsSignature = "";
+          persistModelSnapshot(model);
+          render();
+          return false;
+        }
         if (!response.ok || !data.ok) throw new Error(data.error || "Device heartbeat failed.");
         model.deviceSessions = data.devices || model.deviceSessions || [];
         persistModelSnapshot(model);
