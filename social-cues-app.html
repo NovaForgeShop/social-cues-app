@@ -4347,7 +4347,9 @@
       $$(`[data-variant-schedule="${id}"]`).forEach(input => {
         input.value = formatDateTimeInput(variant.scheduledFor);
       });
-      persistModelSnapshot(model);
+      saveModel(variant.scheduledFor
+        ? `${platformName(variant.platform)} scheduled for ${formatDateTime(variant.scheduledFor)}.`
+        : `${platformName(variant.platform)} schedule cleared.`);
     }
 
     function setStatus(id, status) {

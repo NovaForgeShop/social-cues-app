@@ -120,7 +120,7 @@ try {
 
   const appHtml = await readFile(new URL("./social-cues-app.html", import.meta.url), "utf8");
   if (!appHtml.includes("Attach launch video") || !appHtml.includes("Local preview only")) throw new Error("publish media UI must distinguish hosted launch assets from local previews");
-  if (!appHtml.includes('data-variant-schedule=') || !appHtml.includes("function setVariantSchedule") || !appHtml.includes("scheduledAt > Date.now()")) {
+  if (!appHtml.includes('data-variant-schedule=') || !appHtml.includes("function setVariantSchedule") || !appHtml.includes("scheduledAt > Date.now()") || !appHtml.includes("schedule cleared")) {
     throw new Error("campaign variants must preserve a user-selected local publish time when queued");
   }
   for (const customerSurface of [
