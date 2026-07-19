@@ -36,6 +36,13 @@ test('first-run workspace stays usable on Android and iPhone', async ({ page }, 
   await expect(page.locator('#socialAccountList [data-account-lane="instagram"]')).toHaveCount(1);
   await expect(page.locator('#socialAccountList > .account-card-grid').first().locator('[data-account-lane="google_growth"]')).toHaveCount(0);
 
+  await expect(page.locator('#mobileViewSelect option[value="responses"]')).toBeEnabled();
+  await page.locator('#mobileViewSelect').selectOption('responses');
+  await expect(page.locator('#responses')).toBeVisible();
+  await expect(page.locator('#responseInbox')).toBeVisible();
+  await expect(page.locator('#responseReadiness')).toBeVisible();
+  await expect(page.locator('#responses h2').first()).toHaveText('Response inbox');
+
   await page.locator('#mobileViewSelect').selectOption('studio');
   await expect(page.locator('[data-studio-mode="video"]')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('[data-studio-lane="video"]')).toBeVisible();
