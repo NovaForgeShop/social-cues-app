@@ -34,6 +34,11 @@ test('first-run workspace stays usable on Android and iPhone', async ({ page }, 
   await expect(page.locator('#accounts')).toBeVisible();
   await expect(page.locator('#socialAccountList [data-account-lane="facebook"]')).toHaveCount(1);
   await expect(page.locator('#socialAccountList [data-account-lane="instagram"]')).toHaveCount(1);
+  await expect(page.locator('#socialAccountList > .account-card-grid').first().locator('[data-account-lane="google_growth"]')).toHaveCount(0);
+
+  await page.locator('#mobileViewSelect').selectOption('studio');
+  await expect(page.locator('[data-studio-mode="video"]')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('[data-studio-lane="video"]')).toBeVisible();
 
   await page.locator('#mobileViewSelect').selectOption('help');
   await expect(page.locator('#helpSelectedProviders')).toContainText(/Facebook/i);

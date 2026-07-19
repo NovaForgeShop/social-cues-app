@@ -186,6 +186,30 @@
       background: currentColor;
     }
     .mobile-view-menu { display: none; }
+    [hidden] { display: none !important; }
+
+    .studio-mode-tabs {
+      display: inline-grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 4px;
+      width: min(100%, 560px);
+      margin-bottom: 14px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255,255,255,.035);
+    }
+    .studio-mode-tabs button {
+      min-height: 40px;
+      border-color: transparent;
+      background: transparent;
+      color: var(--muted);
+    }
+    .studio-mode-tabs button.active {
+      border-color: var(--line-strong);
+      background: var(--signal-ghost);
+      color: var(--text);
+    }
 
     h1, h2, h3, p { margin: 0; }
     h1 { font-size: 32px; line-height: 1.04; letter-spacing: 0; }
@@ -257,7 +281,7 @@
       background: linear-gradient(90deg, transparent, var(--signal), transparent);
     }
     .metric span { color: var(--muted); font-size: 12px; font-weight: 750; }
-    .metric strong { display: block; font-size: 28px; margin-top: 5px; letter-spacing: -.04em; }
+    .metric strong { display: block; font-size: 28px; margin-top: 5px; letter-spacing: 0; }
     .metric em { color: var(--lime); font-style: normal; font-size: 12px; font-weight: 850; }
 
     .grid-4 {
@@ -818,6 +842,8 @@
 
     @media (max-width: 480px) {
       .grid-4, .form-grid, .variant-tools { grid-template-columns: 1fr; }
+      .studio-mode-tabs { grid-template-columns: 1fr; }
+      .studio-mode-tabs button { min-height: 38px; }
       .onboarding-platform-grid { grid-template-columns: 1fr 1fr; }
       .onboarding-requirement { grid-template-columns: 1fr; gap: 9px; }
       .choice-grid { grid-template-columns: 1fr; }
@@ -953,9 +979,9 @@
       <section id="dashboard" class="section active">
         <div class="hero">
           <div>
-            <div class="kicker">Customer operating system</div>
-            <h1>Turn one honest idea into a social system that compounds.</h1>
-            <p>Log in as a Social Cues user, connect provider-verified social accounts, create campaigns, approve content, attach media, and turn real platform signals into a working growth machine.</p>
+            <div class="kicker">Today</div>
+            <h1>Your Social Cues command center.</h1>
+            <p>See what needs attention, move approved work forward, and turn real audience signals into the next useful action.</p>
             <div class="tags">
               <span class="tag" id="persistenceTag">Cloud persistence</span>
               <span class="tag">Approval-first</span>
@@ -1230,7 +1256,12 @@
       </section>
 
       <section id="studio" class="section">
-        <div class="grid-2">
+        <div class="studio-mode-tabs" role="tablist" aria-label="Create mode">
+          <button type="button" class="active" role="tab" aria-selected="true" data-studio-mode="video">Video to campaign</button>
+          <button type="button" role="tab" aria-selected="false" data-studio-mode="campaign">Campaign</button>
+          <button type="button" role="tab" aria-selected="false" data-studio-mode="voice">Voiceover</button>
+        </div>
+        <div class="grid-2" data-studio-lane="campaign" hidden>
           <div class="panel">
             <div class="row">
               <div>
@@ -1351,7 +1382,7 @@
         </div>
 
         <div style="height:14px"></div>
-        <div class="panel">
+        <div class="panel" data-studio-lane="video">
           <div class="row">
             <div>
               <h2>Raw video intake</h2>
@@ -1367,6 +1398,14 @@
             <label>
               <span class="small-label">Source video</span>
               <input id="rawVideoInput" type="file" accept="video/*">
+            </label>
+            <label>
+              <span class="small-label">Message that must survive the edit</span>
+              <input id="rawVideoMessageInput" maxlength="180" placeholder="What must viewers understand or feel?">
+            </label>
+            <label>
+              <span class="small-label">Audience for this cut</span>
+              <input id="rawVideoAudienceInput" maxlength="180" placeholder="Who should stop and care?">
             </label>
             <label>
               <span class="small-label">Content approach</span>
@@ -1385,6 +1424,14 @@
                 <option value="unique">Unique cut per platform</option>
               </select>
             </label>
+            <label>
+              <span class="small-label">Candidate clips</span>
+              <select id="rawVideoClipCountInput">
+                <option value="3">Find the best 3</option>
+                <option value="5">Find the best 5</option>
+                <option value="8">Find the best 8</option>
+              </select>
+            </label>
           </div>
           <div style="height:14px"></div>
           <div class="notice" id="rawVideoUploadStatus" hidden></div>
@@ -1396,7 +1443,7 @@
           <div class="stack" id="rawVideoPlanList"></div>
         </div>
         <div style="height:14px"></div>
-        <div class="panel" id="voiceoverStudio">
+        <div class="panel" id="voiceoverStudio" data-studio-lane="voice" hidden>
           <div class="row">
             <div>
               <h2>Campaign voiceover</h2>
@@ -1431,7 +1478,7 @@
           <audio id="elevenlabsVoiceoverPreview" controls preload="metadata" style="width:100%" hidden></audio>
         </div>
         <div style="height:14px"></div>
-        <div class="stack" id="variantList"></div>
+        <div class="stack" id="variantList" data-studio-lane="campaign" hidden></div>
       </section>
 
       <section id="library" class="section">
@@ -1503,8 +1550,18 @@
 
       <section id="calendar" class="section">
         <div class="panel">
-          <h2>Calendar</h2>
-          <p>Approved, queued, and published content by platform-specific posting slot.</p>
+          <div class="row">
+            <div>
+              <h2>Plan and delivery</h2>
+              <p>Approved, queued, blocked, and published content by platform-specific posting slot.</p>
+            </div>
+            <div class="actions">
+              <button class="secondary" data-jump="approvals">Review approvals</button>
+              <button class="primary" data-jump="studio">Create next</button>
+            </div>
+          </div>
+          <div style="height:14px"></div>
+          <div class="tags" id="calendarSummary"><span class="tag">No delivery records yet</span></div>
           <div style="height:14px"></div>
           <div class="stack" id="calendarList"></div>
         </div>
@@ -3070,6 +3127,7 @@
     let onboardingFormHydrated = false;
     let onboardingRequirementsSignature = "";
     let rawVideoUploadController = null;
+    let studioMode = "video";
     let elevenlabsCatalog = { voices: [], models: [] };
     let elevenlabsVoiceoverUrl = "";
     let customerSurfaceState = {
@@ -4218,6 +4276,7 @@
           body: JSON.stringify({
             useAi: true,
             campaign,
+            selectedPlatforms: visibleCreationPlatforms().map(platform => platform.id),
             contentLanguage: model.settings?.contentLanguage || "interface",
             locale: resolvedLocale()
           })
@@ -4355,7 +4414,7 @@
       const brief = `Launch Social Cues using this customer-ready command center as the first success story. Show how the tool helps a customer log in, connect accounts, generate platform-native variants, maintain approval control, attach media, analyze metrics, and turn honest signals into a repeatable growth system. Evidence so far: ${evidence || "evidence is still being built."}`;
       const campaign = createCampaignFromIdea("Social Cues Self-Launch From Customer Evidence", brief, "Launch product");
       const flags = claimFlags(campaign.brief);
-      campaign.variants = platforms.filter(platform => !platform.accountOnly).map(platform => ({
+      campaign.variants = visibleCreationPlatforms().map(platform => ({
         id: uid(platform.id),
         platform: platform.id,
         status: "draft",
@@ -4524,6 +4583,53 @@
 
     function platformById(id) {
       return platforms.find(p => p.id === id);
+    }
+
+    function activeWorkspacePlatformIds() {
+      const active = new Set(Array.isArray(model.onboarding?.selectedPlatforms) ? model.onboarding.selectedPlatforms : []);
+      mergedConnectedAccounts().forEach(account => {
+        const platform = canonicalProviderAssetPlatform(account.platform || account.provider || account.oauthProvider || "");
+        if (platform && accountConnectionState(account).connected && account.disabled !== true) active.add(platform);
+      });
+      return active;
+    }
+
+    function visibleCreationPlatforms() {
+      const active = activeWorkspacePlatformIds();
+      const visible = platforms.filter(platform => !platform.accountOnly && active.has(platform.id));
+      return visible.length ? visible : platforms.filter(platform => ["facebook", "instagram", "threads", "youtube", "tiktok", "x"].includes(platform.id));
+    }
+
+    function providerSourceIsActive(provider = "") {
+      const active = activeWorkspacePlatformIds();
+      const providerIds = {
+        "YouTube": ["youtube"],
+        "Threads": ["threads"],
+        "Pinterest": ["pinterest"],
+        "Twitch": ["twitch"],
+        "TikTok": ["tiktok"],
+        "LinkedIn": ["linkedin"],
+        "Patreon": ["patreon"],
+        "Google": ["youtube", "google_growth", "google_business"],
+        "Canva": ["canva"],
+        "Shopify": ["shopify"],
+        "Etsy": ["etsy"],
+        "Meta": ["facebook", "instagram", "threads"],
+        "Social Cues": ["social-cues"]
+      };
+      return (providerIds[provider] || [String(provider).toLowerCase()]).some(id => id === "social-cues" || active.has(id));
+    }
+
+    function setStudioMode(mode = "video") {
+      studioMode = ["video", "campaign", "voice"].includes(mode) ? mode : "video";
+      $$('[data-studio-mode]').forEach(button => {
+        const active = button.dataset.studioMode === studioMode;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      $$('[data-studio-lane]').forEach(lane => {
+        lane.hidden = lane.dataset.studioLane !== studioMode;
+      });
     }
 
     function providerDisplayName(account) {
@@ -5313,6 +5419,14 @@
       return $("#rawVideoLaneInput")?.value || "shared";
     }
 
+    function rawVideoIntent() {
+      return {
+        messageToPreserve: clean($("#rawVideoMessageInput")?.value || activeCampaign()?.brief || ""),
+        audience: clean($("#rawVideoAudienceInput")?.value || model.onboarding?.audience || ""),
+        targetClipCount: Math.max(1, Math.min(8, Number($("#rawVideoClipCountInput")?.value || 3)))
+      };
+    }
+
     function rawVideoPlatformIds() {
       return ["tiktok", "instagram", "youtube", "facebook", "x", "threads"];
     }
@@ -5562,6 +5676,7 @@
             sourceName: rawVideo.name,
             assetId: rawVideo.assetId || "",
             storagePath: rawVideo.storagePath || "",
+            intent: rawVideo.intent || {},
             outputs: rawVideo.outputs
           })
         });
@@ -5622,6 +5737,7 @@
           type: file?.type || active.rawVideo?.type || "video/mp4",
           size: file?.size || active.rawVideo?.size || 0,
           approach: rawVideoApproach(),
+          intent: rawVideoIntent(),
           addedAt: new Date().toISOString()
         };
         if (file) setRawVideoUploadState("Preparing private upload...", { progress: 0, busy: true });
@@ -5644,9 +5760,17 @@
           active.rawVideo.uploadedAt = uploadedAsset.uploadedAt;
           active.rawVideo.uploadNote = "Private source uploaded and verified. Render queue entry is now allowed.";
         }
-        active.rawVideo.outputs = platforms
+        active.rawVideo.outputs = visibleCreationPlatforms()
           .filter(platform => ["tiktok", "instagram", "youtube", "facebook", "x", "threads"].includes(platform.id))
           .map(platform => rawVideoPlanForPlatform(platform, active, active.rawVideo));
+        active.rawVideo.dissectionStages = [
+          { id: "secure", label: "Secure source", status: active.rawVideo.storageStatus === "uploaded" ? "complete" : "waiting", detail: active.rawVideo.uploadNote },
+          { id: "probe", label: "Map scenes and silence", status: "queued", detail: "ffprobe and FFmpeg inspect orientation, audio, scene changes, and dead air." },
+          { id: "transcript", label: "Transcribe the message", status: "queued", detail: "Speech becomes source-grounded text for captions and message fidelity." },
+          { id: "rank", label: "Rank candidate stories", status: "queued", detail: `Score up to ${active.rawVideo.intent.targetClipCount} hooks for coherence, payoff, audience fit, and visual pacing.` },
+          { id: "render", label: "Build platform cuts", status: "waiting", detail: "Render only selected services with safe crops, loudness, captions, and brand treatment." },
+          { id: "review", label: "Human approval", status: "waiting", detail: "Check the message, crop, captions, CTA, and provider settings before any publish action." }
+        ];
         const renderJob = await createRawVideoRenderJob(active, active.rawVideo);
         if (renderJob) {
           active.rawVideo.renderJob = {
@@ -6369,6 +6493,7 @@
       }
       const outputs = Array.isArray(source.outputs) ? source.outputs : [];
       const job = source.renderJob || null;
+      const dissectionStages = Array.isArray(source.dissectionStages) ? source.dissectionStages : [];
       const sourceMeta = [
         source.name,
         source.size ? `${Math.round(source.size / 1024 / 1024)} MB` : "",
@@ -6384,6 +6509,17 @@
         </div>
         ${job.lastError ? `<div class="notice warn">${escapeHtml(job.lastError)}</div>` : ""}
         ${renderedOutputs.length ? `<div class="button-row">${renderedOutputs.map(output => `<button class="secondary" data-render-output-job="${escapeHtml(job.workerJobId || "")}" data-render-output-platform="${escapeHtml(output.platform || "")}">Open ${escapeHtml(output.platform || "video")} cut</button>`).join("")}</div>` : ""}
+      ` : "";
+      const dissectionHtml = dissectionStages.length ? `
+        <article class="variant" style="--accent:#ff2d78">
+          <div class="variant-head">
+            <div><h3>Intelligent dissection</h3><p>${escapeHtml(source.intent?.messageToPreserve || "Preserve the campaign message while finding the strongest short-form story.")}</p></div>
+            <span class="pill ${job?.status === "completed" ? "published" : "approved"}">${escapeHtml(job?.status || "planned")}</span>
+          </div>
+          <div class="stack">
+            ${dissectionStages.map(stage => `<div class="status-row"><div><strong>${escapeHtml(stage.label)}</strong><br><span>${escapeHtml(stage.detail || "")}</span></div><span class="pill ${stage.status === "complete" ? "published" : stage.status === "queued" ? "approved" : "draft"}">${escapeHtml(stage.status)}</span></div>`).join("")}
+          </div>
+        </article>
       ` : "";
       const lane = source.followupLane || rawVideoLane();
       const followups = Array.isArray(source.followups) && source.followups.length ? source.followups : rawVideoFollowupSequence(campaign, source);
@@ -6447,6 +6583,7 @@
           <p>${escapeHtml(source.uploadNote || "Ready for planning. Live editing needs server storage and a render worker.")}</p>
           ${jobHtml}
         </article>
+        ${dissectionHtml}
         ${followupHtml}
         ${outputHtml}
       `;
@@ -6857,7 +6994,7 @@
     }
 
     function renderRules() {
-      $("#rulesBox").innerHTML = platforms.filter(platform => !platform.accountOnly).map(platform => `
+      $("#rulesBox").innerHTML = visibleCreationPlatforms().map(platform => `
         <article class="variant" style="--accent:${platform.accent}">
           <div class="variant-head">
             <div>
@@ -6922,6 +7059,19 @@
 
     function renderCalendar() {
       const items = customerDeliveryLedgerRows();
+      const counts = items.reduce((summary, item) => {
+        const status = String(item.status || "queued").toLowerCase();
+        if (["approved", "queued", "scheduled", "processing", "submitted"].includes(status)) summary.upcoming += 1;
+        if (["blocked", "failed", "retrying"].includes(status)) summary.attention += 1;
+        if (status === "published") summary.published += 1;
+        return summary;
+      }, { upcoming: 0, attention: 0, published: 0 });
+      const summary = $("#calendarSummary");
+      if (summary) summary.innerHTML = [
+        `<span class="tag">${counts.upcoming} upcoming</span>`,
+        `<span class="tag">${counts.attention} need attention</span>`,
+        `<span class="tag">${counts.published} published</span>`
+      ].join("");
       $("#calendarList").innerHTML = items.length
         ? items.map(deliveryHistoryCard).join("")
         : `<div class="empty">Approved, scheduled, blocked, and published content will appear here.</div>`;
@@ -7038,7 +7188,8 @@
       const list = $(target.list);
       if (!list) return;
       const selected = customerSurfaceState[`selected${surface[0].toUpperCase()}${surface.slice(1)}Source`] || "";
-      list.innerHTML = (customerSources[surface] || []).map(item => `
+      const visibleSources = (customerSources[surface] || []).filter(item => providerSourceIsActive(item.provider));
+      list.innerHTML = visibleSources.map(item => `
         <article class="variant" style="--accent:${customerSourceAccent(item.provider)}">
           <div class="variant-head">
             <div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.detail)}</p></div>
@@ -7048,7 +7199,7 @@
             <button class="secondary" data-customer-surface="${escapeHtml(surface)}" data-customer-source="${escapeHtml(item.id)}">${selected === item.id ? "Refresh" : "Load"}</button>
           </div>
         </article>
-      `).join("");
+      `).join("") || `<div class="empty">Connect or select a relevant account to add ${escapeHtml(surface)} sources.</div>`;
     }
 
     function renderLibrary() {
@@ -10664,12 +10815,12 @@
       const adminDiagnostics = $("#adminProviderDiagnostics");
       if (adminDiagnostics) adminDiagnostics.innerHTML = canAccessAdminPanel() ? diagnostics : "";
 
+      const selectedPlatformIds = new Set(Array.isArray(model.onboarding?.selectedPlatforms) ? model.onboarding.selectedPlatforms : []);
       const servicePlatforms = customerPlatforms.filter(platform => ["google_growth", "google_business"].includes(platform.id));
       const communityPlatforms = customerPlatforms.filter(platform => platform.id === "reddit");
-      const connectedPlatforms = customerPlatforms.filter(platform => platform.id !== "reddit" && !servicePlatforms.includes(platform) && accountEvidence(platform).known);
+      const primaryPlatforms = customerPlatforms.filter(platform => platform.id !== "reddit" && !servicePlatforms.includes(platform) && (selectedPlatformIds.has(platform.id) || accountEvidence(platform).known));
       const disconnectedPlatforms = customerPlatforms.filter(platform => {
-        if (platform.id === "reddit" || servicePlatforms.includes(platform)) return false;
-        if (accountEvidence(platform).known) return false;
+        if (primaryPlatforms.includes(platform)) return false;
         return true;
       });
       const availablePlatforms = disconnectedPlatforms.filter(platform => {
@@ -10679,8 +10830,8 @@
       });
       const availablePlatformIds = new Set(availablePlatforms.map(platform => platform.id));
       const setupGatedPlatforms = disconnectedPlatforms.filter(platform => !availablePlatformIds.has(platform.id));
-      const connectedCount = connectedPlatforms.filter(platform => accountEvidence(platform).connection.connected).length;
-      const attentionCount = connectedPlatforms.length - connectedCount;
+      const connectedCount = primaryPlatforms.filter(platform => accountEvidence(platform).connection.connected).length;
+      const attentionCount = primaryPlatforms.length - connectedCount;
       const accountHealthSummary = $("#accountHealthSummary");
       if (accountHealthSummary) {
         accountHealthSummary.innerHTML = [
@@ -10688,8 +10839,8 @@
           ["Needs attention", attentionCount, attentionCount ? "Reconnect or provider approval" : "No account action needed"],
           ["Available", availablePlatforms.length, "Ready to add"],
           ["Setup gated", setupGatedPlatforms.length, setupGatedPlatforms.length ? "Visible below with the exact blocker" : "No hidden provider setup"],
-          ["Google services", servicePlatforms.length, metaState.youtubeAccount ? "Shared Google authorization detected" : "Google authorization available"],
-          ["Community lanes", communityPlatforms.length, metaState.redditStatus?.communityCommandReady ? "Reddit Devvit workflow ready" : "Reddit setup or review gated"]
+          ["Selected services", primaryPlatforms.length, "Your focused account queue"],
+          ["More services", disconnectedPlatforms.length, "Available when this workspace needs them"]
         ].map(([label, count, detail]) => `
           <div class="account-health-row">
             <div><strong>${escapeHtml(label)}</strong><br><span>${escapeHtml(detail)}</span></div>
@@ -10708,24 +10859,10 @@
       $("#socialAccountList").innerHTML = `
         <div class="account-group-header">
           <strong>Accounts and posting identities</strong>
-          <span class="tag">${escapeHtml(`${connectedPlatforms.length} saved`)}</span>
+          <span class="tag">${escapeHtml(`${primaryPlatforms.length} selected or saved`)}</span>
         </div>
         <div class="account-card-grid">
-          ${connectedPlatforms.map(providerCard).join("") || `<div class="empty">No connected accounts yet.</div>`}
-        </div>
-        <div class="account-group-header" style="margin-top:16px">
-          <strong>Google account capabilities</strong>
-          <span class="tag">One Google authorization, separate API gates</span>
-        </div>
-        <div class="account-card-grid">
-          ${servicePlatforms.map(providerCard).join("")}
-        </div>
-        <div class="account-group-header" style="margin-top:16px">
-          <strong>Installed-community workflows</strong>
-          <span class="tag">Devvit handoff</span>
-        </div>
-        <div class="account-card-grid">
-          ${communityPlatforms.map(providerCard).join("")}
+          ${primaryPlatforms.map(providerCard).join("") || `<div class="empty">Choose services in workspace setup, then connect their public posting identities here.</div>`}
         </div>
         ${availableConnections}
       `;
@@ -11971,6 +12108,7 @@
       renderOnboarding();
       renderBrandKit();
       renderDashboard();
+      setStudioMode(studioMode);
       renderRules();
       renderRawVideoPlan();
       renderElevenlabsVoiceoverStudio();
@@ -12001,6 +12139,7 @@
     }
 
     $("#newCampaign").addEventListener("click", createCampaign);
+    $$('[data-studio-mode]').forEach(button => button.addEventListener("click", () => setStudioMode(button.dataset.studioMode)));
     $("#createAccountButton").addEventListener("click", createAccount);
     $("#loginButton").addEventListener("click", loginUser);
     $("#completeOnboarding").addEventListener("click", saveOnboarding);

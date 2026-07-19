@@ -591,7 +591,9 @@ try {
   if (!appHtml.includes('id: "discord"') || !appHtml.includes('connectRoute: "/api/oauth/discord/start"')) throw new Error("Discord function suite should expose the OAuth connect route");
   if (!appHtml.includes("function authoritativeProviderAccount") || !appHtml.includes("providerAccountSelectionRow(canonical)") || !appHtml.includes("providerAccountOptionLabel(account)")) throw new Error("accounts GUI must use the authoritative provider-account selection response");
   if (!appHtml.includes('return `${identity} is connected. Additional provider access is still pending.`') || !/function providerPrimaryAction[\s\S]*?if \(connected \|\| label\.includes\("connected"\)\)[\s\S]*?label: "Reconnect"/.test(appHtml) || !appHtml.includes("providerPrimaryAction(readiness, connected)")) throw new Error("connected provider cards must use customer summaries and avoid stale first-time connection language");
-  if (!appHtml.includes('"google_growth", "google_business"') || !appHtml.includes("Google account capabilities") || !appHtml.includes("One Google authorization, separate API gates")) throw new Error("Accounts must expose Google Growth and Business Profile capability lanes without duplicating them as social identities");
+  if (!appHtml.includes('"google_growth", "google_business"') || !appHtml.includes("selectedPlatformIds") || !appHtml.includes("primaryPlatforms") || !appHtml.includes("More services")) throw new Error("Accounts must keep selected services in the focused account queue and move unused Google/provider lanes behind setup disclosure");
+  if (!appHtml.includes('data-studio-mode="video"') || !appHtml.includes("function setStudioMode") || !appHtml.includes("visibleCreationPlatforms().map(platform => platform.id)")) throw new Error("Create must expose video as a first-class mode and generate only for active workspace platforms");
+  if (!appHtml.includes("function providerSourceIsActive") || !appHtml.includes("visibleSources")) throw new Error("Audience, library, and commerce sources must follow selected or connected workspace services");
   if (!appHtml.includes('data-account-lane="reddit"') || !appHtml.includes("Reddit installed-community lane") || !appHtml.includes("Open Reddit workflow")) throw new Error("Accounts must expose the Reddit installed-community workflow without pretending it is OAuth");
   if (!appHtml.includes("function discordClientActionKey") || !appHtml.includes('"Idempotency-Key": idempotencyKey') || !appHtml.includes("clearDiscordClientActionKey(button)")) throw new Error("Discord live customer actions must send reusable idempotency keys and clear them only after success");
   if (!appHtml.includes("function providerStateChips") || !appHtml.includes('data-provider-state="${escapeHtml(label)}"') || !appHtml.includes("function providerAccountEvidenceLine")) throw new Error("account cards must separate connection, publishing, analytics, and review while showing asset evidence");
@@ -1922,6 +1924,7 @@ try {
   const mediaEditorReady = await request("/api/media/editor/readiness");
   if (!mediaEditorReady.ok || !Array.isArray(mediaEditorReady.outputs)) throw new Error("media editor readiness failed");
   if (typeof mediaEditorReady.planningReady !== "boolean" || typeof mediaEditorReady.uploadReady !== "boolean" || typeof mediaEditorReady.rendererConfigured !== "boolean" || typeof mediaEditorReady.renderReady !== "boolean") throw new Error("media editor readiness must separate planning, upload, renderer configuration, and live rendering truth");
+  if (mediaEditorReady.internalPipeline?.sourceProbe !== "ffprobe" || mediaEditorReady.internalPipeline?.sceneAndSilenceMap !== "FFmpeg" || !String(mediaEditorReady.internalPipeline?.transcript || "").includes("speech-to-text") || !String(mediaEditorReady.internalPipeline?.workerState || "").trim()) throw new Error("media readiness must expose the proven internal dissection stages and honest worker state");
   if (!serverSource.includes("const renderReady = Boolean(planningReady && uploadReady && mediaRenderWorkerConfigured)") || !serverSource.includes("Private upload and planning ready; isolated renderer pending")) throw new Error("media readiness must not report a live render pipeline before the isolated worker is configured");
   const requiredVideoPlatforms = ["tiktok", "instagram", "youtube", "facebook", "x", "threads"];
   if (requiredVideoPlatforms.some(platform => !mediaEditorReady.outputs.some(output => output.platform === platform))) throw new Error("media editor readiness missed a video platform");
@@ -1971,9 +1974,19 @@ try {
   const mediaEditPlan = await request("/api/media/editor/plan", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sourceName: "raw-test.mp4", brief: "Social Cues launch" })
+    body: JSON.stringify({
+      sourceName: "raw-test.mp4",
+      brief: "Social Cues launch",
+      intent: {
+        messageToPreserve: "Show creators the audience-intelligence payoff.",
+        audience: "Creators building their first repeatable growth system",
+        targetClipCount: 5
+      }
+    })
   });
   if (!mediaEditPlan.ok || !mediaEditPlan.plan?.outputs?.length || !mediaEditPlan.serverRequirement) throw new Error("media editor plan failed");
+  if (mediaEditPlan.plan.intent?.targetClipCount !== 5 || !mediaEditPlan.plan.intent?.messageToPreserve?.includes("audience-intelligence") || !mediaEditPlan.plan.intent?.audience?.includes("Creators")) throw new Error("media editor plan must preserve the user's message, audience, and requested clip count");
+  if (![...(mediaEditPlan.plan.intake || []), ...(mediaEditPlan.plan.editPass || [])].some(stage => /scene|silence/i.test(stage)) || !mediaEditPlan.plan.reviewGate) throw new Error("media editor plan must include dissection stages and an explicit human review gate");
   if (!mediaEditPlan.plan.outputs.every(output => output.outputName?.startsWith("raw-test-") && output.filterPlan && output.safeArea && output.requiredReview)) throw new Error("media editor plan must include export names, filters, safe areas, and review gates");
 
   const mediaAsset = await request("/api/media/assets", {

@@ -5052,6 +5052,14 @@ function mediaEditorReadiness() {
       image: openaiImageModel,
       video: openaiVideoModel || "provider gated"
     },
+    internalPipeline: {
+      sourceProbe: "ffprobe",
+      sceneAndSilenceMap: "FFmpeg",
+      transcript: "OpenAI speech-to-text",
+      candidateScoring: "Source-grounded structured scoring",
+      finish: "FFmpeg and Remotion",
+      workerState: mediaRenderWorkerConfigured ? "configured" : "local engine proven; isolated production worker pending"
+    },
     warnings: [
       "Raw media upload and AI editing should run server-side because files are large, expensive, and may contain private client footage.",
       "Camera and microphone access must be user-initiated in the browser and never auto-enabled.",
@@ -19651,7 +19659,12 @@ async function route(req, res) {
     const requestedLanguage = input.contentLanguage || model.settings?.contentLanguage || model.settings?.language || "interface";
     const targetLanguage = requestedLanguage === "interface" ? (model.settings?.language || "auto") : requestedLanguage;
     const targetLocale = input.locale || model.settings?.language || "auto";
-    const targetPlatforms = platforms.filter(platform => !platform.accountOnly);
+    const requestedPlatformIds = new Set((Array.isArray(input.selectedPlatforms) ? input.selectedPlatforms : [])
+      .map(value => String(value || "").trim().toLowerCase())
+      .filter(Boolean));
+    const availablePlatforms = platforms.filter(platform => !platform.accountOnly);
+    const selectedTargetPlatforms = availablePlatforms.filter(platform => requestedPlatformIds.has(platform.id));
+    const targetPlatforms = selectedTargetPlatforms.length ? selectedTargetPlatforms : availablePlatforms;
     const localVariants = () => targetPlatforms.map(platform => ({
       id: uid(platform.id),
       platform: platform.id,
@@ -22233,8 +22246,13 @@ async function route(req, res) {
       ready: mediaEditorReadiness().ready,
       sourceName,
       plan: {
-        intake: ["Confirm rights/consent", "Detect orientation and spoken hook", "Transcribe if audio is present", "Choose one campaign promise"],
-        editPass: ["Cut dead air", "Add first-frame title", "Add burned-in captions", "Add platform-safe CTA", "Export per-platform sizes"],
+        intent: {
+          messageToPreserve: String(input.intent?.messageToPreserve || brief).slice(0, 500),
+          audience: String(input.intent?.audience || "").slice(0, 500),
+          targetClipCount: Math.max(1, Math.min(8, Number(input.intent?.targetClipCount || 3)))
+        },
+        intake: ["Confirm rights/consent", "Probe streams, duration, orientation, and loudness", "Map scene changes and silence", "Transcribe spoken content", "Choose one campaign promise"],
+        editPass: ["Rank coherent hook-to-payoff windows", "Cut dead air without breaking meaning", "Add first-frame title", "Add burned-in captions", "Apply brand-safe reframing", "Normalize audio", "Add platform-safe CTA", "Export only selected platform sizes"],
         outputs: mediaEditorReadiness().outputs.map(output => ({
           ...output,
           outputName: `${sourceName.replace(/\.[^.]+$/, "").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "raw-video"}-${output.spec.fileSuffix}`,
@@ -22245,7 +22263,9 @@ async function route(req, res) {
         })),
         reviewGate: "User approval is required before upload, scheduling, or publishing."
       },
-      serverRequirement: "Live editing needs server-side media storage plus a queued render worker; this endpoint is the product contract until that worker is added."
+      serverRequirement: mediaRenderWorkerConfigured
+        ? "The isolated renderer is configured; queued jobs can be claimed after the private source is verified."
+        : "The local FFmpeg evidence and render engine is proven. Production still needs the isolated worker to claim the durable job, download the private source, render, and return private output paths."
     });
   }
 
@@ -22345,6 +22365,7 @@ async function route(req, res) {
           assetId: job.assetId,
           storagePath: job.storagePath,
           sourceName: job.sourceName,
+          intent: input.intent || {},
           outputs: job.outputs
         }
       }]).catch(() => [])

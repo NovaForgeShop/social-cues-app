@@ -62,14 +62,37 @@ test('local workstation navigation and safe buttons respond', async ({ page }) =
   await expect(page.locator('[data-view="integrations"]')).toBeHidden();
 
   await page.locator('[data-view="studio"]').click();
+  await expect(page.locator('[data-studio-mode="video"]')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('[data-studio-lane="video"]')).toBeVisible();
+  await expect(page.locator('#rawVideoMessageInput')).toBeVisible();
+  await expect(page.locator('#rawVideoAudienceInput')).toBeVisible();
+  await expect(page.locator('#rawVideoClipCountInput')).toHaveValue('3');
+  await page.locator('#rawVideoMessageInput').fill('Preserve the audience-intelligence message.');
+  await page.locator('#rawVideoAudienceInput').fill('Independent creators');
+  await page.locator('#rawVideoClipCountInput').selectOption('5');
+  await expect(page.locator('[data-studio-lane="campaign"]').first()).toBeHidden();
+  await page.locator('[data-studio-mode="campaign"]').click();
+  await expect(page.locator('#rulesBox .variant')).toHaveCount(3);
   await page.locator('#generateVariants').click();
-  await expect(page.locator('#variantList [data-copy]')).toHaveCount(18);
+  await expect(page.locator('#variantList [data-copy]')).toHaveCount(3);
+
+  await page.locator('[data-view="growth"]').click();
+  await expect(page.locator('#growthSourceList')).toContainText(/YouTube/i);
+  await expect(page.locator('#growthSourceList')).not.toContainText(/Pinterest|Twitch|LinkedIn|Patreon/i);
+
+  await page.locator('[data-view="accounts"]').click();
+  const focusedAccountGrid = page.locator('#socialAccountList > .account-card-grid').first();
+  await expect(focusedAccountGrid.locator('[data-account-lane="facebook"]')).toHaveCount(1);
+  await expect(focusedAccountGrid.locator('[data-account-lane="instagram"]')).toHaveCount(1);
+  await expect(focusedAccountGrid.locator('[data-account-lane="youtube"]')).toHaveCount(1);
+  await expect(focusedAccountGrid.locator('[data-account-lane="google_growth"]')).toHaveCount(0);
 
   await page.locator('[data-view="approvals"]').click();
   await page.locator('#approvalList [data-variant-action="set-status"][data-status="approved"]').first().click();
   await page.locator('#publishApproved').click();
   await page.locator('[data-view="calendar"]').click();
   await expect(page.locator('#calendarList')).toContainText(/queued|published|approved/i);
+  await expect(page.locator('#calendarSummary')).toContainText(/upcoming|attention|published/i);
 
   for (const route of ['/api/auth/readiness', '/api/integrations/readiness', '/api/oauth/tiktok/status', '/api/oauth/youtube/status']) {
     const response = await page.evaluate(async path => {

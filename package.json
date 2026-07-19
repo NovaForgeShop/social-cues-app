@@ -15,7 +15,8 @@
     "vercel:env:audit": "node scripts/sync-vercel-env.mjs --dry-run",
     "vercel:env:sync": "node scripts/sync-vercel-env.mjs",
     "render:coming-soon": "remotion render remotion/index.ts SocialCuesComingSoon outputs/social-cues-coming-soon-remotion.mp4 --overwrite",
-    "render:still": "remotion still remotion/index.ts SocialCuesComingSoon outputs/social-cues-coming-soon-remotion.png --frame=75 --overwrite"
+    "render:still": "remotion still remotion/index.ts SocialCuesComingSoon outputs/social-cues-coming-soon-remotion.png --frame=75 --overwrite",
+    "video:dissect": "node scripts/video-dissection.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
