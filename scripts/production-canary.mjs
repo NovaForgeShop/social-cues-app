@@ -25,6 +25,9 @@ try { healthBody = JSON.parse(health.text); } catch {}
 record("health endpoint", health.response.status === 200 && healthBody.ok === true, `status ${health.response.status}`);
 record("health response secret scan", !leakedSecret(health.text), "health output must never contain credential material");
 
+const robots = await request("/robots.txt");
+record("robots policy", robots.response.status === 200 && /Disallow:\s*\/api\//i.test(robots.text) && /Disallow:\s*\/app/i.test(robots.text), `status ${robots.response.status}`);
+
 const app = await request("/app");
 record("customer app shell", app.response.status === 200 && /Social Cues/i.test(app.text), `status ${app.response.status}`);
 record("content security policy", Boolean(app.response.headers.get("content-security-policy")), "CSP header missing");

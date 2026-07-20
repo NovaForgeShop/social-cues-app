@@ -17610,6 +17610,30 @@ async function route(req, res) {
     return html(res, 200, termsOfServiceHtml(), "/terms");
   }
 
+  if (url.pathname === "/robots.txt" && (req.method === "GET" || req.method === "HEAD")) {
+    const body = [
+      "User-agent: *",
+      "Allow: /$",
+      "Allow: /privacy$",
+      "Allow: /privacy-policy$",
+      "Allow: /terms$",
+      "Allow: /terms-of-service$",
+      "Disallow: /api/",
+      "Disallow: /app",
+      "Disallow: /portal",
+      "Disallow: /account",
+      "Disallow: /reset-password",
+      ""
+    ].join("\n");
+    if (req.method === "HEAD") {
+      const headers = responseHeaders("text/plain; charset=utf-8");
+      headers["Content-Length"] = String(Buffer.byteLength(body));
+      res.writeHead(200, headers);
+      return res.end();
+    }
+    return text(res, 200, body, "text/plain; charset=utf-8");
+  }
+
   if (url.pathname === "/manifest.webmanifest") {
     return text(res, 200, await readFile(manifestPath, "utf8"), "application/manifest+json; charset=utf-8");
   }
