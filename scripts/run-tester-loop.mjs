@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
+import net from 'node:net';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const port = process.env.PORT || '4188';
-const baseURL = process.env.E2E_BASE_URL || `http://127.0.0.1:${port}`;
-const testDataDir = process.env.SOCIAL_CUES_DATA_DIR || path.join(process.cwd(), '.tmp', `tester-loop-data-${port}-${Date.now()}`);
+let port = process.env.PORT || '';
+let baseURL = process.env.E2E_BASE_URL || '';
+let testDataDir = '';
 const testFiles = process.argv.slice(2);
 const projects = String(process.env.E2E_PROJECTS || 'chromium').split(',').map(value => value.trim()).filter(Boolean);
 const localPromoCodes = JSON.stringify([
@@ -25,6 +26,22 @@ function spawnProcess(command, args, env) {
   });
 }
 
+async function findAvailablePort() {
+  if (process.env.PORT) return String(process.env.PORT);
+  const preferred = 4188 + (process.pid % 1000);
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const candidate = preferred + attempt;
+    const available = await new Promise(resolve => {
+      const probe = net.createServer();
+      probe.once('error', () => resolve(false));
+      probe.once('listening', () => probe.close(() => resolve(true)));
+      probe.listen(candidate, '127.0.0.1');
+    });
+    if (available) return String(candidate);
+  }
+  throw new Error('Could not find an available local test port.');
+}
+
 async function waitForHealth() {
   const deadline = Date.now() + 30_000;
   let lastError = null;
@@ -42,6 +59,9 @@ async function waitForHealth() {
 }
 
 async function run() {
+  port = port || await findAvailablePort();
+  baseURL = baseURL || `http://127.0.0.1:${port}`;
+  testDataDir = process.env.SOCIAL_CUES_DATA_DIR || path.join(process.cwd(), '.tmp', `tester-loop-data-${port}-${Date.now()}`);
   const serverEnv = {
     ...process.env,
     PORT: port,
