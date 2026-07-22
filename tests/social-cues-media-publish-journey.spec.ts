@@ -296,7 +296,12 @@ test('media selection reaches a durable provider handoff on desktop and mobile',
   const preparedVariant = preparedModel.body.quickPosts?.[0]?.variants?.find((variant: any) => variant.platform === 'facebook');
   const queuedVariantId = preparedVariant?.id;
   expect(queuedVariantId).toBeTruthy();
+  const approvedSave = page.waitForResponse(response => response.url().endsWith('/api/model') && response.request().method() === 'POST' && response.ok());
+  await quickCard.locator(`[data-quick-action="approve"][data-quick-variant="${queuedVariantId}"]`).click();
+  await approvedSave;
+  await expect(quickCard.locator('[data-quick-batch-action="queue-all"]')).toBeEnabled();
   const queuedSave = page.waitForResponse(response => response.url().endsWith('/api/model') && response.request().method() === 'POST' && response.ok());
+  page.once('dialog', dialog => dialog.accept());
   await quickCard.locator('[data-quick-batch-action="queue-all"]').click();
   await queuedSave;
   const queuedModel = await sameOriginJson(page, '/api/model');

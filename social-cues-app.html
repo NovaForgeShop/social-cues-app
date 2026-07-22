@@ -4746,7 +4746,10 @@
         .filter(variant => variant.status === "approved" && variant.platform !== "reddit"));
       const approvedQuickVariants = (model.quickPosts || []).flatMap(batch => (batch.variants || [])
         .filter(variant => variant.status === "approved"));
-      const approvalCount = approvedCampaignVariants.length + approvedQuickVariants.length;
+      const approvedQueueRows = standaloneQueueApprovalRows()
+        .filter(row => String(row.status || "").toLowerCase() === "approved");
+      const localApprovalCount = approvedCampaignVariants.length + approvedQuickVariants.length;
+      const approvalCount = localApprovalCount + approvedQueueRows.length;
       const redditHandoffs = (model.campaigns || []).flatMap(campaign => campaign.variants || [])
         .filter(variant => variant.status === "approved" && variant.platform === "reddit").length;
       if (!approvalCount) {
@@ -4757,6 +4760,12 @@
       }
       if (!confirm(`Final check: queue ${approvalCount} approved post${approvalCount === 1 ? "" : "s"} for delivery?`)) return;
       let count = 0;
+      const failures = [];
+      const confirmButton = $("#publishApproved");
+      if (confirmButton) {
+        confirmButton.disabled = true;
+        confirmButton.textContent = "Queuing approved posts...";
+      }
       approvedCampaignVariants.forEach(variant => {
         syncCopy(variant.id);
         variant.status = "queued";
@@ -4784,8 +4793,23 @@
         });
       });
       const handoffNote = redditHandoffs ? ` ${redditHandoffs} Reddit variant${redditHandoffs === 1 ? " remains" : "s remain"} approved for manual Devvit handoff.` : "";
-      await saveModel(`Confirmed and queued ${count} approved post${count === 1 ? "" : "s"}.${handoffNote}`);
+      if (localApprovalCount) {
+        await saveModel(`Confirmed and queued ${localApprovalCount} approved post${localApprovalCount === 1 ? "" : "s"}.${handoffNote}`);
+      }
+      for (const row of approvedQueueRows) {
+        try {
+          await submitStandaloneQueueApproval(row.id, true);
+          count++;
+        } catch (error) {
+          failures.push(`${platformName(row.platform)}: ${error.message}`);
+        }
+      }
       await refreshPublishQueueState().catch(() => null);
+      renderApprovalIndicators();
+      if (failures.length) {
+        showAppResult("Some posts could not be queued", `${count} post${count === 1 ? " is" : "s are"} queued. ${failures.length} still need attention: ${failures.join("; ")}`, "error");
+        return;
+      }
       showAppResult("Final confirmation complete", `${count} approved post${count === 1 ? " is" : "s are"} now in the publishing queue.${handoffNote}`, "success");
     }
 
@@ -13467,22 +13491,27 @@
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
+    async function submitStandaloneQueueApproval(queueId = "", finalConfirmation = false) {
+      const response = await authedFetch("/api/publish/queue/approval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          queueId,
+          approved: true,
+          confirm: finalConfirmation ? "QUEUE_APPROVED_POST" : ""
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) throw new Error(data.error || "The approval could not be saved.");
+      if (data.publishQueue) metaState.publishQueue = data.publishQueue;
+      return data;
+    }
+
     async function updateStandaloneQueueApproval(queueId = "", finalConfirmation = false) {
       if (!queueId) return;
       if (finalConfirmation && !confirm("Final check: place this approved post into the live publishing queue?")) return;
       try {
-        const response = await authedFetch("/api/publish/queue/approval", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            queueId,
-            approved: true,
-            confirm: finalConfirmation ? "QUEUE_APPROVED_POST" : ""
-          })
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok || data.ok === false) throw new Error(data.error || "The approval could not be saved.");
-        if (data.publishQueue) metaState.publishQueue = data.publishQueue;
+        const data = await submitStandaloneQueueApproval(queueId, finalConfirmation);
         render();
         applyWorkspaceDeepLink({ view: "approvals", approvalId: queueId, notice: "publish-approval" });
         showAppResult(finalConfirmation ? "Post confirmed and queued" : "Content approved - step 1 complete", data.message || (finalConfirmation

@@ -159,9 +159,10 @@ test('local workstation navigation and safe buttons respond', async ({ page }) =
   await expect(emailLinkedCard).toHaveAttribute('data-approval-focus', 'true');
   await emailLinkedCard.locator('[data-queue-confirm="false"]').click();
   await expect(emailLinkedCard.locator('[data-queue-confirm="true"]')).toContainText(/Confirm & queue/i);
+  await expect(page.locator('#publishApproved')).toBeEnabled();
   page.once('dialog', dialog => dialog.accept());
-  await emailLinkedCard.locator('[data-queue-confirm="true"]').click();
-  await expect(page.locator('#appResult')).toContainText(/confirmed and queued|deliverable/i);
+  await page.locator('#publishApproved').click();
+  await expect(page.locator('#appResult')).toContainText(/confirmation complete|publishing queue/i);
   const confirmedQueue = await page.evaluate(async queueId => {
     const response = await fetch('/api/publish/queue', { credentials: 'same-origin', cache: 'no-store' });
     const body = await response.json();
