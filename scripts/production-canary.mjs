@@ -54,7 +54,8 @@ for (const asset of (assetBody.assets || []).slice(0, 12)) {
 }
 
 for (const check of checks) {
-  process.stdout.write(`${check.ok ? "PASS" : "FAIL"} ${check.name}${check.detail ? ` - ${check.detail}` : ""}\n`);
+  const detail = !check.ok && check.detail ? ` - ${check.detail}` : "";
+  process.stdout.write(`${check.ok ? "PASS" : "FAIL"} ${check.name}${detail}\n`);
 }
 if (failures.length) {
   process.stderr.write(`\nProduction canary failed with ${failures.length} issue(s).\n`);
