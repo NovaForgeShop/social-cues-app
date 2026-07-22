@@ -144,10 +144,12 @@ test('25-step Social Cues tester loop reaches the workstation and checks safe fu
     expect(copies.join('\n')).toMatch(/campaign|Facebook|social|system|growth/i);
   });
 
-  await test.step('14b - queueing preserves the selected publish time', async () => {
+  await test.step('14b - two-step approval preserves the selected publish time', async () => {
     const scheduleInput = page.locator('#variantList [data-variant-schedule]').first();
     await scheduleInput.fill('2030-01-02T09:30');
     await scheduleInput.blur();
+    await page.locator('#variantList [data-variant-action="set-status"][data-status="approved"]').first().click();
+    page.once('dialog', dialog => dialog.accept());
     await page.locator('#variantList [data-variant-action="set-status"][data-status="queued"]').first().click();
     await expect(page.locator('#variantList [data-variant-schedule]').first()).toHaveValue('2030-01-02T09:30');
   });

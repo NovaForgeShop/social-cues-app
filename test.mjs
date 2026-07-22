@@ -400,7 +400,7 @@ try {
   if (!serverSource.includes("acceptWorkspaceInvite") || !serverSource.includes('pageParams.get("invite")')) throw new Error("portal must accept a workspace invitation after the invited user signs in");
   if (!serverSource.includes('res.setHeader("X-Request-ID"') || !serverSource.includes('"http_request_completed"') || !serverSource.includes('"unhandled_request_error"')) throw new Error("production requests must expose correlation IDs and structured diagnostics");
   if (!serverSource.includes('const sensitiveKeys = ["verify", "token", "token_hash", "access_token", "refresh_token"]') || !serverSource.includes('credentialUrlCleanup: ui.includes("function stripConsumedAuthCredentials")') || !serverSource.includes('crypto.createHash("sha256").update(ui)')) throw new Error("locked app credentials and deployed app-shell identity must be observable without exposing source or secrets");
-  if (!serverSource.includes("function scheduledVariantLedgerItems") || !serverSource.includes('variantStatus === "blocked"') || !serverSource.includes("recoveredFromVariantEvidence") || !serverSource.includes('["queued", "scheduled", "queued-review-only", "retrying"].includes(item.status)') || !serverSource.includes("terminalPublishHistory: true")) throw new Error("normalized publishing history must preserve real terminal evidence without counting completed posts as due");
+  if (!serverSource.includes("function scheduledVariantLedgerItems") || !serverSource.includes('variantStatus === "blocked"') || !serverSource.includes("recoveredFromVariantEvidence") || !serverSource.includes('["queued", "scheduled", "retrying"].includes(item.status)') || !serverSource.includes("awaitingApproval") || !serverSource.includes("terminalPublishHistory: true")) throw new Error("normalized publishing history must preserve approval gates and real terminal evidence without counting unconfirmed or completed posts as due");
   if (!serverSource.includes("function normalizedProviderCleanupKey") || !serverSource.includes("function normalizedStoredConnectionStatus") || !serverSource.includes("connectedIdsByPlatform") || !serverSource.includes("genericIdentity") || !serverSource.includes('normalizedStoredConnectionStatus(row.status) === "connected"') || !serverSource.includes("canonicalIds.has(providerAccountId)") || !serverSource.includes("canonicalProviderStateCleanup: true")) throw new Error("normalized provider cleanup must remove only stale disconnected duplicates or generic identities after a verified connection exists");
   if (!serverSource.includes("localModelSaveQueue.then(save, save)") || !serverSource.includes("renameLocalModelWithRetry")) throw new Error("local atomic model writes must serialize and retry transient Windows locks");
   if (!serverSource.includes('url.pathname === "/api/billing/portal"') || !serverSource.includes("createStripeCustomerPortalSession")) throw new Error("Stripe Customer Portal route missing");
@@ -1412,11 +1412,48 @@ try {
 
   const queued = await request("/api/publish/social-cues/queue", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
     body: JSON.stringify({ variant: generated.variants[0] })
   });
   if (!queued.ok || queued.provider !== "social-cues-queue") throw new Error("queue failed");
   if (queued.status === "queued-local-simulation") throw new Error("queue returned demo simulation status");
+  if (queued.status !== "queued-review-only" || queued.queueItem?.approvalStage !== 0) throw new Error("new queue items must begin at approval step 1");
+
+  const unauthenticatedApproval = await fetch(base + "/api/publish/queue/approval", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ queueId: queued.queueItem.id, approved: true })
+  });
+  if (unauthenticatedApproval.status !== 402) throw new Error("queue approval must require authenticated paid or promo access");
+
+  const prematureQueueConfirmation = await fetch(base + "/api/publish/queue/approval", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    body: JSON.stringify({ queueId: queued.queueItem.id, approved: true, confirm: "QUEUE_APPROVED_POST" })
+  });
+  if (prematureQueueConfirmation.status !== 409) throw new Error("queue confirmation must not bypass content approval");
+
+  const firstApproval = await request("/api/publish/queue/approval", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    body: JSON.stringify({ queueId: queued.queueItem.id, approved: true })
+  });
+  if (!firstApproval.ok || firstApproval.status !== "approved" || firstApproval.approvalStage !== 1) throw new Error("queue content approval did not reach step 1");
+
+  const finalApproval = await request("/api/publish/queue/approval", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    body: JSON.stringify({ queueId: queued.queueItem.id, approved: true, confirm: "QUEUE_APPROVED_POST" })
+  });
+  if (!finalApproval.ok || finalApproval.status !== "queued" || finalApproval.approvalStage !== 2) throw new Error("final queue confirmation did not make the post deliverable");
+  if (!finalApproval.publishQueue?.rows?.some(item => item.id === queued.queueItem.id && item.status === "queued")) throw new Error("confirmed queue item was not visible in the durable publish ledger");
+
+  const repeatedFinalApproval = await request("/api/publish/queue/approval", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    body: JSON.stringify({ queueId: queued.queueItem.id, approved: true, confirm: "QUEUE_APPROVED_POST" })
+  });
+  if (!repeatedFinalApproval.ok || repeatedFinalApproval.status !== "queued" || repeatedFinalApproval.approvalStage !== 2) throw new Error("repeating final queue confirmation must be idempotent");
 
   const scheduledModel = await request("/api/model", {
     headers: { Authorization: `Bearer ${login.session.token}` }
@@ -1441,7 +1478,7 @@ try {
     {
       id: `queued-facebook-${Date.now()}`,
       platform: "facebook",
-      status: "approved",
+      status: "queued",
       scheduledFor: dueAt,
       queuedAt: dueAt,
       copy: "Social Cues scheduled Facebook smoke test.",

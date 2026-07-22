@@ -14,9 +14,22 @@ test('first-run workspace stays usable on Android and iPhone', async ({ page }, 
   await page.locator('#emailInput').fill(`mobile-${testInfo.project.name}-${stamp}@socialcuesapp.test`);
   await page.locator('#passwordInput').fill(`Mobile-shell-${stamp}!`);
   await page.locator('#promoInput').fill(promoCode);
-  await page.locator('#createBtn').click();
-  await page.waitForURL(/\/app|\/portal/, { timeout: 10_000 });
-  await page.goto('/app');
+  const [mobileSignupResponse] = await Promise.all([
+    page.waitForResponse(response => response.url().endsWith('/api/auth/signup') && response.request().method() === 'POST'),
+    page.locator('#createBtn').click()
+  ]);
+  const mobileSignup = await mobileSignupResponse.json();
+  expect(mobileSignupResponse.ok()).toBeTruthy();
+  expect(mobileSignup.entitlement?.active).toBeTruthy();
+  await page.context().addCookies([{
+    name: 'sc_session',
+    value: mobileSignup.session.token,
+    url: new URL(page.url()).origin,
+    httpOnly: true,
+    sameSite: 'Lax'
+  }]);
+  await page.waitForURL(/\/app(?:[?#]|$)/, { timeout: 10_000 });
+  await page.waitForLoadState('domcontentloaded');
 
   await expect(page.locator('#onboarding')).toBeVisible();
   await expect(page.locator('body')).toHaveClass(/onboarding-scene/);
@@ -30,6 +43,50 @@ test('first-run workspace stays usable on Android and iPhone', async ({ page }, 
 
   await expect(page.locator('body')).not.toHaveClass(/onboarding-scene/);
   await expect(page.locator('#mobileViewSelect')).toBeVisible();
+  const mobileQueue = await page.evaluate(async projectName => {
+    const response = await fetch('/api/publish/social-cues/queue', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        variant: {
+          id: `mobile-approval-${projectName}-${Date.now()}`,
+          platform: 'facebook',
+          copy: `Mobile approval check for ${projectName}`,
+          status: 'draft'
+        },
+        notifyByEmail: false
+      })
+    });
+    return response.json();
+  }, testInfo.project.name);
+  expect(mobileQueue.ok).toBeTruthy();
+  await page.goto(`/app?view=approvals&approval=${encodeURIComponent(mobileQueue.queueItem.id)}&notice=publish-approval`);
+  await expect(page.locator('#mobileViewSelect option[value="approvals"]')).toContainText(/Approvals \(\d+\)/);
+  await expect(page.locator('#approvals')).toBeVisible();
+  const mobileApprovalCard = page.locator(`[data-approval-queue="${mobileQueue.queueItem.id}"]`);
+  await expect(mobileApprovalCard).toBeVisible();
+  const mobileEntitlement = await page.evaluate(async () => {
+    const response = await fetch('/api/auth/entitlement', { credentials: 'same-origin', cache: 'no-store' });
+    return { status: response.status, body: await response.json() };
+  });
+  if (mobileEntitlement.status !== 200 || !mobileEntitlement.body?.entitlement?.active) {
+    throw new Error(`mobile entitlement missing before approval: ${JSON.stringify(mobileEntitlement)}`);
+  }
+  const [mobileFirstApprovalResponse] = await Promise.all([
+    page.waitForResponse(response => response.url().endsWith('/api/publish/queue/approval') && response.request().method() === 'POST'),
+    mobileApprovalCard.locator('[data-queue-confirm="false"]').click()
+  ]);
+  const mobileFirstApproval = await mobileFirstApprovalResponse.json();
+  if (!mobileFirstApprovalResponse.ok()) {
+    throw new Error(`mobile approval failed: ${mobileFirstApprovalResponse.status()} ${JSON.stringify(mobileFirstApproval)}`);
+  }
+  expect(mobileFirstApproval.status).toBe('approved');
+  expect(mobileFirstApproval.approvalStage).toBe(1);
+  page.once('dialog', dialog => dialog.accept());
+  await mobileApprovalCard.locator('[data-queue-confirm="true"]').click();
+  await expect(page.locator('#appResult')).toContainText(/confirmed and queued|deliverable/i);
+
   await page.locator('#mobileViewSelect').selectOption('accounts');
   await expect(page.locator('#accounts')).toBeVisible();
   await expect(page.locator('#socialAccountList [data-account-lane="facebook"]')).toHaveCount(1);

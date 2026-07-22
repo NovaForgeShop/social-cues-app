@@ -3143,6 +3143,8 @@ function queueRecordFromVariant(item = {}, session = null) {
   const variantStatus = String(item.variant?.status || "").toLowerCase();
   const status = variantStatus === "published"
     ? "published"
+    : variantStatus === "approved"
+      ? "approved"
     : variantStatus === "failed"
       ? "failed"
       : variantStatus === "blocked"
@@ -3225,14 +3227,16 @@ function publishQueueLedger(model = {}, session = null, options = {}) {
     .sort((a, b) => Date.parse(a.scheduledFor || a.queuedAt || a.createdAt || "") - Date.parse(b.scheduledFor || b.queuedAt || b.createdAt || ""));
   const summary = {
     total: rows.length,
-    queued: rows.filter(item => ["queued", "scheduled", "queued-review-only"].includes(item.status)).length,
+    awaitingApproval: rows.filter(item => item.status === "queued-review-only").length,
+    awaitingConfirmation: rows.filter(item => item.status === "approved").length,
+    queued: rows.filter(item => ["queued", "scheduled"].includes(item.status)).length,
     processing: rows.filter(item => item.status === "processing").length,
     retrying: rows.filter(item => item.status === "retrying").length,
     dryRunReady: rows.filter(item => item.status === "dry-run-ready").length,
     blocked: rows.filter(item => ["blocked", "failed"].includes(item.status)).length,
     failed: rows.filter(item => item.status === "failed").length,
     published: rows.filter(item => item.status === "published").length,
-    dueNow: rows.filter(item => ["queued", "scheduled", "queued-review-only", "retrying"].includes(item.status) && (!item.scheduledFor || Date.parse(item.scheduledFor) <= Date.now())).length
+    dueNow: rows.filter(item => ["queued", "scheduled", "retrying"].includes(item.status) && (!item.scheduledFor || Date.parse(item.scheduledFor) <= Date.now())).length
   };
   return {
     ok: true,
@@ -3241,6 +3245,10 @@ function publishQueueLedger(model = {}, session = null, options = {}) {
     summary,
     nextAction: summary.blocked
       ? "Open the blocked queue items, fix their provider/account/media gate, then run the queue dry-run again."
+      : summary.awaitingApproval
+        ? "Open Approvals and complete content approval for the waiting posts."
+        : summary.awaitingConfirmation
+          ? "Open Approvals and use Confirm & queue to complete the final safety check."
       : summary.queued
         ? "Run Push scheduled queue as a dry-run before any live publish attempt."
         : "Queue approved campaign variants from Studio when content is ready.",
@@ -3253,21 +3261,34 @@ function recordPublishQueueItem(model = {}, input = {}, session = null) {
   const now = new Date().toISOString();
   const item = input.variant || input.item || input;
   const platform = item.platform || input.platform || "social-cues";
+  const recordId = input.queueId || uid("queue");
+  const variantId = item.id || input.variantId || `queue-variant-${recordId}`;
+  const scheduledFor = input.scheduledFor || item.scheduledFor || new Date(Date.now() + 90 * 60 * 1000).toISOString();
+  const queueItem = {
+    ...(cloneJson(item) || {}),
+    id: variantId,
+    platform,
+    status: "queued-review-only",
+    scheduledFor,
+    copy: String(item.copy || item.text || input.copy || ""),
+    updatedAt: now
+  };
   const record = {
-    id: input.queueId || uid("queue"),
+    id: recordId,
     source: "api-queue",
     provider: "social-cues-queue",
     platform,
     campaignId: input.campaignId || item.campaignId || "",
     campaignTitle: input.campaignTitle || item.campaignTitle || "",
-    variantId: item.id || input.variantId || "",
+    variantId,
     status: "queued-review-only",
+    approvalStage: 0,
     mode: "reminder-or-native-publish",
     queuedAt: now,
-    scheduledFor: input.scheduledFor || item.scheduledFor || new Date(Date.now() + 90 * 60 * 1000).toISOString(),
+    scheduledFor,
     live: false,
     copyPreview: String(item.copy || item.text || input.copy || "").replace(/\s+/g, " ").slice(0, 160),
-    item: publicPublishQueueRecord(item),
+    item: publicPublishQueueRecord(queueItem),
     ...workspaceOwnerFields(session)
   };
   model.publishQueue.unshift(record);
@@ -8171,7 +8192,8 @@ async function enqueueNotificationOutbox(user = {}, notification = {}) {
         label: notification.label || "Social Cues notice",
         detail: notification.detail || "",
         actionRequired: Boolean(notification.actionRequired),
-        route: notification.route || ""
+        route: notification.route || "",
+        actionLabel: notification.actionLabel || "Open Social Cues"
       },
       next_attempt_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -8196,6 +8218,7 @@ async function notificationOutboxForUser(user = {}) {
     detail: row.payload?.detail || "",
     actionRequired: Boolean(row.payload?.actionRequired),
     route: row.payload?.route || "",
+    actionLabel: row.payload?.actionLabel || "Open Social Cues",
     attempts: Number(row.attempts || 0),
     nextAttemptAt: row.next_attempt_at || null,
     lastError: row.last_error || "",
@@ -8691,6 +8714,7 @@ async function processNotificationWorkerJob(job) {
   const label = String(notice.payload?.label || "Social Cues notice").slice(0, 200);
   const detail = String(notice.payload?.detail || "").slice(0, 4000);
   const route = String(notice.payload?.route || "");
+  const actionLabel = String(notice.payload?.actionLabel || "Open Social Cues").slice(0, 80);
   const actionUrl = route.startsWith("/") ? `${publicAppUrl}${route}` : publicAppUrl;
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -8703,8 +8727,8 @@ async function processNotificationWorkerJob(job) {
       from: `${smtpSenderName} <${smtpFrom}>`,
       to: [notice.target],
       subject: label,
-      text: `${label}\n\n${detail}\n\nOpen Social Cues: ${actionUrl}`,
-      html: `<h1>${escapeNotificationHtml(label)}</h1><p>${escapeNotificationHtml(detail)}</p><p><a href="${escapeNotificationHtml(actionUrl)}">Open Social Cues</a></p>`
+      text: `${label}\n\n${detail}\n\n${actionLabel}: ${actionUrl}`,
+      html: `<h1>${escapeNotificationHtml(label)}</h1><p>${escapeNotificationHtml(detail)}</p><p><a href="${escapeNotificationHtml(actionUrl)}">${escapeNotificationHtml(actionLabel)}</a></p>`
     })
   });
   const body = await response.json().catch(() => ({}));
@@ -8799,15 +8823,15 @@ async function processScheduledPublishWorkerJob(job, registry) {
   if (automationPreferences(model).livePublishingPaused) {
     throw new WorkerJobError("Live publishing is paused by the workspace owner.", { blocked: true });
   }
-  const variantId = String(job.payload?.variantId || job.payload?.externalKey || "").replace(/^variant-/, "");
-  let item = null;
-  for (const campaign of contentVariantBatches(model)) {
-    const variant = (campaign.variants || []).find(candidate => String(candidate.id || "") === variantId);
-    if (variant) { item = { campaign, variant }; break; }
-  }
+  const externalKey = String(job.payload?.externalKey || "");
+  const variantId = String(job.payload?.variantId || externalKey).replace(/^variant-/, "");
+  const item = queuedVariants(model, { includeFuture: true }).find(candidate =>
+    String(candidate.variant?.id || "") === variantId
+    || String(candidate.queueRecord?.id || "") === externalKey
+  ) || null;
   if (!item) return { skipped: true, reason: "The campaign variant was removed before publishing." };
   if (item.variant.status === "published") return { duplicateSuppressed: true, providerPostId: item.variant.providerPostId || null };
-  if (!["approved", "queued"].includes(item.variant.status)) {
+  if (!["approved", "queued", "retrying"].includes(item.variant.status)) {
     return { skipped: true, reason: `Variant status ${item.variant.status || "unknown"} is not publishable.` };
   }
   const dueAt = Date.parse(item.variant.nextRetryAt || item.variant.scheduledFor || item.variant.queuedAt || "");
@@ -8816,6 +8840,7 @@ async function processScheduledPublishWorkerJob(job, registry) {
   }
 
   markQueuePublishProcessing(model, item, { user });
+  if (item.queueRecord) item.queueRecord.status = "processing";
   const result = await attemptQueuedVariantPublish(model, item, { live: true, user });
   rememberPublishAttempt(item, result);
   rememberQueuePublishResult(model, item, result, { user });
@@ -15202,6 +15227,8 @@ function portalPageHtml() {
     const $ = id => document.getElementById(id);
     const pageParams = new URLSearchParams(location.search);
     const hashParams = new URLSearchParams((location.hash || "").replace(/^#/, ""));
+    function appReturnPath(){const raw=pageParams.get("returnTo")||"/app";try{const parsed=new URL(raw,location.origin);return parsed.origin===location.origin&&parsed.pathname==="/app"?parsed.pathname+parsed.search+parsed.hash:"/app"}catch{return"/app"}}
+    if(pageParams.has("returnTo"))sessionStorage.setItem("sc_app_return_to",appReturnPath());
     let createMode = pageParams.get("mode")==="create" || pageParams.has("promo") || pageParams.has("code");
     function deviceId(){let id=localStorage.getItem(deviceKey);if(!id){id="portal-"+Date.now()+"-"+Math.random().toString(16).slice(2,8);localStorage.setItem(deviceKey,id)}return id}
     function deviceInfo(){return{deviceId:deviceId(),deviceName:navigator.platform||"This device",deviceKind:/iphone|android.*mobile/i.test(navigator.userAgent)?"phone":"laptop",userAgent:navigator.userAgent,platform:navigator.platform,language:navigator.language,screen:(screen.width||0)+"x"+(screen.height||0),timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone,trusted:true}}
@@ -15337,6 +15364,15 @@ function lockedAppPreviewHtml() {
   <footer class="wrap footer"><a href="/privacy">Privacy</a> - <a href="/terms">Terms</a> - <a href="mailto:${supportEmail}">${supportEmail}</a></footer>
   <script>
     (async function repairAppSession(){
+      const returnUrl = new URL(location.href);
+      ["verify", "token", "token_hash", "access_token", "refresh_token"].forEach((key) => returnUrl.searchParams.delete(key));
+      const returnQuery = returnUrl.searchParams.toString();
+      const returnTo = returnUrl.pathname + (returnQuery ? "?" + returnQuery : "") + returnUrl.hash;
+      document.querySelectorAll('a[href^="/portal"]').forEach((link) => {
+        const target = new URL(link.getAttribute("href"), location.origin);
+        target.searchParams.set("returnTo", returnTo);
+        link.setAttribute("href", target.pathname + target.search);
+      });
       if (history.replaceState && location.search) {
         const cleanUrl = new URL(location.href);
         const sensitiveKeys = ["verify", "token", "token_hash", "access_token", "refresh_token"];
@@ -15365,7 +15401,7 @@ function lockedAppPreviewHtml() {
           accessStatus.textContent = "Active";
           appStatus.textContent = "Opening";
           detail.textContent = "Full access is active. Opening the private workstation.";
-          location.replace("/app");
+          location.replace(returnTo);
           return;
         }
         if (res.ok && data.ok && data.user) {
@@ -17022,10 +17058,10 @@ function queuedVariants(model, options = {}) {
   const includeFuture = Boolean(options.includeFuture);
   const platforms = new Set((options.platforms || []).filter(Boolean));
   const items = [];
+  const seenVariantIds = new Set();
   for (const campaign of contentVariantBatches(model)) {
     for (const variant of campaign.variants || []) {
-      const hasSchedule = Boolean(variant.scheduledFor || variant.queuedAt);
-      const queueEligible = variant.status === "queued" || (variant.status === "approved" && hasSchedule);
+      const queueEligible = variant.status === "queued" || variant.status === "retrying";
       if (!queueEligible) continue;
       if (platforms.size && !platforms.has(variant.platform)) continue;
       const retryAt = Date.parse(variant.nextRetryAt || "");
@@ -17034,7 +17070,42 @@ function queuedVariants(model, options = {}) {
       const due = includeFuture || Number.isNaN(scheduledAt) || scheduledAt <= now;
       if (!due) continue;
       items.push({ campaign, variant, scheduledAt: Number.isNaN(scheduledAt) ? null : new Date(scheduledAt).toISOString() });
+      if (variant.id) seenVariantIds.add(String(variant.id));
     }
+  }
+  for (const record of Array.isArray(model.publishQueue) ? model.publishQueue : []) {
+    const status = String(record.status || "").toLowerCase();
+    if (!["queued", "retrying"].includes(status)) continue;
+    const variantId = String(record.variantId || record.item?.id || record.id || "");
+    if (!variantId || seenVariantIds.has(variantId)) continue;
+    const platform = record.platform || record.item?.platform || "";
+    if (platforms.size && !platforms.has(platform)) continue;
+    const scheduledAt = Date.parse(record.nextRetryAt || record.scheduledFor || record.queuedAt || "");
+    const due = includeFuture || Number.isNaN(scheduledAt) || scheduledAt <= now;
+    if (!due) continue;
+    const variant = record.item && typeof record.item === "object" ? record.item : {};
+    Object.assign(variant, {
+      id: variantId,
+      platform,
+      status,
+      scheduledFor: record.scheduledFor || variant.scheduledFor || null,
+      queuedAt: record.queuedAt || variant.queuedAt || null,
+      copy: variant.copy || record.copyPreview || ""
+    });
+    record.item = variant;
+    record.variantId = variantId;
+    items.push({
+      campaign: {
+        id: record.campaignId || record.id,
+        title: record.campaignTitle || "Approved queue post",
+        brief: record.copyPreview || variant.copy || "",
+        type: "publish-queue"
+      },
+      variant,
+      queueRecord: record,
+      scheduledAt: Number.isNaN(scheduledAt) ? null : new Date(scheduledAt).toISOString()
+    });
+    seenVariantIds.add(variantId);
   }
   return items;
 }
@@ -21284,15 +21355,27 @@ async function route(req, res) {
       workspaceId: record.workspaceId
     });
     if (session?.user) {
-      await enqueueNotificationOutbox(session.user, {
+      const approvalRoute = `/app?view=approvals&approval=${encodeURIComponent(record.id)}&notice=publish-approval`;
+      const approvalNotice = {
         type: "publish-approval",
-        channel: "in-app",
-        label: `${platformDisplayName(record.platform)} queued for approval`,
-        detail: `${record.campaignTitle || "Campaign content"} is scheduled for ${record.scheduledFor || "review"}.`,
+        label: `Approval needed (step 1 of 2): ${platformDisplayName(record.platform)}`,
+        detail: `${record.campaignTitle || "Campaign content"} needs content approval. After that, use Confirm & queue to make it deliverable for ${record.scheduledFor || "the selected time"}.`,
         actionRequired: true,
-        route: "/app",
-        idempotencyKey: `publish-approval:${record.id}`
+        actionLabel: "Review and approve",
+        route: approvalRoute
+      };
+      await enqueueNotificationOutbox(session.user, {
+        ...approvalNotice,
+        channel: "in-app",
+        idempotencyKey: `publish-approval:${record.id}:in-app`
       }).catch(() => {});
+      if (input.notifyByEmail !== false) {
+        await enqueueNotificationOutbox(session.user, {
+          ...approvalNotice,
+          channel: "email",
+          idempotencyKey: `publish-approval:${record.id}:email`
+        }).catch(() => {});
+      }
     }
     await saveModelForUser(model, session?.user || null);
     return json(res, 200, {
@@ -21303,6 +21386,122 @@ async function route(req, res) {
       scheduledFor: record.scheduledFor,
       mode: "reminder-or-native-publish",
       item: record.item,
+      queueItem: publicPublishQueueRecord(record),
+      publishQueue: publishQueueLedger(model, session)
+    });
+  }
+
+  if (url.pathname === "/api/publish/queue/approval" && req.method === "POST") {
+    const input = await bodyJson(req);
+    const sharedModel = await getModel();
+    const session = await entitledSessionFromRequest(sharedModel, req);
+    if (!session) return appAccessRequiredResponse(res);
+    const model = await modelForSession(session, sharedModel);
+    ensureUserWorkspace(model, session.user);
+    const queueId = String(input.queueId || "").trim().slice(0, 200);
+    if (!queueId) return json(res, 400, { ok: false, error: "A queue item is required for approval." });
+    const record = (model.publishQueue || []).find(item => item.id === queueId && (!hasOwnerMarker(item) || ownedByUser(item, session.user.id)));
+    if (!record) return json(res, 404, { ok: false, error: "That approval item is not available in this workspace." });
+    if (input.approved !== true) return json(res, 400, { ok: false, error: "Set approved:true after reviewing the post content." });
+    const finalConfirmation = input.confirm === "QUEUE_APPROVED_POST";
+    const now = new Date().toISOString();
+    const currentStatus = String(record.status || "queued-review-only").toLowerCase();
+    if (["published", "processing", "submitted"].includes(currentStatus)) {
+      return json(res, 200, {
+        ok: true,
+        message: `This ${platformDisplayName(record.platform)} post has already moved beyond approval.`,
+        queueItem: publicPublishQueueRecord(record),
+        publishQueue: publishQueueLedger(model, session)
+      });
+    }
+    if (currentStatus === "queued" && Number(record.approvalStage || 0) >= 2) {
+      return json(res, 200, {
+        ok: true,
+        status: record.status,
+        approvalStage: Number(record.approvalStage || 0),
+        message: `This ${platformDisplayName(record.platform)} post is already confirmed and queued.`,
+        queueItem: publicPublishQueueRecord(record),
+        publishQueue: publishQueueLedger(model, session)
+      });
+    }
+    if (finalConfirmation) {
+      if (currentStatus !== "approved" || Number(record.approvalStage || 0) < 1) {
+        return json(res, 409, {
+          ok: false,
+          error: "Complete step 1 by approving the content before the final queue confirmation.",
+          requiredStep: "approve-content"
+        });
+      }
+      const scheduledAt = Date.parse(record.scheduledFor || "");
+      record.status = "queued";
+      record.approvalStage = 2;
+      record.approvalConfirmedAt = now;
+      record.queuedAt = now;
+      record.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
+        ? record.scheduledFor
+        : new Date(Date.now() + 2 * 60 * 1000).toISOString();
+      record.item = {
+        ...(record.item && typeof record.item === "object" ? record.item : {}),
+        id: record.variantId || record.item?.id || `queue-variant-${record.id}`,
+        platform: record.platform,
+        status: "queued",
+        copy: record.item?.copy || record.copyPreview || "",
+        scheduledFor: record.scheduledFor,
+        queuedAt: now,
+        approvedAt: record.approvedAt || now,
+        approvalConfirmedAt: now,
+        updatedAt: now
+      };
+      record.variantId = record.item.id;
+      record.updatedAt = now;
+      model.activity = Array.isArray(model.activity) ? model.activity : [];
+      model.activity.unshift({
+        id: uid("actv"),
+        type: "publish-approval",
+        status: "queued",
+        summary: `${platformDisplayName(record.platform)} passed both approval checks and entered the publishing queue.`,
+        createdAt: now,
+        ownerUserId: session.user.id,
+        workspaceId: workspaceIdForUser(session.user)
+      });
+    } else {
+      if (!["queued-review-only", "approved"].includes(currentStatus)) {
+        return json(res, 409, { ok: false, error: `Queue item status ${currentStatus || "unknown"} cannot be approved.` });
+      }
+      record.status = "approved";
+      record.approvalStage = 1;
+      record.approvedAt = record.approvedAt || now;
+      record.updatedAt = now;
+      record.item = {
+        ...(record.item && typeof record.item === "object" ? record.item : {}),
+        id: record.variantId || record.item?.id || `queue-variant-${record.id}`,
+        platform: record.platform,
+        status: "approved",
+        copy: record.item?.copy || record.copyPreview || "",
+        scheduledFor: record.scheduledFor,
+        approvedAt: record.approvedAt,
+        updatedAt: now
+      };
+      record.variantId = record.item.id;
+      await enqueueNotificationOutbox(session.user, {
+        type: "publish-confirmation",
+        channel: "in-app",
+        label: `Final confirmation needed: ${platformDisplayName(record.platform)}`,
+        detail: "Content approval is complete. Use Confirm & queue to complete step 2 and make the post deliverable.",
+        actionRequired: true,
+        actionLabel: "Confirm and queue",
+        route: `/app?view=approvals&approval=${encodeURIComponent(record.id)}&notice=publish-approval`,
+        idempotencyKey: `publish-confirmation:${record.id}:in-app`
+      }).catch(() => {});
+    }
+    await saveModelForUser(model, session.user);
+    return json(res, 200, {
+      ok: true,
+      status: record.status,
+      approvalStage: Number(record.approvalStage || 0),
+      message: finalConfirmation
+        ? `${platformDisplayName(record.platform)} is confirmed and queued for ${record.scheduledFor}.`
+        : `Content approved. Complete step 2 with Confirm & queue.`,
       queueItem: publicPublishQueueRecord(record),
       publishQueue: publishQueueLedger(model, session)
     });

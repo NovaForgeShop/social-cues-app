@@ -163,6 +163,20 @@
       color: #fff;
       outline: 1px solid var(--line);
     }
+    .nav-badge {
+      min-width: 22px;
+      height: 22px;
+      margin-left: auto;
+      padding: 0 7px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--pink);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 900;
+    }
     .nav-more {
       border-top: 1px solid var(--line);
       padding-top: 10px;
@@ -324,6 +338,26 @@
       flex-wrap: wrap;
       justify-content: flex-end;
       margin-top: 13px;
+    }
+    .approval-attention {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin: 0 0 16px;
+      padding: 14px 16px;
+      border: 1px solid rgba(255,45,120,.42);
+      border-left: 4px solid var(--pink);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--pink) 10%, var(--panel-bg));
+    }
+    .approval-attention p { margin: 3px 0 0; }
+    .approval-attention button { flex: 0 0 auto; }
+    .approval-progress { margin-bottom: 14px; }
+    .approval-step { margin: 10px 0 0; }
+    [data-approval-focus="true"] {
+      outline: 2px solid var(--cyan);
+      box-shadow: 0 0 0 5px rgba(40,215,238,.12);
     }
 
     textarea, input, select {
@@ -929,6 +963,7 @@
         <button class="active" data-view="dashboard"><span class="dot"></span><span>Dashboard</span></button>
         <button data-view="onboarding" data-onboarding-nav><span class="dot"></span><span>Get started</span></button>
         <button data-view="studio"><span class="dot"></span><span>Create</span></button>
+        <button data-view="approvals"><span class="dot"></span><span>Approvals</span><span class="nav-badge hidden" id="approvalNavBadge">0</span></button>
         <button data-view="calendar"><span class="dot"></span><span>Plan</span></button>
         <button data-view="growth"><span class="dot"></span><span>Audience</span></button>
         <button data-view="responses"><span class="dot"></span><span>Responses</span></button>
@@ -940,7 +975,6 @@
           <div class="nav nav-sub">
             <button data-view="brandkit"><span class="dot"></span><span>Brand</span></button>
             <button data-view="library"><span class="dot"></span><span>Library</span></button>
-            <button data-view="approvals"><span class="dot"></span><span>Approvals</span></button>
             <button data-view="automation" data-feature-module="automation"><span class="dot"></span><span>Automation</span></button>
             <button data-view="commerce" data-feature-module="commerce"><span class="dot"></span><span>Commerce</span></button>
             <button data-view="ads" data-feature-module="ads"><span class="dot"></span><span>Ads</span></button>
@@ -1019,6 +1053,14 @@
           <div class="metric"><span>Drafts</span><strong id="metricDrafts">0</strong><em>need review</em></div>
           <div class="metric"><span>Approved</span><strong id="metricApproved">0</strong><em>ready</em></div>
           <div class="metric"><span>Published</span><strong id="metricPublished">0</strong><em>sent</em></div>
+        </div>
+
+        <div class="approval-attention hidden" id="approvalAttention" role="status" aria-live="polite">
+          <div>
+            <strong id="approvalAttentionTitle">Posts need your approval</strong>
+            <p id="approvalAttentionDetail">Open Approvals to review the next required action.</p>
+          </div>
+          <button class="primary" data-jump="approvals">Review now</button>
         </div>
 
         <div class="grid-2">
@@ -1635,11 +1677,12 @@
           <div class="row">
             <div>
               <h2>Approval room</h2>
-              <p>Approve only the content you want Social Cues to queue, remind on, or publish through provider-verified accounts.</p>
+              <p>Every live post has two safety checks: approve the content, then confirm it should enter the publishing queue.</p>
             </div>
-            <button class="primary" id="publishApproved">Schedule approved</button>
+            <button class="primary" id="publishApproved" disabled>Confirm &amp; queue approved</button>
           </div>
           <div style="height:14px"></div>
+          <div class="notice approval-progress" id="approvalProgress" aria-live="polite">Checking posts that need your attention.</div>
           <div class="stack" id="approvalList"></div>
         </div>
       </section>
@@ -3840,7 +3883,8 @@
           const synced = await syncModelFromServer(`${mode === "signup" ? "Created account" : "Logged in"} as ${auth.user?.name || name}. This device is remembered.`);
           if (!synced) throw new Error("Signed in, but the private workspace could not be loaded.");
           heartbeatDevice();
-          jump(model.onboarding?.complete ? "dashboard" : "onboarding");
+          if (model.onboarding?.complete) applyWorkspaceDeepLink(currentWorkspaceDeepLink(), "dashboard");
+          else jump("onboarding");
           render();
           return;
         } catch (error) {
@@ -4584,9 +4628,17 @@
       }
     }
 
+    function campaignVariantForId(id) {
+      for (const campaign of model.campaigns || []) {
+        const variant = (campaign.variants || []).find(item => item.id === id);
+        if (variant) return { campaign, variant };
+      }
+      return null;
+    }
+
     function syncCopy(id) {
-      const campaign = activeCampaign();
-      const variant = campaign?.variants.find(v => v.id === id);
+      const item = campaignVariantForId(id);
+      const variant = item?.variant;
       if (!variant) return;
       const textarea = document.querySelector(`[data-copy="${id}"]`);
       if (textarea) variant.copy = textarea.value;
@@ -4596,8 +4648,7 @@
 
     function setVariantSchedule(id, value) {
       syncCopy(id);
-      const campaign = activeCampaign();
-      const variant = campaign?.variants.find(v => v.id === id);
+      const variant = campaignVariantForId(id)?.variant;
       if (!variant) return;
       const scheduled = value ? new Date(value) : null;
       if (scheduled && !Number.isNaN(scheduled.getTime())) variant.scheduledFor = scheduled.toISOString();
@@ -4613,8 +4664,8 @@
 
     function setStatus(id, status) {
       syncCopy(id);
-      const campaign = activeCampaign();
-      const variant = campaign?.variants.find(v => v.id === id);
+      const item = campaignVariantForId(id);
+      const variant = item?.variant;
       if (!variant) return;
       if (variant.platform === "reddit" && ["queued", "submitted", "published"].includes(status)) {
         variant.status = "approved";
@@ -4623,22 +4674,43 @@
         saveModel("Reddit approved for manual Devvit handoff. It was not added to the native publish queue.");
         return;
       }
+      if (status === "queued" && variant.status !== "approved") {
+        showAppResult("Content approval needed", "Complete step 1 by approving this post before the final queue confirmation.", "error");
+        return;
+      }
+      if (status === "queued" && !confirm(`Final check: queue the approved ${platformName(variant.platform)} post for delivery?`)) return;
       if (status === "queued" && variant.platform === "youtube") {
         alert("YouTube reminder: Social Cues prepares uploads private-first. Public automated publishing needs Google OAuth, YouTube upload scope, and Google API compliance/audit clearance.");
       }
       variant.status = status;
+      if (status === "approved") {
+        variant.approvedAt = new Date().toISOString();
+        delete variant.approvalConfirmedAt;
+      }
+      if (status === "draft") {
+        delete variant.approvedAt;
+        delete variant.approvalConfirmedAt;
+        delete variant.queuedAt;
+      }
       if (status === "published") {
         variant.publishedAt = new Date().toISOString();
         delete variant.mockViews;
       }
       if (status === "queued") {
         variant.queuedAt = new Date().toISOString();
+        variant.approvalConfirmedAt = variant.queuedAt;
         const scheduledAt = Date.parse(variant.scheduledFor || "");
         variant.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
           ? variant.scheduledFor
-          : nextScheduleTime(variant);
+          : new Date(Date.now() + 2 * 60 * 1000).toISOString();
       }
       saveModel(`${platformName(variant.platform)} marked ${status}.`);
+      if (status === "approved") {
+        showAppResult("Content approved - step 1 complete", `Use Confirm & queue for ${platformName(variant.platform)} to complete step 2 and make it deliverable.`, "success");
+      }
+      if (status === "queued") {
+        showAppResult("Post confirmed and queued", `${platformName(variant.platform)} is scheduled for ${formatDateTime(variant.scheduledFor)}.`, "success");
+      }
     }
 
     function nextScheduleTime() {
@@ -4649,36 +4721,59 @@
 
     function strengthen(id) {
       syncCopy(id);
-      const campaign = activeCampaign();
-      const variant = campaign?.variants.find(v => v.id === id);
+      const variant = campaignVariantForId(id)?.variant;
       if (!variant) return;
       variant.copy += "\n\nRevision note: lead with the clearest outcome, then make the CTA more specific.";
       variant.status = "needs revision";
       saveModel(`${platformName(variant.platform)} variant strengthened.`);
     }
 
-    function publishApproved() {
-      const campaign = activeCampaign();
+    async function refreshPublishQueueState() {
+      if (!SERVER_MODE) return null;
+      const response = await authedFetch("/api/publish/queue");
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.ok !== false) {
+        metaState.publishQueue = data;
+        renderApprovalIndicators();
+        renderCalendar();
+        return data;
+      }
+      return null;
+    }
+
+    async function publishApproved() {
+      const approvedCampaignVariants = (model.campaigns || []).flatMap(campaign => (campaign.variants || [])
+        .filter(variant => variant.status === "approved" && variant.platform !== "reddit"));
+      const approvedQuickVariants = (model.quickPosts || []).flatMap(batch => (batch.variants || [])
+        .filter(variant => variant.status === "approved"));
+      const approvalCount = approvedCampaignVariants.length + approvedQuickVariants.length;
+      const redditHandoffs = (model.campaigns || []).flatMap(campaign => campaign.variants || [])
+        .filter(variant => variant.status === "approved" && variant.platform === "reddit").length;
+      if (!approvalCount) {
+        showAppResult("Nothing awaiting final confirmation", redditHandoffs
+          ? `${redditHandoffs} Reddit handoff${redditHandoffs === 1 ? " is" : "s are"} approved for manual Devvit use.`
+          : "Approve content first. Confirm & queue becomes available for step 2.", "info");
+        return;
+      }
+      if (!confirm(`Final check: queue ${approvalCount} approved post${approvalCount === 1 ? "" : "s"} for delivery?`)) return;
       let count = 0;
-      let redditHandoffs = 0;
-      (campaign?.variants || []).forEach(v => {
-        syncCopy(v.id);
-        if (v.status === "approved") {
-          if (v.platform === "reddit") {
-            redditHandoffs++;
-            return;
-          }
-          v.status = "queued";
-          v.queuedAt = new Date().toISOString();
-          v.scheduledFor = nextScheduleTime(v);
-          count++;
-        }
+      approvedCampaignVariants.forEach(variant => {
+        syncCopy(variant.id);
+        variant.status = "queued";
+        variant.queuedAt = new Date().toISOString();
+        variant.approvalConfirmedAt = variant.queuedAt;
+        const scheduledAt = Date.parse(variant.scheduledFor || "");
+        variant.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
+          ? variant.scheduledFor
+          : new Date(Date.now() + 2 * 60 * 1000).toISOString();
+        count++;
       });
       (model.quickPosts || []).forEach(batch => {
         (batch.variants || []).forEach(variant => {
           if (variant.status !== "approved") return;
           variant.status = "queued";
           variant.queuedAt = new Date().toISOString();
+          variant.approvalConfirmedAt = variant.queuedAt;
           const scheduledAt = Date.parse(variant.scheduledFor || "");
           variant.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
             ? variant.scheduledFor
@@ -4689,7 +4784,9 @@
         });
       });
       const handoffNote = redditHandoffs ? ` ${redditHandoffs} Reddit variant${redditHandoffs === 1 ? " remains" : "s remain"} approved for manual Devvit handoff.` : "";
-      saveModel(count ? `Scheduled ${count} approved variants in Social Cues Queue.${handoffNote}` : redditHandoffs ? handoffNote.trim() : "No approved variants to schedule.");
+      await saveModel(`Confirmed and queued ${count} approved post${count === 1 ? "" : "s"}.${handoffNote}`);
+      await refreshPublishQueueState().catch(() => null);
+      showAppResult("Final confirmation complete", `${count} approved post${count === 1 ? " is" : "s are"} now in the publishing queue.${handoffNote}`, "success");
     }
 
     function addProof() {
@@ -5689,8 +5786,9 @@
     }
 
     function attachLaunchAsset(id) {
-      const campaign = activeCampaign();
-      const variant = campaign?.variants.find(v => v.id === id);
+      const item = campaignVariantForId(id);
+      const campaign = item?.campaign;
+      const variant = item?.variant;
       if (!variant) return;
       const asset = launchAssetForPlatform(variant.platform);
       variant.videoUrl = asset.publicUrl;
@@ -5700,8 +5798,9 @@
     }
 
     function generateMedia(id, provider = "Social Cues") {
-      const campaign = activeCampaign();
-      const variant = campaign?.variants.find(v => v.id === id);
+      const item = campaignVariantForId(id);
+      const campaign = item?.campaign;
+      const variant = item?.variant;
       if (!variant) return;
       variant.media = {
         type: "generated",
@@ -5717,8 +5816,9 @@
     async function attachMedia(id, input) {
       const file = input.files?.[0];
       if (!file) return;
-      const campaign = activeCampaign();
-      const variant = campaign?.variants.find(v => v.id === id);
+      const item = campaignVariantForId(id);
+      const campaign = item?.campaign;
+      const variant = item?.variant;
       if (!variant) return;
       try {
         let asset = null;
@@ -5750,8 +5850,7 @@
     }
 
     function attachHostedVideo(id) {
-      const campaign = activeCampaign();
-      const variant = campaign?.variants.find(v => v.id === id);
+      const variant = campaignVariantForId(id)?.variant;
       if (!variant) return;
       const url = prompt("Paste the public HTTPS video URL for this platform:");
       if (!url) return;
@@ -6612,8 +6711,9 @@
     }
 
     async function planMediaEdit(id) {
-      const campaign = activeCampaign();
-      const variant = campaign?.variants.find(v => v.id === id);
+      const item = campaignVariantForId(id);
+      const campaign = item?.campaign;
+      const variant = item?.variant;
       if (!variant) return;
       const sourceName = variant.media?.name || "raw client media";
       try {
@@ -7605,12 +7705,22 @@
       </div>`;
     }
 
-    function variantCard(v) {
+    function approvalStepCopy(status = "draft", platform = "") {
+      if (platform === "reddit" && status === "approved") return "Approved for manual Reddit / Devvit handoff.";
+      if (["draft", "needs revision", "queued-review-only"].includes(status)) return "Step 1 of 2: review the copy and approve the content.";
+      if (status === "approved") return "Step 1 complete. Step 2 of 2: confirm this post should enter the publishing queue.";
+      if (["queued", "scheduled"].includes(status)) return "Both approval checks are complete. This post is in the publishing queue.";
+      if (status === "published") return "Published. Both approval checks and provider delivery are complete.";
+      if (["blocked", "failed"].includes(status)) return "Delivery needs attention before this post can be tried again.";
+      return "Review the current status before moving this post forward.";
+    }
+
+    function variantCard(v, sourceCampaign = activeCampaign()) {
       const p = platformById(v.platform);
       const id = escapeHtml(v.id);
       const accent = escapeHtml(p?.accent || "#ff2d78");
       const flags = v.flags?.length ? `<div class="tags">${v.flags.map(flag => `<span class="tag">${escapeHtml(flag)}</span>`).join("")}</div>` : "";
-      const campaign = activeCampaign();
+      const campaign = sourceCampaign || activeCampaign();
       const destination = v.destination?.url ? v.destination : campaignDestinationForPlatform(p || { id: v.platform }, campaign || {});
       const destinationHtml = destination?.url
         ? `<div class="notice"><strong>${escapeHtml(destination.cta || "Destination")}</strong><br>${destination.placement === "profile" ? "Profile link" : "Post link"}: <a href="${escapeHtml(destination.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(destination.url)}</a></div>`
@@ -7633,7 +7743,14 @@
       const videoTags = (v.videoHashtags || []).length ? `<div class="tags">${v.videoHashtags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>` : "";
       const redditHandoff = v.platform === "reddit";
       const displayStatus = redditHandoff && ["approved", "queued", "submitted", "published"].includes(v.status) ? "manual handoff" : v.status;
-      return `<article class="variant" style="--accent:${accent}">
+      const approvalActions = redditHandoff
+        ? `<button data-variant-action="set-status" data-variant-id="${id}" data-status="approved">Approve handoff</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button><button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Draft</button><span class="tag">Manual / Devvit only</span>`
+        : v.status === "approved"
+          ? `<button class="primary" data-variant-action="set-status" data-variant-id="${id}" data-status="queued">Confirm &amp; queue (2 of 2)</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button><button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Return to draft</button>`
+          : ["queued", "scheduled", "processing", "submitted", "published"].includes(String(v.status || "").toLowerCase())
+            ? `<button disabled>Approval complete</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button>`
+            : `<button class="primary" data-variant-action="set-status" data-variant-id="${id}" data-status="approved">Approve content (1 of 2)</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button><button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Draft</button>`;
+      return `<article class="variant" data-approval-variant="${id}" style="--accent:${accent}">
         <div class="variant-head">
           <div>
             <h3>${escapeHtml(p?.name || "Platform")}</h3>
@@ -7649,15 +7766,13 @@
         ${editHtml}
         ${flags}
         ${videoTags}
+        <div class="notice approval-step"><strong>${escapeHtml(approvalStepCopy(String(v.status || "draft").toLowerCase(), v.platform))}</strong></div>
         <div class="tags">
           ${v.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
           <span class="tag">${escapeHtml(disclosureNote(activeCampaign()))}</span>
         </div>
         <div class="variant-tools">
-          <button data-variant-action="set-status" data-variant-id="${id}" data-status="approved">${redditHandoff ? "Approve handoff" : "Approve"}</button>
-          <button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button>
-          <button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Draft</button>
-          ${redditHandoff ? `<span class="tag">Manual / Devvit only</span>` : `<button data-variant-action="set-status" data-variant-id="${id}" data-status="queued">Queue</button>`}
+          ${approvalActions}
         </div>
         ${redditHandoff ? "" : `<label class="field-label">Publish time (your local timezone)<input type="datetime-local" data-variant-schedule="${id}" value="${escapeHtml(formatDateTimeInput(v.scheduledFor))}"></label>`}
         <div class="variant-tools">
@@ -7675,13 +7790,86 @@
 
     function renderVariants() {
       const campaign = activeCampaign();
-      const html = campaign?.variants.length ? campaign.variants.map(variantCard).join("") : `<div class="empty">Generate variants for the active campaign.</div>`;
+      const html = campaign?.variants.length ? campaign.variants.map(variant => variantCard(variant, campaign)).join("") : `<div class="empty">Generate variants for the active campaign.</div>`;
       $("#variantList").innerHTML = html;
       const quickApprovals = (model.quickPosts || []).flatMap(batch => (batch.variants || [])
         .filter(variant => ["draft", "approved", "queued", "failed", "blocked"].includes(String(variant.status || "").toLowerCase()))
         .map(variant => quickPostVariantCard(batch, variant)));
-      const campaignApprovals = campaign?.variants.length ? campaign.variants.map(variantCard) : [];
-      $("#approvalList").innerHTML = [...quickApprovals, ...campaignApprovals].join("") || `<div class="empty">No variants to approve yet.</div>`;
+      const campaignApprovals = (model.campaigns || []).flatMap(item => (item.variants || [])
+        .filter(variant => ["draft", "needs revision", "approved", "queued", "failed", "blocked"].includes(String(variant.status || "").toLowerCase()))
+        .map(variant => variantCard(variant, item)));
+      const queueApprovals = standaloneQueueApprovalRows().map(queueApprovalCard);
+      $("#approvalList").innerHTML = [...queueApprovals, ...quickApprovals, ...campaignApprovals].join("") || `<div class="empty">Nothing needs approval. New drafts and emailed approval requests will appear here.</div>`;
+      renderApprovalIndicators();
+    }
+
+    function standaloneQueueApprovalRows() {
+      const localVariantIds = new Set([
+        ...(model.campaigns || []).flatMap(campaign => (campaign.variants || []).map(variant => variant.id)),
+        ...(model.quickPosts || []).flatMap(batch => (batch.variants || []).map(variant => variant.id))
+      ].filter(Boolean));
+      return (metaState.publishQueue?.rows || []).filter(row =>
+        ["queued-review-only", "approved"].includes(String(row.status || "").toLowerCase())
+        && (!row.variantId || !localVariantIds.has(row.variantId))
+      );
+    }
+
+    function queueApprovalCard(record = {}) {
+      const platform = platformById(record.platform) || { name: record.platform || "Provider", accent: "#28d7ee" };
+      const status = String(record.status || "queued-review-only").toLowerCase();
+      const firstStep = status === "queued-review-only";
+      const buttonLabel = firstStep ? "Approve content (1 of 2)" : "Confirm & queue (2 of 2)";
+      return `<article class="variant" data-approval-queue="${escapeHtml(record.id)}" style="--accent:${escapeHtml(platform.accent || "#28d7ee")}">
+        <div class="variant-head">
+          <div><h3>${escapeHtml(platform.name)}${record.campaignTitle ? ` - ${escapeHtml(record.campaignTitle)}` : ""}</h3><p>${escapeHtml(record.copyPreview || "Queued content awaiting review")}</p></div>
+          <span class="pill ${firstStep ? "draft" : "approved"}">${firstStep ? "approval needed" : "final confirmation"}</span>
+        </div>
+        <div class="notice approval-step"><strong>${escapeHtml(approvalStepCopy(status, record.platform))}</strong></div>
+        <div class="tags">${record.scheduledFor ? `<span class="tag">target ${escapeHtml(formatDateTime(record.scheduledFor))}</span>` : ""}<span class="tag">email-linked queue item</span></div>
+        <div class="variant-tools"><button class="primary" data-queue-approval="${escapeHtml(record.id)}" data-queue-confirm="${firstStep ? "false" : "true"}">${buttonLabel}</button></div>
+      </article>`;
+    }
+
+    function approvalSummary() {
+      const campaignVariants = (model.campaigns || []).flatMap(campaign => campaign.variants || []);
+      const quickVariants = (model.quickPosts || []).flatMap(batch => batch.variants || []);
+      const queueRows = standaloneQueueApprovalRows();
+      const allLocal = [...campaignVariants, ...quickVariants];
+      return {
+        review: allLocal.filter(item => ["draft", "needs revision"].includes(String(item.status || "").toLowerCase())).length
+          + queueRows.filter(item => String(item.status || "").toLowerCase() === "queued-review-only").length,
+        confirm: allLocal.filter(item => item.status === "approved" && item.platform !== "reddit").length
+          + queueRows.filter(item => String(item.status || "").toLowerCase() === "approved").length,
+        manual: campaignVariants.filter(item => item.status === "approved" && item.platform === "reddit").length,
+        queued: allLocal.filter(item => ["queued", "scheduled", "processing", "submitted"].includes(String(item.status || "").toLowerCase())).length
+      };
+    }
+
+    function renderApprovalIndicators() {
+      const summary = approvalSummary();
+      const pending = summary.review + summary.confirm;
+      const badge = $("#approvalNavBadge");
+      if (badge) {
+        badge.textContent = String(pending);
+        badge.classList.toggle("hidden", !pending);
+      }
+      const mobileOption = $('#mobileViewSelect option[value="approvals"]');
+      if (mobileOption) mobileOption.textContent = pending ? `Approvals (${pending})` : "Approvals";
+      const attention = $("#approvalAttention");
+      if (attention) attention.classList.toggle("hidden", !pending);
+      if (pending) {
+        $("#approvalAttentionTitle").textContent = `${pending} post${pending === 1 ? " needs" : "s need"} your approval`;
+        $("#approvalAttentionDetail").textContent = `${summary.review} need content review; ${summary.confirm} need the final Confirm & queue check.`;
+      }
+      const progress = $("#approvalProgress");
+      if (progress) progress.innerHTML = pending
+        ? `<strong>${summary.review} at step 1; ${summary.confirm} at step 2.</strong> Approve the content first. Then Confirm &amp; queue to make the post deliverable.${summary.manual ? ` ${summary.manual} Reddit handoff${summary.manual === 1 ? " is" : "s are"} ready for manual Devvit use.` : ""}`
+        : `<strong>Approval room clear.</strong> There are no posts waiting for a decision.`;
+      const confirmAll = $("#publishApproved");
+      if (confirmAll) {
+        confirmAll.disabled = summary.confirm === 0;
+        confirmAll.textContent = summary.confirm ? `Confirm & queue approved (${summary.confirm})` : "Confirm & queue approved";
+      }
     }
 
     function quickPostBatchForVariant(variantId = "") {
@@ -7705,13 +7893,24 @@
       if (!item) return;
       syncQuickPostCopy(variantId);
       if (status === "queued" && item.variant.status !== "approved") {
-        showAppResult("Approval required", "Approve this one-shot draft before queueing it.", "error");
+        showAppResult("Content approval needed", "Complete step 1 by approving this one-shot post before the final queue confirmation.", "error");
         return;
       }
+      if (status === "queued" && !confirm(`Final check: queue the approved ${platformName(item.variant.platform)} post for delivery?`)) return;
       item.variant.status = status;
       item.variant.updatedAt = new Date().toISOString();
+      if (status === "approved") {
+        item.variant.approvedAt = item.variant.updatedAt;
+        delete item.variant.approvalConfirmedAt;
+      }
+      if (status === "draft") {
+        delete item.variant.approvedAt;
+        delete item.variant.approvalConfirmedAt;
+        delete item.variant.queuedAt;
+      }
       if (status === "queued") {
         item.variant.queuedAt = item.variant.updatedAt;
+        item.variant.approvalConfirmedAt = item.variant.updatedAt;
         const scheduledAt = Date.parse(item.variant.scheduledFor || "");
         item.variant.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
           ? item.variant.scheduledFor
@@ -7719,6 +7918,8 @@
       }
       item.batch.updatedAt = item.variant.updatedAt;
       saveModel(`${platformName(item.variant.platform)} quick post marked ${status}.`);
+      if (status === "approved") showAppResult("Content approved - step 1 complete", `Use Confirm & queue for ${platformName(item.variant.platform)} to complete step 2.`, "success");
+      if (status === "queued") showAppResult("Post confirmed and queued", `${platformName(item.variant.platform)} is scheduled for ${formatDateTime(item.variant.scheduledFor)}.`, "success");
     }
 
     function setQuickPostSchedule(variantId, value) {
@@ -7734,14 +7935,21 @@
         : `${platformName(item.variant.platform)} quick post schedule cleared.`);
     }
 
-    function approveAndQueueQuickPost(batchId = "") {
+    async function approveAndQueueQuickPost(batchId = "") {
       const batch = (model.quickPosts || []).find(item => item.id === batchId);
       if (!batch) return;
+      const approved = (batch.variants || []).filter(variant => variant.status === "approved");
+      if (!approved.length) {
+        showAppResult("Content approval needed", "Approve at least one post in this batch before the final queue confirmation.", "error");
+        return;
+      }
+      if (!confirm(`Final check: queue ${approved.length} approved post${approved.length === 1 ? "" : "s"} from this batch?`)) return;
       const now = new Date().toISOString();
-      (batch.variants || []).forEach(variant => {
+      approved.forEach(variant => {
         syncQuickPostCopy(variant.id);
         variant.status = "queued";
         variant.queuedAt = now;
+        variant.approvalConfirmedAt = now;
         const scheduledAt = Date.parse(variant.scheduledFor || "");
         variant.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
           ? variant.scheduledFor
@@ -7749,7 +7957,9 @@
         variant.updatedAt = now;
       });
       batch.updatedAt = now;
-      saveModel(`Approved and queued ${batch.variants.length} one-shot post${batch.variants.length === 1 ? "" : "s"}.`);
+      await saveModel(`Confirmed and queued ${approved.length} one-shot post${approved.length === 1 ? "" : "s"}.`);
+      await refreshPublishQueueState().catch(() => null);
+      showAppResult("Final confirmation complete", `${approved.length} one-shot post${approved.length === 1 ? " is" : "s are"} in the publishing queue.`, "success");
     }
 
     function removeQuickPost(batchId = "") {
@@ -7765,7 +7975,13 @@
       const mediaPreview = media.url
         ? `<div class="media-preview">${media.type === "video" ? `<video src="${escapeHtml(media.url)}" controls preload="metadata"></video>` : `<img src="${escapeHtml(media.url)}" alt="${escapeHtml(media.name || "Post media")}">`}<div class="media-copy">${escapeHtml(media.name || "Media")}<br>${escapeHtml(variant.contentFormat || media.type || "post")}</div></div>`
         : `<div class="notice">${escapeHtml(media.name || "Private media")}</div>`;
-      return `<article class="variant" style="--accent:${escapeHtml(platform.accent || "#28d7ee")}">
+      const status = String(variant.status || "draft").toLowerCase();
+      const approvalActions = status === "approved"
+        ? `<button class="primary" data-quick-action="queue" data-quick-variant="${escapeHtml(variant.id)}">Confirm &amp; queue (2 of 2)</button><button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Return to draft</button>`
+        : ["queued", "scheduled", "processing", "submitted", "published"].includes(status)
+          ? `<button disabled>Approval complete</button>`
+          : `<button class="primary" data-quick-action="approve" data-quick-variant="${escapeHtml(variant.id)}">Approve content (1 of 2)</button><button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Draft</button>`;
+      return `<article class="variant" data-approval-variant="${escapeHtml(variant.id)}" style="--accent:${escapeHtml(platform.accent || "#28d7ee")}">
         <div class="variant-head">
           <div>
             <h3>${escapeHtml(platform.name)}: ${escapeHtml(variant.postingIdentity || "selected account")}</h3>
@@ -7776,11 +7992,10 @@
         <textarea data-quick-copy="${escapeHtml(variant.id)}">${escapeHtml(variant.copy || "")}</textarea>
         ${mediaPreview}
         ${variant.destinationUrl ? `<div class="notice"><strong>Primary link</strong><br><a href="${escapeHtml(variant.destinationUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(variant.destinationUrl)}</a></div>` : ""}
+        <div class="notice approval-step"><strong>${escapeHtml(approvalStepCopy(status, variant.platform))}</strong></div>
         <label class="field-label">Publish time (your local timezone)<input type="datetime-local" data-quick-schedule="${escapeHtml(variant.id)}" value="${escapeHtml(formatDateTimeInput(variant.scheduledFor))}"></label>
         <div class="variant-tools">
-          <button data-quick-action="approve" data-quick-variant="${escapeHtml(variant.id)}">Approve</button>
-          <button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Draft</button>
-          <button data-quick-action="queue" data-quick-variant="${escapeHtml(variant.id)}" ${variant.status === "approved" ? "" : "disabled"}>Queue</button>
+          ${approvalActions}
         </div>
       </article>`;
     }
@@ -7795,7 +8010,7 @@
           <div class="row">
             <div><h3>${escapeHtml(batch.title || "Quick post")}</h3><p>${escapeHtml(batch.mode === "everywhere" ? "Every compatible connected account" : "One connected account")} - ${escapeHtml(batch.mediaKind || "media")}</p></div>
             <div class="actions">
-              <button class="primary" data-quick-batch-action="queue-all" data-quick-batch-id="${escapeHtml(batch.id)}">Approve &amp; queue all</button>
+              <button class="primary" data-quick-batch-action="queue-all" data-quick-batch-id="${escapeHtml(batch.id)}" ${(batch.variants || []).some(variant => variant.status === "approved") ? "" : "disabled"}>Confirm &amp; queue approved (${(batch.variants || []).filter(variant => variant.status === "approved").length})</button>
               <button class="danger" data-quick-batch-action="remove" data-quick-batch-id="${escapeHtml(batch.id)}">Remove</button>
             </div>
           </div>
@@ -13027,6 +13242,45 @@
       };
     }
 
+    function currentWorkspaceDeepLink() {
+      let params = new URLSearchParams(location.search);
+      if (!params.get("view")) {
+        const savedReturn = sessionStorage.getItem("sc_app_return_to") || "";
+        try {
+          const savedUrl = new URL(savedReturn, location.origin);
+          if (savedUrl.origin === location.origin && savedUrl.pathname === "/app") params = savedUrl.searchParams;
+        } catch {}
+      }
+      return {
+        view: params.get("view") || "",
+        approvalId: params.get("approval") || "",
+        notice: params.get("notice") || ""
+      };
+    }
+
+    function applyWorkspaceDeepLink(link = currentWorkspaceDeepLink(), fallbackView = "") {
+      const requestedView = String(link?.view || "").trim();
+      const validView = requestedView && document.getElementById(requestedView) ? requestedView : fallbackView;
+      if (validView) jump(validView);
+      if (validView || link?.approvalId || link?.notice) sessionStorage.removeItem("sc_app_return_to");
+      if (validView === "approvals" || link?.approvalId || link?.notice === "publish-approval") {
+        jump("approvals");
+        const approvalId = String(link?.approvalId || "").trim();
+        requestAnimationFrame(() => {
+          const target = approvalId ? [...document.querySelectorAll("[data-approval-variant], [data-approval-queue]")]
+            .find(element => element.dataset.approvalVariant === approvalId || element.dataset.approvalQueue === approvalId) : null;
+          if (target) {
+            target.dataset.approvalFocus = "true";
+            target.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        });
+        const summary = approvalSummary();
+        showAppResult("Approval action ready", summary.confirm
+          ? `${summary.confirm} approved post${summary.confirm === 1 ? " needs" : "s need"} the final Confirm & queue check.`
+          : `${summary.review} post${summary.review === 1 ? " needs" : "s need"} content approval before queueing.`, "info");
+      }
+    }
+
     function stripConsumedAuthCredentials() {
       if (!history.replaceState || !location.search) return false;
       const url = new URL(location.href);
@@ -13201,6 +13455,7 @@
       $$(".section").forEach(s => s.classList.toggle("active", s.id === view));
       if ($("#mobileViewSelect")) $("#mobileViewSelect").value = view;
       if (view === "growth") loadOpenaiUsage();
+      if (view === "approvals" && SERVER_MODE) refreshPublishQueueState().catch(() => null);
       if (view === "responses" && !customerSurfaceState.manychatCatalog) renderManychatCrm();
       if (view === "ads" && !customerSurfaceState.adDrafts.length) loadAdDrafts();
       if (view === "devices" && !customerSurfaceState.workspaceAccess) loadWorkspaceAccess();
@@ -13210,6 +13465,32 @@
     function navigateTo(view) {
       jump(view);
       window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    async function updateStandaloneQueueApproval(queueId = "", finalConfirmation = false) {
+      if (!queueId) return;
+      if (finalConfirmation && !confirm("Final check: place this approved post into the live publishing queue?")) return;
+      try {
+        const response = await authedFetch("/api/publish/queue/approval", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            queueId,
+            approved: true,
+            confirm: finalConfirmation ? "QUEUE_APPROVED_POST" : ""
+          })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false) throw new Error(data.error || "The approval could not be saved.");
+        if (data.publishQueue) metaState.publishQueue = data.publishQueue;
+        render();
+        applyWorkspaceDeepLink({ view: "approvals", approvalId: queueId, notice: "publish-approval" });
+        showAppResult(finalConfirmation ? "Post confirmed and queued" : "Content approved - step 1 complete", data.message || (finalConfirmation
+          ? "The post is now deliverable at its scheduled time."
+          : "Complete step 2 with Confirm & queue."), "success");
+      } catch (error) {
+        showAppResult("Approval could not be saved", error.message, "error");
+      }
     }
 
     function render() {
@@ -13583,6 +13864,11 @@
         if (quickBatchButton.dataset.quickBatchAction === "remove") removeQuickPost(quickBatchButton.dataset.quickBatchId);
         return;
       }
+      const queueApprovalButton = event.target.closest("[data-queue-approval]");
+      if (queueApprovalButton) {
+        updateStandaloneQueueApproval(queueApprovalButton.dataset.queueApproval, queueApprovalButton.dataset.queueConfirm === "true");
+        return;
+      }
       const quickVariantButton = event.target.closest("[data-quick-action][data-quick-variant]");
       if (quickVariantButton) {
         const status = { approve: "approved", draft: "draft", queue: "queued" }[quickVariantButton.dataset.quickAction];
@@ -13656,6 +13942,7 @@
     async function bootApp() {
       const oauthReturn = currentOAuthReturn();
       stripConsumedAuthCredentials();
+      const workspaceDeepLink = currentWorkspaceDeepLink();
       const restored = await restoreSession();
       const synced = SERVER_MODE && restored
         ? await syncModelFromServer("Synced account changes from server.")
@@ -13668,6 +13955,7 @@
       }
       await refreshMetaState();
       if (oauthReturn.provider) jump("accounts");
+      else if (model.currentUser?.id && model.onboarding?.complete) applyWorkspaceDeepLink(workspaceDeepLink);
       setInterval(() => heartbeatDevice(), 60_000);
     }
 

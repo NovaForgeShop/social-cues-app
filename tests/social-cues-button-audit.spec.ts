@@ -113,11 +113,62 @@ test('local workstation navigation and safe buttons respond', async ({ page }) =
   await expect(focusedAccountGrid.locator('[data-account-lane="google_growth"]')).toHaveCount(0);
 
   await page.locator('[data-view="approvals"]').click();
-  await page.locator('#approvalList [data-variant-action="set-status"][data-status="approved"]').first().click();
+  const contentApproval = page.locator('#approvalList [data-variant-action="set-status"][data-status="approved"]');
+  const approvalCount = await contentApproval.count();
+  expect(approvalCount).toBeGreaterThan(0);
+  await contentApproval.first().click();
+  await expect(page.locator('#approvalProgress')).toContainText(/step 2|Confirm & queue/i);
+  await expect(page.locator('#approvalNavBadge')).toBeVisible();
+  await expect(page.locator('#publishApproved')).toBeEnabled();
+  page.once('dialog', dialog => dialog.accept());
   await page.locator('#publishApproved').click();
+  await expect(page.locator('#appResult')).toContainText(/confirmation complete|publishing queue/i);
   await page.locator('[data-view="calendar"]').click();
   await expect(page.locator('#calendarList')).toContainText(/queued|published|approved/i);
   await expect(page.locator('#calendarSummary')).toContainText(/upcoming|attention|published/i);
+
+  const emailLinkedQueue = await page.evaluate(async () => {
+    const response = await fetch('/api/publish/social-cues/queue', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        variant: {
+          id: `email-linked-${Date.now()}`,
+          platform: 'facebook',
+          copy: 'Email-linked approval journey',
+          status: 'draft'
+        },
+        notifyByEmail: false
+      })
+    });
+    return response.json();
+  });
+  expect(emailLinkedQueue.ok).toBeTruthy();
+  const emailLinkedQueueId = emailLinkedQueue.queueItem.id;
+  await page.goto('/app');
+  await expect(page.locator('#dashboard')).toBeVisible();
+  await expect(page.locator('#approvalAttention')).toBeVisible();
+  await expect(page.locator('#approvalAttentionDetail')).toContainText(/content review/i);
+  await page.goto(`/app?view=approvals&approval=${encodeURIComponent(emailLinkedQueueId)}&notice=publish-approval`);
+  await expect(page.locator('#approvals')).toBeVisible();
+  await expect(page.locator('#approvalProgress')).toContainText(/step 1|content approval/i);
+  await expect(page.locator('#approvalNavBadge')).toBeVisible();
+  const emailLinkedCard = page.locator(`[data-approval-queue="${emailLinkedQueueId}"]`);
+  await expect(emailLinkedCard).toBeVisible();
+  await expect(emailLinkedCard).toHaveAttribute('data-approval-focus', 'true');
+  await emailLinkedCard.locator('[data-queue-confirm="false"]').click();
+  await expect(emailLinkedCard.locator('[data-queue-confirm="true"]')).toContainText(/Confirm & queue/i);
+  page.once('dialog', dialog => dialog.accept());
+  await emailLinkedCard.locator('[data-queue-confirm="true"]').click();
+  await expect(page.locator('#appResult')).toContainText(/confirmed and queued|deliverable/i);
+  const confirmedQueue = await page.evaluate(async queueId => {
+    const response = await fetch('/api/publish/queue', { credentials: 'same-origin', cache: 'no-store' });
+    const body = await response.json();
+    return body.rows.find((row: { id?: string }) => row.id === queueId);
+  }, emailLinkedQueueId);
+  expect(confirmedQueue?.status).toBe('queued');
+  expect(confirmedQueue?.approvalStage).toBe(2);
 
   for (const route of ['/api/auth/readiness', '/api/integrations/readiness', '/api/oauth/tiktok/status', '/api/oauth/youtube/status']) {
     const response = await page.evaluate(async path => {
