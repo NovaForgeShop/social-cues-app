@@ -3244,6 +3244,8 @@
       selectedLibrarySource: "",
       selectedGrowthSource: "",
       selectedCommerceSource: "",
+      sourceOutcomes: {},
+      sourceRecords: {},
       manychatCatalog: null,
       manychatUsage: null,
       workspaceAccess: null,
@@ -3260,33 +3262,62 @@
       library: [
         { id: "facebook-pages", name: "Facebook Pages", provider: "Meta", route: "/api/meta/pages", readinessRoute: "/api/meta/assets", connectPlatform: "facebook", detail: "Managed Pages available to the signed-in Meta identity." },
         { id: "instagram-assets", name: "Instagram professional assets", provider: "Meta", route: "/api/meta/instagram/accounts", readinessRoute: "/api/meta/assets", connectPlatform: "instagram", detail: "Linked Instagram professional accounts returned through Meta." },
+        { id: "facebook-insights", name: "Facebook Page insights", provider: "Meta", route: "/api/meta/insights/facebook", readinessRoute: "/api/meta/assets", connectPlatform: "facebook", detail: "Page performance signals returned under the current Meta permissions." },
+        { id: "instagram-insights", name: "Instagram insights", provider: "Meta", route: "/api/meta/insights/instagram", readinessRoute: "/api/meta/assets", connectPlatform: "instagram", detail: "Professional-account performance signals returned under the current Meta permissions." },
         { id: "meta-comments", name: "Meta comments", provider: "Meta", route: "/api/meta/comments", readinessRoute: "/api/meta/comments/readiness", connectPlatform: "facebook", detail: "Facebook and Instagram comment threads available for response work." },
         { id: "meta-messages", name: "Meta messages", provider: "Meta", route: "/api/meta/messages", readinessRoute: "/api/meta/comments/readiness", connectPlatform: "facebook", detail: "Inbox-style Meta message surfaces when messaging permissions are approved." },
         { id: "threads-profile", name: "Threads profile", provider: "Threads", route: "/api/threads/account", readinessRoute: "/api/oauth/threads/status", connectPlatform: "threads", detail: "Threads identity, handle, and profile readiness." },
-        { id: "youtube-playlists", name: "YouTube playlists", provider: "YouTube", route: "/api/youtube/playlists", detail: "Playlists owned by the selected channel." },
-        { id: "youtube-activity", name: "YouTube activity", provider: "YouTube", route: "/api/youtube/activity", detail: "Recent channel activity and uploads." },
+        { id: "threads-reactions", name: "Threads reactions and replies", provider: "Threads", route: "/api/threads/reactions", readinessRoute: "/api/oauth/threads/status", connectPlatform: "threads", detail: "Conversation, mention, and reply signals available to the connected Threads profile." },
+        { id: "threads-insights", name: "Threads insights", provider: "Threads", route: "/api/threads/insights", readinessRoute: "/api/oauth/threads/status", connectPlatform: "threads", detail: "Profile and content performance returned by the Threads API." },
+        { id: "threads-search", name: "Threads discovery", provider: "Threads", route: "/api/threads/search", readinessRoute: "/api/oauth/threads/status", connectPlatform: "threads", actionLabel: "Search", queryParam: "q", queryLabel: "Enter a Threads keyword or topic", queryDefault: "Social Cues", detail: "Keyword and profile discovery available under the connected Threads scopes." },
+        { id: "youtube-channel", name: "YouTube channel", provider: "YouTube", route: "/api/youtube/channel", readinessRoute: "/api/youtube/readiness", connectPlatform: "youtube", detail: "The selected YouTube channel identity and public channel data." },
+        { id: "youtube-playlists", name: "YouTube playlists", provider: "YouTube", route: "/api/youtube/playlists", readinessRoute: "/api/youtube/readiness", connectPlatform: "youtube", detail: "Playlists owned by the selected channel." },
+        { id: "youtube-comments", name: "YouTube comments", provider: "YouTube", route: "/api/youtube/comments", readinessRoute: "/api/youtube/readiness", connectPlatform: "youtube", detail: "Recent channel comment threads for the Responses workspace." },
+        { id: "youtube-search", name: "YouTube search", provider: "YouTube", route: "/api/youtube/search", readinessRoute: "/api/youtube/readiness", connectPlatform: "youtube", actionLabel: "Search", queryParam: "q", queryLabel: "Enter a YouTube topic, channel, or phrase", queryDefault: "Social Cues", detail: "Channel-grounded search intelligence using the current Google quota." },
+        { id: "youtube-analytics", name: "YouTube analytics", provider: "YouTube", route: "/api/youtube/analytics", readinessRoute: "/api/youtube/readiness", connectPlatform: "youtube", detail: "Channel performance returned by Google." },
+        { id: "youtube-activity", name: "YouTube activity", provider: "YouTube", route: "/api/youtube/activity", readinessRoute: "/api/youtube/readiness", connectPlatform: "youtube", detail: "Recent channel activity and uploads." },
         { id: "x-profile", name: "X profile", provider: "X", route: "/api/x/account", readinessRoute: "/api/oauth/x/status", connectPlatform: "x", detail: "The public X identity Social Cues can act as." },
         { id: "x-engagement", name: "X engagement", provider: "X", route: "/api/x/engagement", readinessRoute: "/api/x/engagement/readiness", connectPlatform: "x", detail: "Conversation and reply signals available under the current X plan." },
-        { id: "pinterest-boards", name: "Pinterest boards", provider: "Pinterest", route: "/api/pinterest/boards", detail: "Boards available to the selected Pinterest account." },
-        { id: "pinterest-pins", name: "Pinterest Pins", provider: "Pinterest", route: "/api/pinterest/pins", detail: "Pins available for campaign research and reuse." },
-        { id: "canva-designs", name: "Canva designs", provider: "Canva", route: "/api/canva/designs", detail: "Designs available to the connected Canva user." },
-        { id: "canva-folders", name: "Canva folders", provider: "Canva", route: "/api/canva/folder-items", detail: "Folder contents for creative organization." },
-        { id: "canva-templates", name: "Canva brand templates", provider: "Canva", route: "/api/canva/brand-templates", detail: "Approved brand templates available to this account." },
-        { id: "canva-export-formats", name: "Canva export formats", provider: "Canva", route: "/api/canva/design-export-formats", detail: "Formats supported for a selected Canva design." },
+        { id: "pinterest-profile", name: "Pinterest profile", provider: "Pinterest", route: "/api/pinterest/user", readinessRoute: "/api/pinterest/readiness", connectPlatform: "pinterest", detail: "The selected Pinterest business identity." },
+        { id: "pinterest-boards", name: "Pinterest boards", provider: "Pinterest", route: "/api/pinterest/boards", readinessRoute: "/api/pinterest/readiness", connectPlatform: "pinterest", detail: "Boards available to the selected Pinterest account." },
+        { id: "pinterest-pins", name: "Pinterest Pins", provider: "Pinterest", route: "/api/pinterest/pins", readinessRoute: "/api/pinterest/readiness", connectPlatform: "pinterest", detail: "Pins available for campaign research and reuse." },
+        { id: "pinterest-analytics", name: "Pinterest analytics", provider: "Pinterest", route: "/api/pinterest/analytics", readinessRoute: "/api/pinterest/readiness", connectPlatform: "pinterest", detail: "Organic Pin and board performance returned under the current approval." },
+        { id: "canva-profile", name: "Canva profile", provider: "Canva", route: "/api/canva/user", readinessRoute: "/api/canva/readiness", connectPlatform: "canva", detail: "The connected Canva user and team context." },
+        { id: "canva-capabilities", name: "Canva capabilities", provider: "Canva", route: "/api/canva/capabilities", readinessRoute: "/api/canva/readiness", connectPlatform: "canva", detail: "The exact Canva scopes and creative operations available to this connection." },
+        { id: "canva-designs", name: "Canva designs", provider: "Canva", route: "/api/canva/designs", readinessRoute: "/api/canva/readiness", connectPlatform: "canva", detail: "Designs available to the connected Canva user." },
+        { id: "canva-folders", name: "Canva folders", provider: "Canva", route: "/api/canva/folder-items", readinessRoute: "/api/canva/readiness", connectPlatform: "canva", actionLabel: "Open folder", queryParam: "folderId", queryLabel: "Enter the Canva folder ID", detail: "Folder contents for creative organization." },
+        { id: "canva-templates", name: "Canva brand templates", provider: "Canva", route: "/api/canva/brand-templates", readinessRoute: "/api/canva/readiness", connectPlatform: "canva", detail: "Approved brand templates available to this account." },
+        { id: "canva-export-formats", name: "Canva export formats", provider: "Canva", route: "/api/canva/design-export-formats", readinessRoute: "/api/canva/readiness", connectPlatform: "canva", actionLabel: "Check design", queryParam: "designId", queryLabel: "Enter the Canva design ID", detail: "Formats supported for a selected Canva design." },
         { id: "discord-community", name: "Discord community", provider: "Discord", route: "/api/discord/community", readinessRoute: "/api/discord/readiness", connectPlatform: "discord", detail: "Selected server, guild, channel, and community context." },
+        { id: "discord-profile", name: "Discord profile", provider: "Discord", route: "/api/discord/user", readinessRoute: "/api/discord/readiness", connectPlatform: "discord", detail: "The connected Discord member identity." },
+        { id: "discord-servers", name: "Discord servers", provider: "Discord", route: "/api/discord/guilds", readinessRoute: "/api/discord/readiness", connectPlatform: "discord", detail: "Servers visible to the connected member for selection." },
         { id: "discord-channels", name: "Discord channels", provider: "Discord", route: "/api/discord/channels", readinessRoute: "/api/discord/bot/readiness", connectPlatform: "discord", detail: "Channels available for announcements, support rooms, and campaign feedback." },
         { id: "discord-messages", name: "Discord messages", provider: "Discord", route: "/api/discord/messages", readinessRoute: "/api/discord/bot/readiness", connectPlatform: "discord", detail: "Recent community messages available for response workflows." },
-        { id: "reddit-devvit", name: "Reddit Devvit workspace", provider: "Reddit", route: "/api/reddit/readiness", connectPlatform: "reddit", detail: "Community app, moderation, and Reddit Ads readiness." },
-        { id: "twitch-clips", name: "Twitch clips", provider: "Twitch", route: "/api/twitch/clips", detail: "Recent clips from the selected Twitch channel." },
-        { id: "twitch-videos", name: "Twitch videos", provider: "Twitch", route: "/api/twitch/videos", detail: "Archived videos from the selected Twitch channel." },
-        { id: "twitch-schedule", name: "Twitch schedule", provider: "Twitch", route: "/api/twitch/schedule", detail: "Upcoming stream schedule." },
-        { id: "tiktok-creator", name: "TikTok creator profile", provider: "TikTok", route: "/api/tiktok/creator-info", detail: "Creator information returned by TikTok." },
-        { id: "linkedin-posts", name: "LinkedIn Company posts", provider: "LinkedIn", route: "/api/linkedin/posts", detail: "Recent posts owned by the selected Company Page." },
-        { id: "patreon-posts", name: "Patreon creator posts", provider: "Patreon", route: "/api/patreon/posts", detail: "Creator posts available to the selected Patreon campaign." },
+        { id: "reddit-devvit", name: "Reddit Devvit workspace", provider: "Reddit", route: "/api/reddit/readiness", readinessRoute: "/api/reddit/readiness", connectPlatform: "reddit", detail: "Community app, moderation, and Reddit Ads readiness. Reddit-hosted playtest actions remain inside Devvit." },
+        { id: "twitch-channel", name: "Twitch channel", provider: "Twitch", route: "/api/twitch/channel", readinessRoute: "/api/twitch/readiness", connectPlatform: "twitch", detail: "The selected broadcaster identity and channel metadata." },
+        { id: "twitch-clips", name: "Twitch clips", provider: "Twitch", route: "/api/twitch/clips", readinessRoute: "/api/twitch/readiness", connectPlatform: "twitch", detail: "Recent clips from the selected Twitch channel." },
+        { id: "twitch-videos", name: "Twitch videos", provider: "Twitch", route: "/api/twitch/videos", readinessRoute: "/api/twitch/readiness", connectPlatform: "twitch", detail: "Archived videos from the selected Twitch channel." },
+        { id: "twitch-live", name: "Twitch live status", provider: "Twitch", route: "/api/twitch/stream", readinessRoute: "/api/twitch/readiness", connectPlatform: "twitch", detail: "Current stream status and live metadata." },
+        { id: "twitch-schedule", name: "Twitch schedule", provider: "Twitch", route: "/api/twitch/schedule", readinessRoute: "/api/twitch/readiness", connectPlatform: "twitch", detail: "Upcoming stream schedule." },
+        { id: "twitch-followers", name: "Twitch followers", provider: "Twitch", route: "/api/twitch/followers", readinessRoute: "/api/twitch/readiness", connectPlatform: "twitch", detail: "Follower signal returned under the current broadcaster scopes." },
+        { id: "tiktok-account", name: "TikTok account", provider: "TikTok", route: "/api/tiktok/account", readinessRoute: "/api/oauth/tiktok/status", connectPlatform: "tiktok", detail: "The connected TikTok publishing identity and granted scopes." },
+        { id: "tiktok-creator", name: "TikTok creator profile", provider: "TikTok", route: "/api/tiktok/creator-info", readinessRoute: "/api/oauth/tiktok/status", connectPlatform: "tiktok", detail: "Creator information returned by TikTok." },
+        { id: "linkedin-posts", name: "LinkedIn Company posts", provider: "LinkedIn", route: "/api/linkedin/posts", readinessRoute: "/api/linkedin/readiness", connectPlatform: "linkedin", detail: "Recent posts owned by the selected Company Page." },
+        { id: "linkedin-comments", name: "LinkedIn comments", provider: "LinkedIn", route: "/api/linkedin/comments", readinessRoute: "/api/linkedin/readiness", connectPlatform: "linkedin", detail: "Company Page conversation signals available under Community Management access." },
+        { id: "linkedin-analytics", name: "LinkedIn analytics", provider: "LinkedIn", route: "/api/linkedin/analytics", readinessRoute: "/api/linkedin/readiness", connectPlatform: "linkedin", detail: "Follower, Page, and organic share statistics for the selected Company Page." },
+        { id: "patreon-identity", name: "Patreon creator identity", provider: "Patreon", route: "/api/patreon/identity", readinessRoute: "/api/patreon/readiness", connectPlatform: "patreon", detail: "The connected Patreon creator identity." },
+        { id: "patreon-campaigns", name: "Patreon campaigns", provider: "Patreon", route: "/api/patreon/campaigns", readinessRoute: "/api/patreon/readiness", connectPlatform: "patreon", detail: "Creator campaigns and tier context available to the connected identity." },
+        { id: "patreon-members", name: "Patreon member intelligence", provider: "Patreon", route: "/api/patreon/members", readinessRoute: "/api/patreon/readiness", connectPlatform: "patreon", detail: "Privacy-minimized member, tier, pledge, and retention signals." },
+        { id: "patreon-posts", name: "Patreon creator posts", provider: "Patreon", route: "/api/patreon/posts", readinessRoute: "/api/patreon/readiness", connectPlatform: "patreon", detail: "Creator posts available to the selected Patreon campaign." },
         { id: "manychat-account", name: "Manychat account", provider: "Manychat", route: "/api/manychat/account", readinessRoute: "/api/manychat/readiness", connectPlatform: "manychat", detail: "Customer-owned Manychat account context and isolation status." },
         { id: "manychat-catalog", name: "Manychat catalog", provider: "Manychat", route: "/api/manychat/catalog", readinessRoute: "/api/manychat/readiness", connectPlatform: "manychat", detail: "Subscriber, tag, field, and flow surfaces available through the connected Manychat account." },
+        { id: "manychat-usage", name: "Manychat usage meter", provider: "Manychat", route: "/api/manychat/usage", readinessRoute: "/api/manychat/readiness", connectPlatform: "manychat", detail: "This workspace's Manychat request buckets and per-account isolation evidence." },
         { id: "elevenlabs-account", name: "ElevenLabs account", provider: "ElevenLabs", route: "/api/elevenlabs/account", readinessRoute: "/api/elevenlabs/readiness", connectPlatform: "elevenlabs", detail: "Customer-owned ElevenLabs account status and spend isolation." },
         { id: "elevenlabs-catalog", name: "ElevenLabs voice catalog", provider: "ElevenLabs", route: "/api/elevenlabs/catalog", readinessRoute: "/api/elevenlabs/readiness", connectPlatform: "elevenlabs", detail: "Voices and models available for campaign voiceover planning." },
+        { id: "elevenlabs-usage", name: "ElevenLabs usage meter", provider: "ElevenLabs", route: "/api/elevenlabs/usage", readinessRoute: "/api/elevenlabs/readiness", connectPlatform: "elevenlabs", detail: "The connected workspace's allowance and durable request meter without generating audio." },
+        { id: "shopify-products", name: "Shopify products", provider: "Shopify", route: "/api/shopify/products", readinessRoute: "/api/shopify/readiness", connectPlatform: "shopify", detail: "Store products available as campaign sources." },
+        { id: "etsy-listings", name: "Etsy listings", provider: "Etsy", route: "/api/etsy/listings", readinessRoute: "/api/etsy/readiness", connectPlatform: "etsy", detail: "Marketplace listings available as campaign sources." },
+        { id: "google-business", name: "Google Business Profile", provider: "Google", route: "/api/google/business/readiness", readinessRoute: "/api/google/business/readiness", connectPlatform: "google_business", detail: "Managed locations and the currently available Business Profile lanes." },
         { id: "launch-assets", name: "Social Cues launch media", provider: "Social Cues", route: "/api/media/public-assets", detail: "Approved public launch assets available for campaigns." }
       ],
       growth: [
@@ -4919,10 +4950,16 @@
     }
 
     function customerSourceStatus(item = {}) {
+      const outcome = customerSurfaceState.sourceOutcomes?.[item.id];
+      if (outcome?.state === "checking") return { state: "pending", label: "Checking", detail: "Social Cues is querying this source now." };
+      if (outcome?.state === "live") return { state: "ready", label: outcome.count ? `Live ${outcome.count}` : "Live", detail: outcome.count ? `${outcome.count} current record${outcome.count === 1 ? "" : "s"} returned.` : "The provider returned a current response." };
+      if (outcome?.state === "empty") return { state: "ready", label: "Live, empty", detail: "The provider query worked and returned no records yet." };
+      if (outcome?.state === "checked") return { state: "ready", label: "Access checked", detail: outcome.detail || "The provider gate returned successfully." };
+      if (outcome?.state === "blocked") return { state: "gated", label: "Needs access", detail: outcome.detail || "This source reported a provider or permission gate." };
       const active = activeWorkspacePlatformIds();
       const ids = providerSourcePlatformIds(item.provider);
       const connected = ids.some(id => id === "social-cues" || active.has(id));
-      if (connected) return { state: "ready", label: "Ready", detail: "This source can be queried for this workspace." };
+      if (connected) return { state: "ready", label: "Connected", detail: "Load this source to confirm current provider data." };
       const service = backendService(item.connectPlatform || ids[0] || "");
       if (service?.configured) return { state: "gated", label: "Connect", detail: "Credentials exist; connect the customer account or choose the managed asset." };
       return { state: "blocked", label: "Setup", detail: "Provider setup, login, or approval is still needed before this source can return data." };
@@ -7994,7 +8031,7 @@
           </div>
           <div class="tags"><span class="tag">${escapeHtml(item.provider)}</span><span class="tag">${escapeHtml(status.detail)}</span></div>
           <div class="variant-tools">
-            <button class="secondary" data-customer-surface="${escapeHtml(surface)}" data-customer-source="${escapeHtml(item.id)}">${canLoad ? (selected === item.id ? "Refresh" : "Load") : "Try load"}</button>
+            <button class="secondary" data-customer-surface="${escapeHtml(surface)}" data-customer-source="${escapeHtml(item.id)}">${escapeHtml(item.actionLabel || (canLoad ? (selected === item.id ? "Refresh" : "Load") : "Try load"))}</button>
             ${item.readinessRoute ? `<button class="secondary" data-customer-source-check="${escapeHtml(item.id)}" data-customer-surface="${escapeHtml(surface)}">Check gate</button>` : ""}
             ${connectPlatform && connectPlatform !== "social-cues" ? `<button class="secondary" data-customer-source-connect="${escapeHtml(connectPlatform)}">Connect</button>` : ""}
           </div>
@@ -8053,16 +8090,38 @@
       }
     }
 
-    function renderProviderPayload(payload, emptyMessage = "The provider returned no visible records.") {
+    function recordSourceUrl(record = {}) {
+      const candidate = record.url || record.webUrl || record.web_url || record.permalink || record.link || record.profileUrl || record.profile_url || record.channelUrl || record.pageUrl || record.html_url || "";
+      try {
+        const parsed = new URL(candidate, location.origin);
+        return ["http:", "https:"].includes(parsed.protocol) ? parsed.toString() : "";
+      } catch {
+        return "";
+      }
+    }
+
+    function providerPayloadRecords(payload = {}) {
+      const candidates = publicArrayCandidates(payload).sort((a, b) => b.rows.length - a.rows.length);
+      if (candidates[0]?.rows?.length) return { path: candidates[0].path, rows: candidates[0].rows.slice(0, 50) };
+      const entries = safeScalarEntries(payload);
+      return entries.length ? { path: "result", rows: [payload] } : { path: "result", rows: [] };
+    }
+
+    function customerSourceRecord(surface = "library", id = "", index = 0) {
+      const rows = customerSurfaceState.sourceRecords?.[`${surface}:${id}`] || [];
+      return rows[Number(index)] || null;
+    }
+
+    function renderProviderPayload(payload, emptyMessage = "The provider returned no visible records.", context = {}) {
       if (!payload || payload.ok === false) {
         return `<div class="notice">${escapeHtml(payload?.error || payload?.message || emptyMessage)}</div>`;
       }
-      const candidates = publicArrayCandidates(payload).sort((a, b) => b.rows.length - a.rows.length);
-      const candidate = candidates[0];
+      const candidate = providerPayloadRecords(payload);
       if (candidate?.rows?.length) {
         return candidate.rows.slice(0, 50).map((record, index) => {
           if (typeof record !== "object" || !record) return `<article class="variant"><h3>${escapeHtml(String(record))}</h3></article>`;
           const mediaUrl = recordMediaUrl(record);
+          const sourceUrl = recordSourceUrl(record);
           const mediaMarkup = mediaUrl
             ? String(record.kind || "").toLowerCase() === "video"
               ? `<video class="provider-result-media" src="${escapeHtml(mediaUrl)}" controls preload="metadata"></video>`
@@ -8076,6 +8135,11 @@
             </div>
             ${mediaMarkup}
             <div class="tags">${entries.map(([key, value]) => `<span class="tag">${escapeHtml(key)}: ${escapeHtml(value)}</span>`).join("")}</div>
+            ${context.surface && context.id && context.actionable !== false ? `<div class="variant-tools">
+              <button class="secondary" data-customer-record-use="${index}" data-customer-surface="${escapeHtml(context.surface)}" data-customer-source="${escapeHtml(context.id)}">Use in campaign</button>
+              <button class="secondary" data-customer-record-copy="${index}" data-customer-surface="${escapeHtml(context.surface)}" data-customer-source="${escapeHtml(context.id)}">Copy details</button>
+              ${sourceUrl ? `<a class="secondary" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Open source</a>` : ""}
+            </div>` : ""}
           </article>`;
         }).join("");
       }
@@ -8098,13 +8162,37 @@
       renderCustomerSources(surface);
       if (target.title) $(target.title).textContent = config.name;
       if (target.meta) $(target.meta).textContent = config.detail;
+      customerSurfaceState.sourceOutcomes[id] = { state: "checking" };
+      renderCustomerSources(surface);
       resultElement.innerHTML = `<div class="empty">Loading ${escapeHtml(config.name)}...</div>`;
       try {
-        const response = await authedFetch(config.route);
+        let requestRoute = config.route;
+        if (config.queryParam) {
+          const queryValue = clean(window.prompt(config.queryLabel || `Enter ${config.queryParam}`, config.queryDefault || "") || "");
+          if (!queryValue) {
+            customerSurfaceState.sourceOutcomes[id] = { state: "blocked", detail: `${config.name} needs ${config.queryParam} before it can load.` };
+            renderCustomerSources(surface);
+            resultElement.innerHTML = `<div class="notice">${escapeHtml(config.name)} needs ${escapeHtml(config.queryParam)} before it can load.</div>`;
+            return;
+          }
+          const separator = requestRoute.includes("?") ? "&" : "?";
+          requestRoute = `${requestRoute}${separator}${encodeURIComponent(config.queryParam)}=${encodeURIComponent(queryValue)}`;
+        }
+        const response = await authedFetch(requestRoute);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || payload.ok === false) throw new Error(payload.error || payload.message || `${config.provider} did not return this source.`);
-        resultElement.innerHTML = renderProviderPayload(payload);
+        const candidate = providerPayloadRecords(payload);
+        customerSurfaceState.sourceRecords[`${surface}:${id}`] = candidate.rows;
+        const providerBlocked = payload.ready === false && Boolean(payload.error || payload.warning || payload.blocker || payload.nextAction || payload.nextActions);
+        customerSurfaceState.sourceOutcomes[id] = providerBlocked
+          ? { state: "blocked", detail: String(payload.error || payload.warning || payload.blocker || payload.nextAction || "Provider access is not ready.").slice(0, 220) }
+          : { state: candidate.rows.length ? "live" : "empty", count: candidate.rows.length };
+        renderCustomerSources(surface);
+        resultElement.innerHTML = renderProviderPayload(payload, "The provider query worked and returned no records yet.", { surface, id, actionable: !providerBlocked });
       } catch (error) {
+        customerSurfaceState.sourceRecords[`${surface}:${id}`] = [];
+        customerSurfaceState.sourceOutcomes[id] = { state: "blocked", detail: String(error.message || "Provider access is blocked.").slice(0, 220) };
+        renderCustomerSources(surface);
         resultElement.innerHTML = `<div class="notice">${escapeHtml(error.message)}</div>`;
       }
     }
@@ -8119,10 +8207,16 @@
       if (target.title) $(target.title).textContent = `${config.name} gate`;
       if (target.meta) $(target.meta).textContent = config.detail;
       const route = config.readinessRoute || config.route;
+      customerSurfaceState.sourceOutcomes[id] = { state: "checking" };
+      renderCustomerSources(surface);
       resultElement.innerHTML = `<div class="empty">Checking ${escapeHtml(config.name)}...</div>`;
       try {
         const response = await authedFetch(route);
         const payload = await response.json().catch(() => ({}));
+        customerSurfaceState.sourceOutcomes[id] = response.ok && payload.ok !== false
+          ? { state: "checked", detail: "The provider gate returned successfully. Load the source to prove current records." }
+          : { state: "blocked", detail: String(payload.error || payload.message || "Provider access is blocked.").slice(0, 220) };
+        renderCustomerSources(surface);
         resultElement.innerHTML = renderProviderPayload({
           ok: response.ok && payload.ok !== false,
           source: config.name,
@@ -8131,7 +8225,58 @@
           ...payload
         }, `${config.provider} did not return readiness data.`);
       } catch (error) {
+        customerSurfaceState.sourceOutcomes[id] = { state: "blocked", detail: String(error.message || "Provider access is blocked.").slice(0, 220) };
+        renderCustomerSources(surface);
         resultElement.innerHTML = `<div class="notice">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    function useCustomerSourceRecord(surface, id, index) {
+      const config = sourceConfig(surface, id);
+      const record = customerSourceRecord(surface, id, index);
+      if (!config || !record) return showAppResult("Source unavailable", "Reload this source before using it in a campaign.", "error");
+      const title = recordTitle(record, Number(index));
+      const detail = recordDetail(record);
+      const sourceUrl = recordSourceUrl(record);
+      const mediaUrl = recordMediaUrl(record);
+      const scalarContext = safeScalarEntries(record)
+        .filter(([key]) => !["title", "name", "displayName", "description", "detail", "summary", "text"].includes(key))
+        .slice(0, 6)
+        .map(([key, value]) => `${key}: ${value}`)
+        .join("\n");
+      const campaign = createCampaignFromIdea(
+        title || `${config.provider} source`,
+        [detail, scalarContext, sourceUrl ? `Source: ${sourceUrl}` : ""].filter(Boolean).join("\n\n") || `Build a campaign from this ${config.name} record.`,
+        "Build demand"
+      );
+      campaign.sourceAsset = {
+        provider: config.provider,
+        sourceId: id,
+        title,
+        url: sourceUrl,
+        mediaUrl,
+        providerRecordId: String(record.id || record.providerAccountId || record.videoId || record.postId || ""),
+        importedAt: new Date().toISOString()
+      };
+      if (mediaUrl) campaign.media = { type: String(record.kind || "image").toLowerCase() === "video" ? "video" : "image", provider: config.provider, name: title, url: mediaUrl, suggestion: "Provider-owned source reference. Confirm reuse rights before publishing." };
+      saveModel(`Added ${config.name} to a new campaign.`);
+      setStudioMode("campaign");
+      navigateTo("studio");
+      showAppResult("Campaign source added", `${title} is ready in Studio with its provider reference preserved.`, "success");
+    }
+
+    async function copyCustomerSourceRecord(surface, id, index) {
+      const config = sourceConfig(surface, id);
+      const record = customerSourceRecord(surface, id, index);
+      if (!config || !record) return showAppResult("Source unavailable", "Reload this source before copying it.", "error");
+      const text = [recordTitle(record, Number(index)), recordDetail(record), recordSourceUrl(record)]
+        .filter(Boolean)
+        .join("\n\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        showAppResult("Source details copied", `${config.name} details are ready to paste.`, "success");
+      } catch {
+        showAppResult("Copy blocked", "Your browser did not allow clipboard access. Open the source and copy it directly.", "error");
       }
     }
 
@@ -13242,6 +13387,16 @@
       const deliveryResolveButton = event.target.closest("[data-delivery-resolve]");
       if (deliveryResolveButton) {
         focusAccountLane(deliveryResolveButton.dataset.deliveryResolve || "");
+        return;
+      }
+      const customerRecordUseButton = event.target.closest("[data-customer-record-use]");
+      if (customerRecordUseButton) {
+        useCustomerSourceRecord(customerRecordUseButton.dataset.customerSurface, customerRecordUseButton.dataset.customerSource, customerRecordUseButton.dataset.customerRecordUse);
+        return;
+      }
+      const customerRecordCopyButton = event.target.closest("[data-customer-record-copy]");
+      if (customerRecordCopyButton) {
+        copyCustomerSourceRecord(customerRecordCopyButton.dataset.customerSurface, customerRecordCopyButton.dataset.customerSource, customerRecordCopyButton.dataset.customerRecordCopy);
         return;
       }
       const customerSourceButton = event.target.closest("[data-customer-source]");

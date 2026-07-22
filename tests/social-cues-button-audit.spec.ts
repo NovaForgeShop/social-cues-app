@@ -68,7 +68,19 @@ test('local workstation navigation and safe buttons respond', async ({ page }) =
   }
   await expect(page.locator('[data-view="integrations"]')).toBeHidden();
 
+  await page.locator('[data-view="library"]').click();
+  await expect(page.locator('#librarySourceList')).toContainText(/YouTube comments/i);
+  await expect(page.locator('#librarySourceList')).toContainText(/Threads reactions and replies/i);
+  await expect(page.locator('#librarySourceList')).toContainText(/Patreon member intelligence/i);
+  await expect(page.locator('#librarySourceList [data-customer-source]')).toHaveCount(59);
+  await page.locator('#librarySourceList [data-customer-source="launch-assets"]').click();
+  await expect(page.locator('#libraryResult [data-customer-record-use]').first()).toBeVisible();
+  await page.locator('#libraryResult [data-customer-record-use]').first().click();
+  await expect(page.locator('#studio')).toBeVisible();
+  await expect(page.locator('#campaignTitleInput')).not.toHaveValue('');
+
   await page.locator('[data-view="studio"]').click();
+  await page.locator('[data-studio-mode="post"]').click();
   await expect(page.locator('[data-studio-mode="post"]')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('[data-studio-lane="post"]')).toBeVisible();
   await expect(page.locator('#quickPostMediaInput')).toHaveAttribute('accept', 'image/*,video/*');
