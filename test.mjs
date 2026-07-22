@@ -125,6 +125,11 @@ try {
   for (const quickPostContract of ['data-studio-mode="post"', 'id="quickPostMediaInput"', 'id="prepareQuickPostOne"', 'id="prepareQuickPostEverywhere"', "function prepareQuickPost", "function quickPostDescription", "function renderQuickPosts"]) {
     if (!appHtml.includes(quickPostContract)) throw new Error(`quick post foreground contract missing: ${quickPostContract}`);
   }
+  for (const quickPostDestination of ['"reddit"', '"patreon"', '"tiktok"', '"x"', '"linkedin"', '"pinterest"', '"discord"', '"google_business"', '"shopify"', '"etsy"', '"twitch"']) {
+    if (!appHtml.includes("quickPostDistributionPlatformIds") || !appHtml.includes(quickPostDestination)) {
+      throw new Error(`quick post everywhere destination missing: ${quickPostDestination}`);
+    }
+  }
   if (!appHtml.includes('data-variant-schedule=') || !appHtml.includes("function setVariantSchedule") || !appHtml.includes("scheduledAt > Date.now()") || !appHtml.includes("schedule cleared")) {
     throw new Error("campaign variants must preserve a user-selected local publish time when queued");
   }
@@ -308,7 +313,7 @@ try {
   if (!appHtml.includes("function providerIdentityEvidence") || !appHtml.includes("function accountConnectionState")) throw new Error("browser connected-account detection must consume shared provider identity and connection truth");
   if (!appHtml.includes("function canWriteHostedWorkspace()") || !appHtml.includes("return Boolean(SERVER_MODE && model.currentUser?.id)")) throw new Error("hosted workspace writes should require a current signed-in user");
   if (appHtml.includes("providerAccountId: account.providerAccountId || account.providerId || account.id")) throw new Error("provider evidence merge must not invent provider ids from local card ids");
-  if (!appHtml.includes("account.connected === true && connectionState.connected")) throw new Error("provider evidence merge should require explicit backend connection truth");
+  if (!appHtml.includes("const connected = Boolean(connectionState.connected)")) throw new Error("provider evidence merge should use computed connection truth from token, status, and identity evidence");
   if (!/function mergeProviderEvidenceIntoModel[\s\S]*?Provider evidence is render-time backend truth; do not write it back as user model state/.test(appHtml)) throw new Error("provider evidence merge must remain render-only instead of persisting optimistic connection state");
   for (const provider of ["pinterest", "canva", "youtube", "shopify"]) {
     if (!serverSource.includes(`repairedProviderAccount(model, "${provider}"`)) throw new Error(`${provider} status/readiness should use shared repaired provider account selection`);

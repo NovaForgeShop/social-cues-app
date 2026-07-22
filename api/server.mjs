@@ -6521,11 +6521,6 @@ function safeWorkspaceSnapshot(model, user = {}) {
     .filter(account => ownedByUser(account, user.id))
     .map(account => {
       const snapshot = publicAccount(account);
-      delete snapshot.tokenStored;
-      delete snapshot.refreshStored;
-      delete snapshot.connected;
-      delete snapshot.connectionState;
-      delete snapshot.connectionReason;
       return snapshot;
     });
   // Device sessions are security records, not workspace content. They are loaded
@@ -13746,6 +13741,23 @@ function mergeServerOnlyAccountFields(incoming, existing) {
   return merged;
 }
 
+function sameProviderAccountIdentity(left = {}, right = {}) {
+  const leftPlatform = canonicalProviderAssetPlatform(left.platform || left.provider || left.oauthProvider || "");
+  const rightPlatform = canonicalProviderAssetPlatform(right.platform || right.provider || right.oauthProvider || "");
+  if (leftPlatform !== rightPlatform) return false;
+  if (left.id && right.id && String(left.id) === String(right.id)) return true;
+  if (left.providerAccountId && right.providerAccountId && String(left.providerAccountId) === String(right.providerAccountId)) return true;
+  return Boolean(left.oauthProvider && right.oauthProvider && String(left.oauthProvider) === String(right.oauthProvider) && !left.providerAccountId && !right.providerAccountId);
+}
+
+function shouldRetainServerProviderAccount(existingAccount, incomingAccounts = [], user = null) {
+  if (!existingAccount || existingAccount.disabled) return false;
+  if (user?.id && !ownedByUser(existingAccount, user.id)) return false;
+  if (!hasStoredToken(existingAccount) || !isRealConnectedAccount(existingAccount)) return false;
+  const incomingMatch = incomingAccounts.find(account => sameProviderAccountIdentity(account, existingAccount));
+  return !incomingMatch;
+}
+
 function mergeOwnedArray(key, merged, existing, user, workspaceId) {
   if (!Array.isArray(merged[key])) return;
   if (serverRetainedWorkspaceCollectionKeys.has(key)) {
@@ -13774,6 +13786,7 @@ function mergePublicModelUpdate(incoming, existing, user = null) {
     merged.connectedAccounts = user
       ? [
           ...incomingAccounts,
+          ...existingAccounts.filter(existingAccount => shouldRetainServerProviderAccount(existingAccount, incomingAccounts, user)),
           ...existingAccounts.filter(existingAccount => !ownedByUser(existingAccount, user.id))
         ]
       : incomingAccounts;
@@ -20255,6 +20268,55 @@ async function route(req, res) {
     } catch (error) {
       return json(res, 409, { ok: false, error: `The source file is not present in private storage yet: ${error.message}` });
     }
+  }
+
+  if (url.pathname === "/api/e2e/provider-accounts" && req.method === "POST") {
+    if (runtimeMode === "vercel" || process.env.E2E_USE_LOCAL_SERVER !== "1") {
+      return json(res, 404, { ok: false, error: "Not found" });
+    }
+    const sharedModel = await getModel();
+    const session = await entitledSessionFromRequest(sharedModel, req);
+    if (!session?.user) return json(res, 401, { ok: false, error: "Sign in before seeding local provider accounts." });
+    const input = await bodyJson(req);
+    const model = await modelForSession(session, sharedModel);
+    ensureUserWorkspace(model, session.user);
+    const workspaceId = workspaceIdForUser(session.user);
+    const allowedPlatforms = new Set(["facebook", "x"]);
+    const incomingAccounts = Array.isArray(input.accounts) ? input.accounts : [];
+    const nextAccounts = incomingAccounts
+      .filter(account => allowedPlatforms.has(canonicalProviderAssetPlatform(account?.platform || "")))
+      .map((account, index) => {
+        const platform = canonicalProviderAssetPlatform(account.platform);
+        const now = new Date().toISOString();
+        const token = String(account.credential || account.token || `fake-test-token-${platform}-${index + 1}`);
+        return stampWorkspaceOwnership({
+          ...account,
+          id: account.id || `e2e-${platform}-${index + 1}`,
+          platform,
+          oauthProvider: account.oauthProvider || (platform === "facebook" ? "meta" : platform),
+          providerAccountId: String(account.providerAccountId || `test-${platform}-${index + 1}`),
+          status: "connected",
+          connectedAt: account.connectedAt || now,
+          credential: encryptedToken(token),
+          tokenExpiresAt: account.tokenExpiresAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          connectionEvidence: "Local E2E provider account seed."
+        }, session.user, workspaceId);
+      });
+    model.connectedAccounts = [
+      ...(model.connectedAccounts || []).filter(account => !ownedByUser(account, session.user.id) || !allowedPlatforms.has(canonicalProviderAssetPlatform(account.platform))),
+      ...nextAccounts
+    ];
+    model.activeProviderAccounts = model.activeProviderAccounts || {};
+    for (const account of nextAccounts) {
+      model.activeProviderAccounts[account.platform] = account.providerAccountId;
+    }
+    sanitizeConnectedAccounts(model);
+    const saved = await saveModelForUser(model, session.user);
+    return json(res, 200, {
+      ok: true,
+      accounts: nextAccounts.map(account => publicAccount(account)),
+      activeProviderAccounts: saved.activeProviderAccounts || {}
+    });
   }
 
   if (url.pathname === "/api/model" && req.method === "GET") {

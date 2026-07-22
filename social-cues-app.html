@@ -3587,6 +3587,24 @@
       }
     }
 
+    async function refreshConnectedAccountsFromServer() {
+      if (!SERVER_MODE) return false;
+      try {
+        const response = await authedFetch("/api/model");
+        if (!response.ok) return false;
+        const serverModel = normalizeModel(await response.json());
+        model.connectedAccounts = mergeConnectedAccountLists(model.connectedAccounts || [], serverModel.connectedAccounts || []);
+        model.activeProviderAccounts = {
+          ...(model.activeProviderAccounts || {}),
+          ...(serverModel.activeProviderAccounts || {})
+        };
+        persistModelSnapshot(model);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
     function resolvedTheme() {
       const selected = model?.settings?.theme || "auto";
       if (selected === "light" || selected === "dark") return selected;
@@ -4048,6 +4066,20 @@
       return Boolean(account?.platform && !isRealConnectedAccount(account) && /token|refresh|invalid|expired|reconnect/i.test(`${account?.connectionEvidence || ""} ${account?.lastTokenError || ""} ${account?.status || ""}`));
     }
 
+    function mergedProviderAccountValue(previous, account, preferIncoming = false) {
+      const primary = preferIncoming ? account : previous;
+      const secondary = preferIncoming ? previous : account;
+      const merged = { ...(secondary || {}), ...(primary || {}) };
+      if (isRealConnectedAccount(primary) && !isProviderFailureAccount(primary)) {
+        delete merged.refreshError;
+        delete merged.lastTokenError;
+        delete merged.needsReconnect;
+        if (merged.tokenValid === false) delete merged.tokenValid;
+        merged.connectionState = accountConnectionState(merged);
+      }
+      return merged;
+    }
+
     function mergeConnectedAccountLists(...accountLists) {
       const accountsByKey = new Map();
       accountLists.flat().filter(Boolean).forEach(account => {
@@ -4057,10 +4089,14 @@
           accountsByKey.set(key, account);
           return;
         }
-        const preferIncoming = isProviderFailureAccount(account)
-          || (isRealConnectedAccount(account) && !isProviderFailureAccount(previous))
-          || (!isRealConnectedAccount(previous) && !isProviderFailureAccount(previous));
-        accountsByKey.set(key, preferIncoming ? { ...previous, ...account } : { ...account, ...previous });
+        const previousReal = isRealConnectedAccount(previous);
+        const incomingReal = isRealConnectedAccount(account);
+        const previousFailure = isProviderFailureAccount(previous);
+        const incomingFailure = isProviderFailureAccount(account);
+        const preferIncoming = (!previousReal && incomingReal)
+          || (previousFailure && !incomingFailure)
+          || (!previousReal && !previousFailure && !incomingFailure);
+        accountsByKey.set(key, mergedProviderAccountValue(previous, account, preferIncoming));
       });
       const realPlatforms = new Set([...accountsByKey.values()].filter(isRealConnectedAccount).map(account => account.platform));
       const disabledPlatforms = new Set([...accountsByKey.values()].filter(account => account.disabled).map(account => account.platform));
@@ -4136,7 +4172,7 @@
       const tokenStored = account.tokenStored ?? hasStoredToken(account);
       const providerAccountId = account.providerAccountId || account.providerId || account.accountId || account.openId || account.userId || "";
       const connectionState = accountConnectionState({ ...account, providerAccountId, tokenStored });
-      const connected = Boolean(account.connected === true && connectionState.connected);
+      const connected = Boolean(connectionState.connected);
       return {
         id: account.id || `acct-${account.platform}`,
         platform: account.platform,
@@ -4176,7 +4212,12 @@
           index = model.connectedAccounts.findIndex(item => isPlaceholderAccount(item) && item.platform === account.platform);
         }
         const previous = index >= 0 ? model.connectedAccounts[index] : null;
-        const merged = { ...(previous || {}), ...account };
+        const previousReal = isRealConnectedAccount(previous);
+        const incomingReal = isRealConnectedAccount(account);
+        const incomingFailure = isProviderFailureAccount(account);
+        const merged = previousReal && !incomingReal && incomingFailure
+          ? mergedProviderAccountValue(account, { ...previous, connectionEvidence: account.connectionEvidence || previous.connectionEvidence }, true)
+          : mergedProviderAccountValue(previous, account, true);
         if (index >= 0) {
           if (JSON.stringify(previous) !== JSON.stringify(merged)) {
             model.connectedAccounts[index] = merged;
@@ -4930,6 +4971,12 @@
         && !["needs-oauth", "needs-config"].includes(row?.status)
       ) {
         return mapName;
+      }
+      if (providerId === "x" && account) {
+        const xIdentity = [account.displayName, account.name, account.handle]
+          .map(value => String(value || "").trim())
+          .find(value => value && !looksLikeAccountEmail(value) && value.toLowerCase() !== "x");
+        if (xIdentity) return xIdentity;
       }
       return postingIdentityName(account);
     }
@@ -5946,22 +5993,39 @@
       return "";
     }
 
+    const quickPostDistributionPlatformIds = [
+      "facebook", "instagram", "threads", "youtube", "tiktok", "x",
+      "reddit", "patreon", "linkedin", "pinterest", "discord",
+      "google_business", "shopify", "etsy", "twitch"
+    ];
+
     function quickPostCompatiblePlatforms(kind = "", format = "auto") {
-      if (kind === "image") return ["facebook", "instagram", "threads"];
-      if (kind === "video" && format === "standard") return ["facebook", "instagram", "youtube", "threads", "tiktok"];
-      if (kind === "video") return ["instagram", "youtube", "tiktok", "threads", "facebook"];
-      return ["facebook", "instagram", "youtube", "tiktok", "threads"];
+      const preferred = kind === "video" && format !== "standard"
+        ? ["instagram", "youtube", "tiktok", "threads", "facebook"]
+        : ["facebook", "instagram", "threads", "youtube", "tiktok"];
+      return [
+        ...preferred,
+        ...quickPostDistributionPlatformIds.filter(platformId => !preferred.includes(platformId))
+      ];
     }
 
     function quickPostConnectedTargets(kind = "", format = "auto") {
+      const disabledPlatforms = new Set((model.connectedAccounts || []).filter(account => account.disabled).map(account => account.platform));
       return quickPostCompatiblePlatforms(kind, format).map(platformId => {
+        if (disabledPlatforms.has(platformId)) return null;
         const account = authoritativeProviderAccount(platformId);
         const state = accountConnectionState(account || {});
+        const knownIdentity = account ? providerPostingIdentityName(platformId, account) : "";
         return state.connected && account?.disabled !== true ? {
           platformId,
           account,
-          identity: providerPostingIdentityName(platformId, account)
-        } : null;
+          identity: knownIdentity
+        } : {
+          platformId,
+          account: null,
+          identity: knownIdentity || platformById(platformId)?.name || platformName(platformId),
+          draftOnly: true
+        };
       }).filter(Boolean);
     }
 
@@ -6011,14 +6075,16 @@
     function quickPostLinkDirectory(excludePlatform = "") {
       const rows = [];
       const seen = new Set();
-      mergedConnectedAccounts().filter(isRealConnectedAccount).forEach(account => {
-        const platformId = canonicalProviderAssetPlatform(account.platform || account.provider || account.oauthProvider || "");
-        if (!platformId || platformId === excludePlatform || seen.has(platformId)) return;
-        const url = connectedAccountProfileUrl(account);
-        if (!url) return;
-        seen.add(platformId);
-        rows.push({ platformId, label: platformName(platformId), url });
-      });
+      mergedConnectedAccounts()
+        .filter(account => isRealConnectedAccount(account) || (hasStoredToken(account) && providerIdentityEvidence(account).verified))
+        .forEach(account => {
+          const platformId = canonicalProviderAssetPlatform(account.platform || account.provider || account.oauthProvider || "");
+          if (!platformId || platformId === excludePlatform || seen.has(platformId)) return;
+          const url = connectedAccountProfileUrl(account);
+          if (!url) return;
+          seen.add(platformId);
+          rows.push({ platformId, label: platformName(platformId), url });
+        });
       return rows.slice(0, 8);
     }
 
@@ -6046,7 +6112,23 @@
         if (profilePlacement) lines.push("Find every connected channel through our profile links.");
         else lines.push(`Find us everywhere:\n${directory.map(row => `${row.label}: ${row.url}`).join("\n")}`);
       }
-      const limits = { threads: 500, instagram: 2200, tiktok: 2200, facebook: 12000, youtube: 5000 };
+      const limits = {
+        threads: 500,
+        x: 280,
+        instagram: 2200,
+        tiktok: 2200,
+        facebook: 12000,
+        youtube: 5000,
+        reddit: 40000,
+        patreon: 12000,
+        linkedin: 3000,
+        pinterest: 500,
+        discord: 1900,
+        google_business: 1500,
+        shopify: 5000,
+        etsy: 5000,
+        twitch: 5000
+      };
       return lines.filter(Boolean).join("\n\n").slice(0, limits[platformId] || 5000);
     }
 
@@ -6077,9 +6159,19 @@
         showAppResult("Add the post message", "Write the caption or description before preparing platform drafts.", "error");
         return;
       }
+      const titleInput = clean($("#quickPostTitleInput")?.value || "");
+      const destinationUrl = $("#quickPostDestinationInput")?.value || model.onboarding?.website || "";
+      const destinationCta = $("#quickPostCtaInput")?.value || "learn_more";
+      const includeConnectedLinks = Boolean($("#quickPostIncludeLinks")?.checked);
+      const selectedPlatformBeforeSync = $("#quickPostPlatformInput")?.value || "";
       const format = kind === "video" ? ($("#quickPostFormatInput")?.value || "auto") : "image";
+      if (SERVER_MODE) {
+        await refreshConnectedAccountsFromServer();
+        mergeProviderEvidenceIntoModel(metaState);
+        renderQuickPostTargetOptions();
+      }
       const allTargets = quickPostConnectedTargets(kind, format);
-      const selectedPlatform = $("#quickPostPlatformInput")?.value || "";
+      const selectedPlatform = $("#quickPostPlatformInput")?.value || selectedPlatformBeforeSync;
       const targets = mode === "everywhere" ? allTargets : allTargets.filter(row => row.platformId === selectedPlatform).slice(0, 1);
       if (!targets.length) {
         showAppResult("No compatible posting account", "Connect and select an account that can publish this media type.", "error");
@@ -6099,14 +6191,14 @@
         const now = new Date().toISOString();
         const media = quickPostMediaRecord(file, asset);
         const input = {
-          destinationUrl: $("#quickPostDestinationInput")?.value || model.onboarding?.website || "",
-          cta: $("#quickPostCtaInput")?.value || "learn_more",
-          includeLinks: Boolean($("#quickPostIncludeLinks")?.checked)
+          destinationUrl,
+          cta: destinationCta,
+          includeLinks: includeConnectedLinks
         };
         const batch = {
           id: uid("quick"),
           type: "quick-post",
-          title: clean($("#quickPostTitleInput")?.value || file.name.replace(/\.[^.]+$/, "")) || "Quick post",
+          title: titleInput || file.name.replace(/\.[^.]+$/, "") || "Quick post",
           brief: caption,
           mode,
           mediaKind: kind,
@@ -6123,7 +6215,7 @@
             providerAccountId: row.account?.providerAccountId || "",
             postingIdentity: row.identity,
             status: "draft",
-            title: clean($("#quickPostTitleInput")?.value || "") || (row.platformId === "youtube" ? file.name.replace(/\.[^.]+$/, "") : ""),
+            title: titleInput || (row.platformId === "youtube" ? file.name.replace(/\.[^.]+$/, "") : ""),
             copy: quickPostDescription(row.platformId, caption, input),
             contentFormat: quickPostFormatName(row.platformId, kind, format),
             destinationUrl: safeQuickPostUrl(input.destinationUrl),
@@ -11200,7 +11292,8 @@
     function selectableAccountsForPlatform(platform, accounts = mergedConnectedAccounts()) {
       const canonical = canonicalProviderAssetPlatform(platform);
       const selectionRow = providerAccountSelectionRow(canonical);
-      const sourceAccounts = selectionRow ? (selectionRow.accounts || []) : accounts;
+      const rowAccounts = selectionRow?.accounts || [];
+      const sourceAccounts = rowAccounts.length ? rowAccounts : accounts;
       return dedupeSelectableProviderAccounts(sourceAccounts
         .filter(account => account.platform === canonical && account.identityVerified !== false && account.providerAccountId && hasStoredToken(account)));
     }
@@ -11242,7 +11335,12 @@
     function authoritativeProviderAccount(platform, fallbackAccounts = mergedConnectedAccounts()) {
       const canonical = canonicalProviderAssetPlatform(platform);
       const row = providerAccountSelectionRow(canonical);
-      const candidates = row?.accounts || fallbackAccounts.filter(account => account.platform === canonical);
+      const rowAccounts = row?.accounts || [];
+      const fallbackPlatformAccounts = fallbackAccounts.filter(account => account.platform === canonical);
+      const rowHasRealAccount = rowAccounts.some(isRealConnectedAccount);
+      const candidates = rowHasRealAccount
+        ? rowAccounts
+        : mergeConnectedAccountLists(fallbackPlatformAccounts, rowAccounts);
       const selectedId = String(row?.selectedProviderAccountId || model.activeProviderAccounts?.[canonical] || "");
       return candidates.find(account => String(account.providerAccountId || "") === selectedId)
         || candidates.find(isRealConnectedAccount)
