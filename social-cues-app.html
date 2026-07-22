@@ -3258,20 +3258,35 @@
 
     const customerSources = {
       library: [
+        { id: "facebook-pages", name: "Facebook Pages", provider: "Meta", route: "/api/meta/pages", readinessRoute: "/api/meta/assets", connectPlatform: "facebook", detail: "Managed Pages available to the signed-in Meta identity." },
+        { id: "instagram-assets", name: "Instagram professional assets", provider: "Meta", route: "/api/meta/instagram/accounts", readinessRoute: "/api/meta/assets", connectPlatform: "instagram", detail: "Linked Instagram professional accounts returned through Meta." },
+        { id: "meta-comments", name: "Meta comments", provider: "Meta", route: "/api/meta/comments", readinessRoute: "/api/meta/comments/readiness", connectPlatform: "facebook", detail: "Facebook and Instagram comment threads available for response work." },
+        { id: "meta-messages", name: "Meta messages", provider: "Meta", route: "/api/meta/messages", readinessRoute: "/api/meta/comments/readiness", connectPlatform: "facebook", detail: "Inbox-style Meta message surfaces when messaging permissions are approved." },
+        { id: "threads-profile", name: "Threads profile", provider: "Threads", route: "/api/threads/account", readinessRoute: "/api/oauth/threads/status", connectPlatform: "threads", detail: "Threads identity, handle, and profile readiness." },
         { id: "youtube-playlists", name: "YouTube playlists", provider: "YouTube", route: "/api/youtube/playlists", detail: "Playlists owned by the selected channel." },
         { id: "youtube-activity", name: "YouTube activity", provider: "YouTube", route: "/api/youtube/activity", detail: "Recent channel activity and uploads." },
+        { id: "x-profile", name: "X profile", provider: "X", route: "/api/x/account", readinessRoute: "/api/oauth/x/status", connectPlatform: "x", detail: "The public X identity Social Cues can act as." },
+        { id: "x-engagement", name: "X engagement", provider: "X", route: "/api/x/engagement", readinessRoute: "/api/x/engagement/readiness", connectPlatform: "x", detail: "Conversation and reply signals available under the current X plan." },
         { id: "pinterest-boards", name: "Pinterest boards", provider: "Pinterest", route: "/api/pinterest/boards", detail: "Boards available to the selected Pinterest account." },
         { id: "pinterest-pins", name: "Pinterest Pins", provider: "Pinterest", route: "/api/pinterest/pins", detail: "Pins available for campaign research and reuse." },
         { id: "canva-designs", name: "Canva designs", provider: "Canva", route: "/api/canva/designs", detail: "Designs available to the connected Canva user." },
         { id: "canva-folders", name: "Canva folders", provider: "Canva", route: "/api/canva/folder-items", detail: "Folder contents for creative organization." },
         { id: "canva-templates", name: "Canva brand templates", provider: "Canva", route: "/api/canva/brand-templates", detail: "Approved brand templates available to this account." },
         { id: "canva-export-formats", name: "Canva export formats", provider: "Canva", route: "/api/canva/design-export-formats", detail: "Formats supported for a selected Canva design." },
+        { id: "discord-community", name: "Discord community", provider: "Discord", route: "/api/discord/community", readinessRoute: "/api/discord/readiness", connectPlatform: "discord", detail: "Selected server, guild, channel, and community context." },
+        { id: "discord-channels", name: "Discord channels", provider: "Discord", route: "/api/discord/channels", readinessRoute: "/api/discord/bot/readiness", connectPlatform: "discord", detail: "Channels available for announcements, support rooms, and campaign feedback." },
+        { id: "discord-messages", name: "Discord messages", provider: "Discord", route: "/api/discord/messages", readinessRoute: "/api/discord/bot/readiness", connectPlatform: "discord", detail: "Recent community messages available for response workflows." },
+        { id: "reddit-devvit", name: "Reddit Devvit workspace", provider: "Reddit", route: "/api/reddit/readiness", connectPlatform: "reddit", detail: "Community app, moderation, and Reddit Ads readiness." },
         { id: "twitch-clips", name: "Twitch clips", provider: "Twitch", route: "/api/twitch/clips", detail: "Recent clips from the selected Twitch channel." },
         { id: "twitch-videos", name: "Twitch videos", provider: "Twitch", route: "/api/twitch/videos", detail: "Archived videos from the selected Twitch channel." },
         { id: "twitch-schedule", name: "Twitch schedule", provider: "Twitch", route: "/api/twitch/schedule", detail: "Upcoming stream schedule." },
         { id: "tiktok-creator", name: "TikTok creator profile", provider: "TikTok", route: "/api/tiktok/creator-info", detail: "Creator information returned by TikTok." },
         { id: "linkedin-posts", name: "LinkedIn Company posts", provider: "LinkedIn", route: "/api/linkedin/posts", detail: "Recent posts owned by the selected Company Page." },
         { id: "patreon-posts", name: "Patreon creator posts", provider: "Patreon", route: "/api/patreon/posts", detail: "Creator posts available to the selected Patreon campaign." },
+        { id: "manychat-account", name: "Manychat account", provider: "Manychat", route: "/api/manychat/account", readinessRoute: "/api/manychat/readiness", connectPlatform: "manychat", detail: "Customer-owned Manychat account context and isolation status." },
+        { id: "manychat-catalog", name: "Manychat catalog", provider: "Manychat", route: "/api/manychat/catalog", readinessRoute: "/api/manychat/readiness", connectPlatform: "manychat", detail: "Subscriber, tag, field, and flow surfaces available through the connected Manychat account." },
+        { id: "elevenlabs-account", name: "ElevenLabs account", provider: "ElevenLabs", route: "/api/elevenlabs/account", readinessRoute: "/api/elevenlabs/readiness", connectPlatform: "elevenlabs", detail: "Customer-owned ElevenLabs account status and spend isolation." },
+        { id: "elevenlabs-catalog", name: "ElevenLabs voice catalog", provider: "ElevenLabs", route: "/api/elevenlabs/catalog", readinessRoute: "/api/elevenlabs/readiness", connectPlatform: "elevenlabs", detail: "Voices and models available for campaign voiceover planning." },
         { id: "launch-assets", name: "Social Cues launch media", provider: "Social Cues", route: "/api/media/public-assets", detail: "Approved public launch assets available for campaigns." }
       ],
       growth: [
@@ -4862,8 +4877,13 @@
         "Pinterest": ["pinterest"],
         "Twitch": ["twitch"],
         "TikTok": ["tiktok"],
+        "X": ["x"],
         "LinkedIn": ["linkedin"],
         "Patreon": ["patreon"],
+        "Discord": ["discord"],
+        "Reddit": ["reddit"],
+        "Manychat": ["manychat"],
+        "ElevenLabs": ["elevenlabs"],
         "Google": ["youtube", "google_growth", "google_business"],
         "Canva": ["canva"],
         "Shopify": ["shopify"],
@@ -4872,6 +4892,40 @@
         "Social Cues": ["social-cues"]
       };
       return (providerIds[provider] || [String(provider).toLowerCase()]).some(id => id === "social-cues" || active.has(id));
+    }
+
+    function providerSourcePlatformIds(provider = "") {
+      const providerIds = {
+        "YouTube": ["youtube"],
+        "Threads": ["threads"],
+        "Pinterest": ["pinterest"],
+        "Twitch": ["twitch"],
+        "TikTok": ["tiktok"],
+        "X": ["x"],
+        "LinkedIn": ["linkedin"],
+        "Patreon": ["patreon"],
+        "Discord": ["discord"],
+        "Reddit": ["reddit"],
+        "Manychat": ["manychat"],
+        "ElevenLabs": ["elevenlabs"],
+        "Google": ["youtube", "google_growth", "google_business"],
+        "Canva": ["canva"],
+        "Shopify": ["shopify"],
+        "Etsy": ["etsy"],
+        "Meta": ["facebook", "instagram", "threads"],
+        "Social Cues": ["social-cues"]
+      };
+      return providerIds[provider] || [String(provider).toLowerCase()];
+    }
+
+    function customerSourceStatus(item = {}) {
+      const active = activeWorkspacePlatformIds();
+      const ids = providerSourcePlatformIds(item.provider);
+      const connected = ids.some(id => id === "social-cues" || active.has(id));
+      if (connected) return { state: "ready", label: "Ready", detail: "This source can be queried for this workspace." };
+      const service = backendService(item.connectPlatform || ids[0] || "");
+      if (service?.configured) return { state: "gated", label: "Connect", detail: "Credentials exist; connect the customer account or choose the managed asset." };
+      return { state: "blocked", label: "Setup", detail: "Provider setup, login, or approval is still needed before this source can return data." };
     }
 
     function setStudioMode(mode = "post") {
@@ -7925,18 +7979,27 @@
       const list = $(target.list);
       if (!list) return;
       const selected = customerSurfaceState[`selected${surface[0].toUpperCase()}${surface.slice(1)}Source`] || "";
-      const visibleSources = (customerSources[surface] || []).filter(item => providerSourceIsActive(item.provider));
-      list.innerHTML = visibleSources.map(item => `
+      const visibleSources = surface === "library"
+        ? (customerSources[surface] || [])
+        : (customerSources[surface] || []).filter(item => providerSourceIsActive(item.provider));
+      list.innerHTML = visibleSources.map(item => {
+        const status = customerSourceStatus(item);
+        const canLoad = status.state === "ready" || item.provider === "Social Cues";
+        const connectPlatform = item.connectPlatform || providerSourcePlatformIds(item.provider)[0] || "";
+        return `
         <article class="variant" style="--accent:${customerSourceAccent(item.provider)}">
           <div class="variant-head">
             <div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.detail)}</p></div>
-            <span class="pill ${selected === item.id ? "published" : "approved"}">${escapeHtml(item.provider)}</span>
+            <span class="pill ${selected === item.id ? "published" : automationStatePill(status.state)}">${escapeHtml(status.label)}</span>
           </div>
+          <div class="tags"><span class="tag">${escapeHtml(item.provider)}</span><span class="tag">${escapeHtml(status.detail)}</span></div>
           <div class="variant-tools">
-            <button class="secondary" data-customer-surface="${escapeHtml(surface)}" data-customer-source="${escapeHtml(item.id)}">${selected === item.id ? "Refresh" : "Load"}</button>
+            <button class="secondary" data-customer-surface="${escapeHtml(surface)}" data-customer-source="${escapeHtml(item.id)}">${canLoad ? (selected === item.id ? "Refresh" : "Load") : "Try load"}</button>
+            ${item.readinessRoute ? `<button class="secondary" data-customer-source-check="${escapeHtml(item.id)}" data-customer-surface="${escapeHtml(surface)}">Check gate</button>` : ""}
+            ${connectPlatform && connectPlatform !== "social-cues" ? `<button class="secondary" data-customer-source-connect="${escapeHtml(connectPlatform)}">Connect</button>` : ""}
           </div>
         </article>
-      `).join("") || `<div class="empty">Connect or select a relevant account to add ${escapeHtml(surface)} sources.</div>`;
+      `; }).join("") || `<div class="empty">No ${escapeHtml(surface)} sources configured.</div>`;
     }
 
     function renderLibrary() {
@@ -8041,6 +8104,32 @@
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || payload.ok === false) throw new Error(payload.error || payload.message || `${config.provider} did not return this source.`);
         resultElement.innerHTML = renderProviderPayload(payload);
+      } catch (error) {
+        resultElement.innerHTML = `<div class="notice">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function checkCustomerSourceGate(surface, id) {
+      const config = sourceConfig(surface, id);
+      const target = customerSourceTarget(surface);
+      const resultElement = $(target.result);
+      if (!config || !resultElement) return;
+      customerSurfaceState[`selected${surface[0].toUpperCase()}${surface.slice(1)}Source`] = id;
+      renderCustomerSources(surface);
+      if (target.title) $(target.title).textContent = `${config.name} gate`;
+      if (target.meta) $(target.meta).textContent = config.detail;
+      const route = config.readinessRoute || config.route;
+      resultElement.innerHTML = `<div class="empty">Checking ${escapeHtml(config.name)}...</div>`;
+      try {
+        const response = await authedFetch(route);
+        const payload = await response.json().catch(() => ({}));
+        resultElement.innerHTML = renderProviderPayload({
+          ok: response.ok && payload.ok !== false,
+          source: config.name,
+          provider: config.provider,
+          route,
+          ...payload
+        }, `${config.provider} did not return readiness data.`);
       } catch (error) {
         resultElement.innerHTML = `<div class="notice">${escapeHtml(error.message)}</div>`;
       }
@@ -13158,6 +13247,16 @@
       const customerSourceButton = event.target.closest("[data-customer-source]");
       if (customerSourceButton) {
         loadCustomerSource(customerSourceButton.dataset.customerSurface, customerSourceButton.dataset.customerSource);
+        return;
+      }
+      const customerSourceCheckButton = event.target.closest("[data-customer-source-check]");
+      if (customerSourceCheckButton) {
+        checkCustomerSourceGate(customerSourceCheckButton.dataset.customerSurface, customerSourceCheckButton.dataset.customerSourceCheck);
+        return;
+      }
+      const customerSourceConnectButton = event.target.closest("[data-customer-source-connect]");
+      if (customerSourceConnectButton) {
+        focusAccountLane(customerSourceConnectButton.dataset.customerSourceConnect || "");
         return;
       }
       const revokeInviteButton = event.target.closest("[data-workspace-invite-revoke]");
