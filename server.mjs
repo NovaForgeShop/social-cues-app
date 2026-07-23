@@ -10330,6 +10330,10 @@ function safeManychatInstallationLink(value = "") {
   }
 }
 
+function looksLikeManychatProfileApiKey(value = "") {
+  return /^\d{5,}:[A-Za-z0-9_-]{24,}$/.test(String(value || "").trim());
+}
+
 async function manychatApi(pathname, params = {}, apiKey = "", options = {}) {
   if (!apiKey) throw new Error("A Manychat Account API key is required.");
   const method = String(options.method || "GET").toUpperCase();
@@ -21869,6 +21873,12 @@ async function route(req, res) {
     if (!apiKey || apiKey.length < 16 || apiKey.length > 4096) {
       return json(res, 400, { ok: false, error: "Enter a valid Manychat Account API key or developer App Key." });
     }
+    if (looksLikeManychatProfileApiKey(apiKey)) {
+      return json(res, 400, {
+        ok: false,
+        error: "This looks like a Profile Public API key. It cannot read contacts, tags, fields, flows, or account identity. Add a channel in Manychat, create a share-enabled template, then use the Profile Template form with that template's numeric ID. Use Settings > API or an installed developer App Key for the CRM connector."
+      });
+    }
     const model = await modelForSession(session, sharedModel);
     ensureUserWorkspace(model, session.user);
     try {
@@ -21983,11 +21993,14 @@ async function route(req, res) {
       });
     } catch (error) {
       const invalidKey = error.status === 401 || error.status === 403 || /wrong token|invalid token|unauthor/i.test(String(error.message || ""));
-      return json(res, invalidKey ? 401 : 502, {
+      const templateValidationError = error.status === 400 && /validation|template/i.test(String(error.message || ""));
+      return json(res, invalidKey ? 401 : templateValidationError ? 400 : 502, {
         ok: false,
         provider: "manychat_profile",
         error: invalidKey
           ? "Manychat rejected this Profile API key. Generate or refresh it under Profile > API Settings, then try again with a share-enabled template ID."
+          : templateValidationError
+            ? "Manychat accepted the Profile API credential, but the template is unavailable. Add a channel/account in Manychat, create a template owned by this profile, activate template access, enable single-use sharing, and enter its numeric template ID."
           : error.message || "Manychat could not verify the Profile Template API key and template ID."
       });
     }

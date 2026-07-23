@@ -204,6 +204,7 @@ try {
   if (!appHtml.includes("Account health") || !appHtml.includes('id="accountHealthSummary"') || !appHtml.includes("Refresh insights")) throw new Error("account page should use the customer-facing account health summary");
   if (!appHtml.includes('data-manychat-connect') || !appHtml.includes('type="password"') || !appHtml.includes('authedFetch("/api/manychat/connect"')) throw new Error("Manychat should connect through an authenticated password-style key control");
   if (!appHtml.includes('data-manychat-profile-connect') || !appHtml.includes('data-manychat-template-generate') || !appHtml.includes('authedFetch("/api/manychat/profile/connect"') || !appHtml.includes('authedFetch("/api/manychat/template-link"')) throw new Error("Manychat Profile API must have a distinct template-link connection instead of being submitted as an Account API token");
+  if (!appHtml.includes("Two different Manychat connections") || !appHtml.includes("Profile API key - templates only") || !serverSource.includes("looksLikeManychatProfileApiKey") || !serverSource.includes("Manychat accepted the Profile API credential, but the template is unavailable")) throw new Error("Manychat must identify Profile keys and explain the channel/template prerequisite instead of returning a generic wrong-token error");
   if (!serverSource.includes('credential: encryptedToken(apiKey)') || !serverSource.includes('url.pathname === "/api/manychat/catalog"') || !serverSource.includes('url.pathname === "/api/manychat/action"') || !serverSource.includes('url.pathname === "/api/manychat/usage"')) throw new Error("Manychat per-user connection, catalog, guarded actions, and usage routes are missing");
   if (!serverSource.includes('url.pathname === "/api/manychat/profile/connect"') || !serverSource.includes('url.pathname === "/api/manychat/template-link"') || !serverSource.includes('platform: "manychat_profile"') || !serverSource.includes('"/user/template/generateSingleUseLink"')) throw new Error("Manychat Profile Template API must verify, encrypt, and reuse a separate per-workspace token family");
   if (!manychatIsolationMigrationSource.includes("create table if not exists public.provider_api_rate_buckets") || !manychatIsolationMigrationSource.includes("pg_advisory_xact_lock") || !manychatIsolationMigrationSource.includes("social_cues_claim_provider_api_quota")) throw new Error("Manychat/provider quota isolation must be durable and concurrency-safe");
@@ -1631,6 +1632,13 @@ try {
   if (!readiness.ok) throw new Error("readiness failed");
   const manychatReadiness = await request("/api/manychat/readiness");
   if (!manychatReadiness.ok || manychatReadiness.isolation?.crossCustomerSharing !== false || !manychatReadiness.routes?.includes("/api/manychat/connect") || !manychatReadiness.routes?.includes("/api/manychat/profile/connect") || !manychatReadiness.routes?.includes("/api/manychat/template-link")) throw new Error("Manychat readiness should expose tenant isolation and separate account/profile connection routes");
+  const wrongManychatLane = await fetch(base + "/api/manychat/connect", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    body: JSON.stringify({ apiKey: "12345678:0123456789abcdef0123456789abcdef" })
+  });
+  const wrongManychatLaneBody = await wrongManychatLane.json();
+  if (wrongManychatLane.status !== 400 || !/Profile Public API key/i.test(wrongManychatLaneBody.error || "")) throw new Error("Manychat Account connector must redirect Profile-key-shaped credentials before calling the Page API");
   const elevenlabsReadiness = await request("/api/elevenlabs/readiness");
   if (!elevenlabsReadiness.ok || elevenlabsReadiness.ready || !elevenlabsReadiness.routes?.includes("/api/elevenlabs/connect") || !elevenlabsReadiness.requiredKeyAccess?.includes("Text to Speech: Access") || !elevenlabsReadiness.connectionModel?.includes("API key")) throw new Error("ElevenLabs readiness should expose a disconnected restricted-key connection without importing provider credentials");
 

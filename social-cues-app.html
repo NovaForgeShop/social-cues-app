@@ -12126,10 +12126,10 @@
         const manychatConnectForm = platform.id === "manychat" && !known ? `
           <form class="manychat-connect-form" data-manychat-connect>
             <label>
-              <span>Account API key</span>
-              <input name="apiKey" type="password" autocomplete="off" spellcheck="false" required minlength="16" placeholder="Paste key from Manychat Settings > API">
+              <span>Account or App key - CRM and contacts</span>
+              <input name="apiKey" type="password" autocomplete="off" spellcheck="false" required minlength="16" placeholder="Manychat account Settings > API or installed App Key">
             </label>
-            <button type="submit">Connect</button>
+            <button type="submit">Connect CRM</button>
           </form>
         ` : "";
         const manychatProfileConnected = Boolean(metaState.manychatStatus?.profileAccountConnected);
@@ -12144,16 +12144,17 @@
         ` : `
           <form class="manychat-connect-form profile" data-manychat-profile-connect>
             <label>
-              <span>Profile API key</span>
+              <span>Profile API key - templates only</span>
               <input name="apiKey" type="password" autocomplete="off" spellcheck="false" required minlength="16" placeholder="Profile > API Settings key">
             </label>
             <label>
-              <span>Template ID</span>
-              <input name="templateId" type="number" inputmode="numeric" min="1" step="1" required placeholder="Template ID">
+              <span>Share-enabled template ID - required</span>
+              <input name="templateId" type="number" inputmode="numeric" min="1" step="1" required placeholder="Numeric template ID">
             </label>
             <button type="submit">Connect templates</button>
           </form>
         `) : "";
+        const manychatSetupHint = platform.id === "manychat" ? `<div class="notice"><strong>Two different Manychat connections.</strong> Profile keys only generate template installation links. Subscriber CRM requires an Account API key or per-installation App Key. Before a Profile key can connect, add a Manychat channel, create a template, activate its access, and enable single-use sharing.</div>` : "";
         const elevenlabsConnectForm = platform.id === "elevenlabs" && !known ? `
           <form class="manychat-connect-form" data-elevenlabs-connect>
             <label>
@@ -12173,6 +12174,7 @@
           </div>
           ${providerStateChips(platform.id, laneAccount)}
           ${renderProviderAccountPicker(platform.id, accounts)}
+          ${manychatSetupHint}
           ${manychatConnectForm}
           ${manychatProfileForm}
           ${elevenlabsConnectForm}
@@ -12335,7 +12337,7 @@
         showAppResult("Manychat connection failed", error.message, "error");
       } finally {
         submit.disabled = false;
-        submit.textContent = "Connect";
+        submit.textContent = "Connect CRM";
       }
     }
 
