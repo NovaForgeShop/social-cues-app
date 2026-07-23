@@ -112,6 +112,7 @@ const envAliases = {
   ELEVENLABS_API_KEY: ["ELEVEN_LABS_API_KEY", "XI_API_KEY", "elevenlabs_api_key"],
   REDDIT_DEVVIT_APP_SLUG: ["DEVVIT_APP_SLUG", "REDDIT_APP_SLUG", "reddit_devvit_app_slug"],
   REDDIT_DEVVIT_PLAYTEST_SUBREDDIT: ["DEVVIT_PLAYTEST_SUBREDDIT", "REDDIT_PLAYTEST_SUBREDDIT", "reddit_devvit_playtest_subreddit"],
+  REDDIT_DEVVIT_COMMAND_THREAD_URL: ["DEVVIT_COMMAND_THREAD_URL", "REDDIT_COMMAND_THREAD_URL", "reddit_devvit_command_thread_url"],
   REDDIT_DATA_API_CLIENT_ID: ["REDDIT_CLIENT_ID", "REDDIT_APP_ID", "REDDIT_DATA_CLIENT_ID", "reddit_client_id"],
   REDDIT_DATA_API_CLIENT_SECRET: ["REDDIT_CLIENT_SECRET", "REDDIT_APP_SECRET", "REDDIT_DATA_CLIENT_SECRET", "reddit_client_secret"],
   REDDIT_ADS_API_CLIENT_ID: ["REDDIT_ADS_CLIENT_ID", "REDDIT_ADS_APP_ID", "reddit_ads_client_id"],
@@ -284,6 +285,7 @@ const redditDevvitPlaytestSubreddit = envValue("REDDIT_DEVVIT_PLAYTEST_SUBREDDIT
 const redditDevvitPlaytestUrl = redditDevvitPlaytestSubreddit
   ? `https://www.reddit.com/r/${redditDevvitPlaytestSubreddit}/?playtest=${encodeURIComponent(redditDevvitAppSlug)}`
   : "";
+const redditDevvitCommandThreadUrl = envValue("REDDIT_DEVVIT_COMMAND_THREAD_URL", redditDevvitPlaytestUrl);
 const redditDataApiClientId = envValue("REDDIT_DATA_API_CLIENT_ID");
 const redditDataApiClientSecret = envValue("REDDIT_DATA_API_CLIENT_SECRET");
 const redditAdsApiClientId = envValue("REDDIT_ADS_API_CLIENT_ID");
@@ -1039,7 +1041,7 @@ const providerServiceStack = [
     name: "Reddit / Devvit",
     purpose: "Reddit-hosted community app workflows, subreddit post/comment signal, mod-tool style response loops, and Reddit Ads readiness after approval.",
     env: [],
-    optionalEnv: ["REDDIT_DEVVIT_APP_SLUG", "REDDIT_DATA_API_CLIENT_ID", "REDDIT_DATA_API_CLIENT_SECRET", "REDDIT_COMMERCIAL_APPROVED", "REDDIT_ADS_API_CLIENT_ID", "REDDIT_ADS_API_CLIENT_SECRET", "REDDIT_ADS_ACCOUNT_ID"],
+    optionalEnv: ["REDDIT_DEVVIT_APP_SLUG", "REDDIT_DEVVIT_COMMAND_THREAD_URL", "REDDIT_DATA_API_CLIENT_ID", "REDDIT_DATA_API_CLIENT_SECRET", "REDDIT_COMMERCIAL_APPROVED", "REDDIT_ADS_API_CLIENT_ID", "REDDIT_ADS_API_CLIENT_SECRET", "REDDIT_ADS_ACCOUNT_ID"],
     configured: () => redditDevvitProjectReady() || Boolean(redditDataApiClientId || redditAdsApiClientId),
     firstUse: "/api/reddit/readiness"
   }
@@ -3135,13 +3137,15 @@ function publicPublishQueueRecord(item = {}) {
   const safe = cloneJson(item) || {};
   delete safe.raw;
   delete safe.providerResponse;
+  if (safe.providerPostId && safe.publishedAt) safe.status = "published";
   return safe;
 }
 
 function queueRecordFromVariant(item = {}, session = null) {
   const lastAttempt = item.variant?.lastPublishAttempt || null;
   const variantStatus = String(item.variant?.status || "").toLowerCase();
-  const status = variantStatus === "published"
+  const hasPublishedEvidence = Boolean(item.variant?.providerPostId && item.variant?.publishedAt);
+  const status = variantStatus === "published" || hasPublishedEvidence
     ? "published"
     : variantStatus === "approved"
       ? "approved"
@@ -16463,6 +16467,14 @@ function redditReadinessPayload() {
     projectDir: runtimeMode === "vercel" ? "local-development-only" : redditDevvitProjectDir,
     playtestSubreddit: redditDevvitPlaytestSubreddit,
     playtestUrl: redditDevvitPlaytestUrl,
+    commandThreadUrl: redditDevvitCommandThreadUrl,
+    conversationHost: "reddit",
+    records: redditDevvitCommandThreadUrl ? [{
+      title: "Reddit community command",
+      detail: `Open the installed Social Cues app in r/${redditDevvitPlaytestSubreddit} to review comments, reply, and moderate.`,
+      url: redditDevvitCommandThreadUrl,
+      status: communityCommandReady ? "playtest-ready" : "setup-needed"
+    }] : [],
     portalRoute: providerPortalRoute("reddit"),
     products: ["Reddit Developer Platform / Devvit", "Reddit API through Devvit permissions", "Traditional Reddit Data API (not implemented)", "Reddit Ads API (not implemented)", "Reddit Embeds"],
     allowedUse: [
@@ -16492,7 +16504,7 @@ function redditReadinessPayload() {
     ],
     missingEnv: [],
     optionalMissingEnv: ["REDDIT_DATA_API_CLIENT_ID", "REDDIT_DATA_API_CLIENT_SECRET", "REDDIT_COMMERCIAL_APPROVED", "REDDIT_ADS_API_CLIENT_ID", "REDDIT_ADS_API_CLIENT_SECRET", "REDDIT_ADS_ACCOUNT_ID"].filter(name => !envPresent(name)),
-    acceptedEnv: envAcceptedMap(["REDDIT_DEVVIT_APP_SLUG", "REDDIT_DEVVIT_PLAYTEST_SUBREDDIT", "REDDIT_DATA_API_CLIENT_ID", "REDDIT_DATA_API_CLIENT_SECRET", "REDDIT_COMMERCIAL_APPROVED", "REDDIT_ADS_API_CLIENT_ID", "REDDIT_ADS_API_CLIENT_SECRET", "REDDIT_ADS_ACCOUNT_ID"]),
+    acceptedEnv: envAcceptedMap(["REDDIT_DEVVIT_APP_SLUG", "REDDIT_DEVVIT_PLAYTEST_SUBREDDIT", "REDDIT_DEVVIT_COMMAND_THREAD_URL", "REDDIT_DATA_API_CLIENT_ID", "REDDIT_DATA_API_CLIENT_SECRET", "REDDIT_COMMERCIAL_APPROVED", "REDDIT_ADS_API_CLIENT_ID", "REDDIT_ADS_API_CLIENT_SECRET", "REDDIT_ADS_ACCOUNT_ID"]),
     commands: [
       "npx.cmd devvit login",
       "npx.cmd devvit new --template=react",

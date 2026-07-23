@@ -1679,7 +1679,7 @@
               <h2>Approval room</h2>
               <p>Every live post has two safety checks: approve the content, then confirm it should enter the publishing queue.</p>
             </div>
-            <button class="primary" id="publishApproved" disabled>Confirm &amp; queue approved</button>
+            <button class="primary" id="publishApproved" disabled>Confirm approved</button>
           </div>
           <div style="height:14px"></div>
           <div class="notice approval-progress" id="approvalProgress" aria-live="polite">Checking posts that need your attention.</div>
@@ -4636,6 +4636,47 @@
       return null;
     }
 
+    function redditCommandThreadUrl() {
+      return safeRedditHostedUrl(metaState.redditStatus?.commandThreadUrl || metaState.redditStatus?.playtestUrl || "");
+    }
+
+    function markRedditHandoffReady(variant) {
+      const now = new Date().toISOString();
+      variant.status = "approved";
+      variant.approvalConfirmedAt = now;
+      variant.handoffReadyAt = now;
+      variant.updatedAt = now;
+      delete variant.queuedAt;
+      delete variant.scheduledFor;
+    }
+
+    async function openRedditHandoff(variantId, requireConfirmation = false) {
+      const campaignItem = campaignVariantForId(variantId);
+      const quickItem = quickPostBatchForVariant(variantId);
+      const variant = campaignItem?.variant || quickItem?.variant;
+      if (!variant || variant.platform !== "reddit") return;
+      if (variant.status !== "approved") {
+        showAppResult("Content approval needed", "Approve the Reddit copy before opening its community workflow.", "error");
+        return;
+      }
+      if (requireConfirmation && !confirm("Final check: confirm this approved Reddit post for the installed community workflow?")) return;
+      if (requireConfirmation || !variant.approvalConfirmedAt) markRedditHandoffReady(variant);
+      if (quickItem?.batch) quickItem.batch.updatedAt = variant.updatedAt;
+      const url = redditCommandThreadUrl();
+      if (variant.copy && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(variant.copy).catch(() => null);
+      }
+      await saveModel("Reddit copy confirmed for the installed community workflow.");
+      if (url) window.open(url, "_blank", "noopener,noreferrer");
+      showAppResult(
+        "Reddit handoff ready",
+        url
+          ? "The approved copy is ready and the Reddit comment inbox has opened. Paste the copy only when you want to create a new Reddit post."
+          : "The approved copy is ready. Load Reddit readiness once to restore the private playtest link.",
+        "success"
+      );
+    }
+
     function syncCopy(id) {
       const item = campaignVariantForId(id);
       const variant = item?.variant;
@@ -4668,10 +4709,7 @@
       const variant = item?.variant;
       if (!variant) return;
       if (variant.platform === "reddit" && ["queued", "submitted", "published"].includes(status)) {
-        variant.status = "approved";
-        delete variant.queuedAt;
-        delete variant.scheduledFor;
-        saveModel("Reddit approved for manual Devvit handoff. It was not added to the native publish queue.");
+        void openRedditHandoff(id, true);
         return;
       }
       if (status === "queued" && variant.status !== "approved") {
@@ -4686,11 +4724,13 @@
       if (status === "approved") {
         variant.approvedAt = new Date().toISOString();
         delete variant.approvalConfirmedAt;
+        delete variant.handoffReadyAt;
       }
       if (status === "draft") {
         delete variant.approvedAt;
         delete variant.approvalConfirmedAt;
         delete variant.queuedAt;
+        delete variant.handoffReadyAt;
       }
       if (status === "published") {
         variant.publishedAt = new Date().toISOString();
@@ -4745,20 +4785,21 @@
       const approvedCampaignVariants = (model.campaigns || []).flatMap(campaign => (campaign.variants || [])
         .filter(variant => variant.status === "approved" && variant.platform !== "reddit"));
       const approvedQuickVariants = (model.quickPosts || []).flatMap(batch => (batch.variants || [])
-        .filter(variant => variant.status === "approved"));
+        .filter(variant => variant.status === "approved" && variant.platform !== "reddit"));
+      const redditHandoffVariants = [
+        ...(model.campaigns || []).flatMap(campaign => campaign.variants || []),
+        ...(model.quickPosts || []).flatMap(batch => batch.variants || [])
+      ].filter(variant => variant.status === "approved" && variant.platform === "reddit" && !variant.approvalConfirmedAt);
       const approvedQueueRows = standaloneQueueApprovalRows()
         .filter(row => String(row.status || "").toLowerCase() === "approved");
       const localApprovalCount = approvedCampaignVariants.length + approvedQuickVariants.length;
-      const approvalCount = localApprovalCount + approvedQueueRows.length;
-      const redditHandoffs = (model.campaigns || []).flatMap(campaign => campaign.variants || [])
-        .filter(variant => variant.status === "approved" && variant.platform === "reddit").length;
+      const approvalCount = localApprovalCount + approvedQueueRows.length + redditHandoffVariants.length;
+      const redditHandoffs = redditHandoffVariants.length;
       if (!approvalCount) {
-        showAppResult("Nothing awaiting final confirmation", redditHandoffs
-          ? `${redditHandoffs} Reddit handoff${redditHandoffs === 1 ? " is" : "s are"} approved for manual Devvit use.`
-          : "Approve content first. Confirm & queue becomes available for step 2.", "info");
+        showAppResult("Nothing awaiting final confirmation", "Approve content first. Confirm & queue becomes available for step 2.", "info");
         return;
       }
-      if (!confirm(`Final check: queue ${approvalCount} approved post${approvalCount === 1 ? "" : "s"} for delivery?`)) return;
+      if (!confirm(`Final check: confirm ${approvalCount} approved post${approvalCount === 1 ? "" : "s"} for delivery or provider handoff?`)) return;
       let count = 0;
       const failures = [];
       const confirmButton = $("#publishApproved");
@@ -4779,7 +4820,7 @@
       });
       (model.quickPosts || []).forEach(batch => {
         (batch.variants || []).forEach(variant => {
-          if (variant.status !== "approved") return;
+          if (variant.status !== "approved" || variant.platform === "reddit") return;
           variant.status = "queued";
           variant.queuedAt = new Date().toISOString();
           variant.approvalConfirmedAt = variant.queuedAt;
@@ -4792,9 +4833,13 @@
           count++;
         });
       });
-      const handoffNote = redditHandoffs ? ` ${redditHandoffs} Reddit variant${redditHandoffs === 1 ? " remains" : "s remain"} approved for manual Devvit handoff.` : "";
-      if (localApprovalCount) {
-        await saveModel(`Confirmed and queued ${localApprovalCount} approved post${localApprovalCount === 1 ? "" : "s"}.${handoffNote}`);
+      redditHandoffVariants.forEach(variant => {
+        markRedditHandoffReady(variant);
+        count++;
+      });
+      const handoffNote = redditHandoffs ? ` ${redditHandoffs} Reddit variant${redditHandoffs === 1 ? " is" : "s are"} ready in the installed community workflow.` : "";
+      if (localApprovalCount || redditHandoffs) {
+        await saveModel(`Confirmed ${localApprovalCount + redditHandoffs} approved post${localApprovalCount + redditHandoffs === 1 ? "" : "s"}.${handoffNote}`);
       }
       for (const row of approvedQueueRows) {
         try {
@@ -4810,7 +4855,7 @@
         showAppResult("Some posts could not be queued", `${count} post${count === 1 ? " is" : "s are"} queued. ${failures.length} still need attention: ${failures.join("; ")}`, "error");
         return;
       }
-      showAppResult("Final confirmation complete", `${count} approved post${count === 1 ? " is" : "s are"} now in the publishing queue.${handoffNote}`, "success");
+      showAppResult("Final confirmation complete", `${count - redditHandoffs} approved post${count - redditHandoffs === 1 ? " is" : "s are"} now in the publishing queue.${handoffNote}`, "success");
     }
 
     function addProof() {
@@ -7716,7 +7761,10 @@
     function miniCard(v, label) {
       const p = platformById(v.platform);
       const redditHandoff = v.platform === "reddit";
-      const displayStatus = redditHandoff && ["approved", "queued", "submitted", "published"].includes(v.status) ? "manual handoff" : v.status;
+      const redditDisplayStatuses = ["approved", "queued", "submitted", "published"];
+      const displayStatus = redditHandoff && redditDisplayStatuses.includes(v.status)
+        ? (v.approvalConfirmedAt || v.status !== "approved" ? "ready in Reddit" : "awaiting confirmation")
+        : v.status;
       return `<div class="variant" style="--accent:${escapeHtml(p.accent)}">
         <div class="variant-head">
           <div>
@@ -7729,8 +7777,9 @@
       </div>`;
     }
 
-    function approvalStepCopy(status = "draft", platform = "") {
-      if (platform === "reddit" && status === "approved") return "Approved for manual Reddit / Devvit handoff.";
+    function approvalStepCopy(status = "draft", platform = "", approvalConfirmedAt = "") {
+      if (platform === "reddit" && status === "approved" && approvalConfirmedAt) return "Both approval checks are complete. Open the Reddit inbox to review live comments or use the approved copy.";
+      if (platform === "reddit" && status === "approved") return "Step 1 complete. Step 2: confirm this copy for the installed Reddit community workflow.";
       if (["draft", "needs revision", "queued-review-only"].includes(status)) return "Step 1 of 2: review the copy and approve the content.";
       if (status === "approved") return "Step 1 complete. Step 2 of 2: confirm this post should enter the publishing queue.";
       if (["queued", "scheduled"].includes(status)) return "Both approval checks are complete. This post is in the publishing queue.";
@@ -7766,9 +7815,14 @@
       const specHtml = spec ? `<div class="notice"><strong>Video output:</strong> ${escapeHtml(spec.format)} - ${escapeHtml(spec.resolution)} - ${escapeHtml(spec.duration)}${spec.outputName ? `<br><strong>File:</strong> ${escapeHtml(spec.outputName)}` : ""}<br>${escapeHtml(spec.safeArea || "")}</div>` : "";
       const videoTags = (v.videoHashtags || []).length ? `<div class="tags">${v.videoHashtags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>` : "";
       const redditHandoff = v.platform === "reddit";
-      const displayStatus = redditHandoff && ["approved", "queued", "submitted", "published"].includes(v.status) ? "manual handoff" : v.status;
+      const redditReady = redditHandoff && v.status === "approved" && Boolean(v.approvalConfirmedAt);
+      const displayStatus = redditHandoff && v.status === "approved" ? (redditReady ? "ready in Reddit" : "awaiting confirmation") : v.status;
       const approvalActions = redditHandoff
-        ? `<button data-variant-action="set-status" data-variant-id="${id}" data-status="approved">Approve handoff</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button><button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Draft</button><span class="tag">Manual / Devvit only</span>`
+        ? redditReady
+          ? `<button class="primary" data-variant-action="open-reddit" data-variant-id="${id}">Open Reddit inbox</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button><button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Return to draft</button>`
+          : v.status === "approved"
+            ? `<button class="primary" data-variant-action="confirm-reddit" data-variant-id="${id}">Confirm &amp; open Reddit (2 of 2)</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button><button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Return to draft</button>`
+            : `<button class="primary" data-variant-action="set-status" data-variant-id="${id}" data-status="approved">Approve content (1 of 2)</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button><button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Draft</button>`
         : v.status === "approved"
           ? `<button class="primary" data-variant-action="set-status" data-variant-id="${id}" data-status="queued">Confirm &amp; queue (2 of 2)</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button><button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Return to draft</button>`
           : ["queued", "scheduled", "processing", "submitted", "published"].includes(String(v.status || "").toLowerCase())
@@ -7778,19 +7832,19 @@
         <div class="variant-head">
           <div>
             <h3>${escapeHtml(p?.name || "Platform")}</h3>
-            <p>${redditHandoff ? "Manual / Devvit handoff - installed-community command thread" : `${escapeHtml(p?.fit || "Platform fit")} - ${escapeHtml(v.bestTime)} - ${escapeHtml(v.connector)}`}</p>
+            <p>${redditHandoff ? "Installed-community comment, reply, and moderation workflow" : `${escapeHtml(p?.fit || "Platform fit")} - ${escapeHtml(v.bestTime)} - ${escapeHtml(v.connector)}`}</p>
           </div>
           <span class="pill ${redditHandoff ? "approved" : statusClass(v.status)}">${escapeHtml(displayStatus)}</span>
         </div>
         <textarea data-copy="${id}">${escapeHtml(v.copy)}</textarea>
         ${destinationHtml}
-        ${redditHandoff ? `<div class="notice"><strong>Manual / Devvit handoff.</strong> Approving keeps this copy ready for an installed Reddit command thread. Social Cues will not add it to the native queue or auto-publish it.</div>` : ""}
+        ${redditHandoff ? `<div class="notice"><strong>Reddit-hosted workflow.</strong> Social Cues keeps the copy approval here, while live comments, replies, and moderator actions stay inside the installed Reddit app.</div>` : ""}
         ${mediaHtml}
         ${specHtml}
         ${editHtml}
         ${flags}
         ${videoTags}
-        <div class="notice approval-step"><strong>${escapeHtml(approvalStepCopy(String(v.status || "draft").toLowerCase(), v.platform))}</strong></div>
+        <div class="notice approval-step"><strong>${escapeHtml(approvalStepCopy(String(v.status || "draft").toLowerCase(), v.platform, v.approvalConfirmedAt))}</strong></div>
         <div class="tags">
           ${v.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
           <span class="tag">${escapeHtml(disclosureNote(activeCampaign()))}</span>
@@ -7862,9 +7916,9 @@
       return {
         review: allLocal.filter(item => ["draft", "needs revision"].includes(String(item.status || "").toLowerCase())).length
           + queueRows.filter(item => String(item.status || "").toLowerCase() === "queued-review-only").length,
-        confirm: allLocal.filter(item => item.status === "approved" && item.platform !== "reddit").length
+        confirm: allLocal.filter(item => item.status === "approved" && (item.platform !== "reddit" || !item.approvalConfirmedAt)).length
           + queueRows.filter(item => String(item.status || "").toLowerCase() === "approved").length,
-        manual: campaignVariants.filter(item => item.status === "approved" && item.platform === "reddit").length,
+        manual: allLocal.filter(item => item.status === "approved" && item.platform === "reddit" && item.approvalConfirmedAt).length,
         queued: allLocal.filter(item => ["queued", "scheduled", "processing", "submitted"].includes(String(item.status || "").toLowerCase())).length
       };
     }
@@ -7883,16 +7937,16 @@
       if (attention) attention.classList.toggle("hidden", !pending);
       if (pending) {
         $("#approvalAttentionTitle").textContent = `${pending} post${pending === 1 ? " needs" : "s need"} your approval`;
-        $("#approvalAttentionDetail").textContent = `${summary.review} need content review; ${summary.confirm} need the final Confirm & queue check.`;
+        $("#approvalAttentionDetail").textContent = `${summary.review} need content review; ${summary.confirm} need the final delivery or provider-workflow check.`;
       }
       const progress = $("#approvalProgress");
       if (progress) progress.innerHTML = pending
-        ? `<strong>${summary.review} at step 1; ${summary.confirm} at step 2.</strong> Approve the content first. Then Confirm &amp; queue to make the post deliverable.${summary.manual ? ` ${summary.manual} Reddit handoff${summary.manual === 1 ? " is" : "s are"} ready for manual Devvit use.` : ""}`
+        ? `<strong>${summary.review} at step 1; ${summary.confirm} at step 2.</strong> Approve the content first. Then confirm it for delivery or its provider workflow.${summary.manual ? ` ${summary.manual} Reddit item${summary.manual === 1 ? " is" : "s are"} ready in the Reddit inbox.` : ""}`
         : `<strong>Approval room clear.</strong> There are no posts waiting for a decision.`;
       const confirmAll = $("#publishApproved");
       if (confirmAll) {
         confirmAll.disabled = summary.confirm === 0;
-        confirmAll.textContent = summary.confirm ? `Confirm & queue approved (${summary.confirm})` : "Confirm & queue approved";
+        confirmAll.textContent = summary.confirm ? `Confirm approved (${summary.confirm})` : "Confirm approved";
       }
     }
 
@@ -7916,6 +7970,10 @@
       const item = quickPostBatchForVariant(variantId);
       if (!item) return;
       syncQuickPostCopy(variantId);
+      if (item.variant.platform === "reddit" && status === "queued") {
+        void openRedditHandoff(variantId, true);
+        return;
+      }
       if (status === "queued" && item.variant.status !== "approved") {
         showAppResult("Content approval needed", "Complete step 1 by approving this one-shot post before the final queue confirmation.", "error");
         return;
@@ -7926,11 +7984,13 @@
       if (status === "approved") {
         item.variant.approvedAt = item.variant.updatedAt;
         delete item.variant.approvalConfirmedAt;
+        delete item.variant.handoffReadyAt;
       }
       if (status === "draft") {
         delete item.variant.approvedAt;
         delete item.variant.approvalConfirmedAt;
         delete item.variant.queuedAt;
+        delete item.variant.handoffReadyAt;
       }
       if (status === "queued") {
         item.variant.queuedAt = item.variant.updatedAt;
@@ -7962,15 +8022,19 @@
     async function approveAndQueueQuickPost(batchId = "") {
       const batch = (model.quickPosts || []).find(item => item.id === batchId);
       if (!batch) return;
-      const approved = (batch.variants || []).filter(variant => variant.status === "approved");
+      const approved = (batch.variants || []).filter(variant => variant.status === "approved" && (variant.platform !== "reddit" || !variant.approvalConfirmedAt));
       if (!approved.length) {
         showAppResult("Content approval needed", "Approve at least one post in this batch before the final queue confirmation.", "error");
         return;
       }
-      if (!confirm(`Final check: queue ${approved.length} approved post${approved.length === 1 ? "" : "s"} from this batch?`)) return;
+      if (!confirm(`Final check: confirm ${approved.length} approved post${approved.length === 1 ? "" : "s"} from this batch for delivery or provider handoff?`)) return;
       const now = new Date().toISOString();
       approved.forEach(variant => {
         syncQuickPostCopy(variant.id);
+        if (variant.platform === "reddit") {
+          markRedditHandoffReady(variant);
+          return;
+        }
         variant.status = "queued";
         variant.queuedAt = now;
         variant.approvalConfirmedAt = now;
@@ -7981,9 +8045,10 @@
         variant.updatedAt = now;
       });
       batch.updatedAt = now;
-      await saveModel(`Confirmed and queued ${approved.length} one-shot post${approved.length === 1 ? "" : "s"}.`);
+      const redditCount = approved.filter(variant => variant.platform === "reddit").length;
+      await saveModel(`Confirmed ${approved.length} one-shot post${approved.length === 1 ? "" : "s"}.${redditCount ? ` ${redditCount} Reddit item${redditCount === 1 ? " is" : "s are"} ready in the installed community workflow.` : ""}`);
       await refreshPublishQueueState().catch(() => null);
-      showAppResult("Final confirmation complete", `${approved.length} one-shot post${approved.length === 1 ? " is" : "s are"} in the publishing queue.`, "success");
+      showAppResult("Final confirmation complete", `${approved.length - redditCount} one-shot post${approved.length - redditCount === 1 ? " is" : "s are"} in the publishing queue.${redditCount ? ` ${redditCount} Reddit item${redditCount === 1 ? " is" : "s are"} ready in Reddit.` : ""}`, "success");
     }
 
     function removeQuickPost(batchId = "") {
@@ -8000,8 +8065,15 @@
         ? `<div class="media-preview">${media.type === "video" ? `<video src="${escapeHtml(media.url)}" controls preload="metadata"></video>` : `<img src="${escapeHtml(media.url)}" alt="${escapeHtml(media.name || "Post media")}">`}<div class="media-copy">${escapeHtml(media.name || "Media")}<br>${escapeHtml(variant.contentFormat || media.type || "post")}</div></div>`
         : `<div class="notice">${escapeHtml(media.name || "Private media")}</div>`;
       const status = String(variant.status || "draft").toLowerCase();
-      const approvalActions = status === "approved"
-        ? `<button class="primary" data-quick-action="queue" data-quick-variant="${escapeHtml(variant.id)}">Confirm &amp; queue (2 of 2)</button><button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Return to draft</button>`
+      const redditHandoff = variant.platform === "reddit";
+      const redditReady = redditHandoff && status === "approved" && Boolean(variant.approvalConfirmedAt);
+      const displayStatus = redditHandoff && status === "approved" ? (redditReady ? "ready in Reddit" : "awaiting confirmation") : (variant.status || "draft");
+      const approvalActions = redditReady
+        ? `<button class="primary" data-quick-reddit="open" data-quick-variant="${escapeHtml(variant.id)}">Open Reddit inbox</button><button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Return to draft</button>`
+        : status === "approved"
+        ? redditHandoff
+          ? `<button class="primary" data-quick-reddit="confirm" data-quick-variant="${escapeHtml(variant.id)}">Confirm &amp; open Reddit (2 of 2)</button><button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Return to draft</button>`
+          : `<button class="primary" data-quick-action="queue" data-quick-variant="${escapeHtml(variant.id)}">Confirm &amp; queue (2 of 2)</button><button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Return to draft</button>`
         : ["queued", "scheduled", "processing", "submitted", "published"].includes(status)
           ? `<button disabled>Approval complete</button>`
           : `<button class="primary" data-quick-action="approve" data-quick-variant="${escapeHtml(variant.id)}">Approve content (1 of 2)</button><button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Draft</button>`;
@@ -8011,17 +8083,22 @@
             <h3>${escapeHtml(platform.name)}: ${escapeHtml(variant.postingIdentity || "selected account")}</h3>
             <p>${escapeHtml(batch.title || "Quick post")} - ${escapeHtml(variant.contentFormat || "one-shot post")}</p>
           </div>
-          <span class="pill ${escapeHtml(statusClass(variant.status))}">${escapeHtml(variant.status || "draft")}</span>
+          <span class="pill ${escapeHtml(statusClass(variant.status))}">${escapeHtml(displayStatus)}</span>
         </div>
         <textarea data-quick-copy="${escapeHtml(variant.id)}">${escapeHtml(variant.copy || "")}</textarea>
         ${mediaPreview}
         ${variant.destinationUrl ? `<div class="notice"><strong>Primary link</strong><br><a href="${escapeHtml(variant.destinationUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(variant.destinationUrl)}</a></div>` : ""}
-        <div class="notice approval-step"><strong>${escapeHtml(approvalStepCopy(status, variant.platform))}</strong></div>
-        <label class="field-label">Publish time (your local timezone)<input type="datetime-local" data-quick-schedule="${escapeHtml(variant.id)}" value="${escapeHtml(formatDateTimeInput(variant.scheduledFor))}"></label>
+        ${redditHandoff ? `<div class="notice"><strong>Reddit-hosted workflow.</strong> Live comments, replies, and moderation stay inside the installed Reddit app.</div>` : ""}
+        <div class="notice approval-step"><strong>${escapeHtml(approvalStepCopy(status, variant.platform, variant.approvalConfirmedAt))}</strong></div>
+        ${redditHandoff ? "" : `<label class="field-label">Publish time (your local timezone)<input type="datetime-local" data-quick-schedule="${escapeHtml(variant.id)}" value="${escapeHtml(formatDateTimeInput(variant.scheduledFor))}"></label>`}
         <div class="variant-tools">
           ${approvalActions}
         </div>
       </article>`;
+    }
+
+    function quickBatchPendingConfirmationCount(batch) {
+      return (batch.variants || []).filter(variant => variant.status === "approved" && (variant.platform !== "reddit" || !variant.approvalConfirmedAt)).length;
     }
 
     function renderQuickPosts() {
@@ -8034,7 +8111,7 @@
           <div class="row">
             <div><h3>${escapeHtml(batch.title || "Quick post")}</h3><p>${escapeHtml(batch.mode === "everywhere" ? "Every compatible connected account" : "One connected account")} - ${escapeHtml(batch.mediaKind || "media")}</p></div>
             <div class="actions">
-              <button class="primary" data-quick-batch-action="queue-all" data-quick-batch-id="${escapeHtml(batch.id)}" ${(batch.variants || []).some(variant => variant.status === "approved") ? "" : "disabled"}>Confirm &amp; queue approved (${(batch.variants || []).filter(variant => variant.status === "approved").length})</button>
+              <button class="primary" data-quick-batch-action="queue-all" data-quick-batch-id="${escapeHtml(batch.id)}" ${quickBatchPendingConfirmationCount(batch) ? "" : "disabled"}>Confirm approved (${quickBatchPendingConfirmationCount(batch)})</button>
               <button class="danger" data-quick-batch-action="remove" data-quick-batch-id="${escapeHtml(batch.id)}">Remove</button>
             </div>
           </div>
@@ -9096,7 +9173,7 @@
       const discordCommunity = surfaces.discordCommunity || {};
       const discordMessages = surfaces.discordMessages || {};
       const redditStatus = metaState.redditStatus || {};
-      const redditPlaytestUrl = safeRedditHostedUrl(redditStatus.playtestUrl);
+      const redditPlaytestUrl = safeRedditHostedUrl(redditStatus.commandThreadUrl || redditStatus.playtestUrl);
       const redditCommandReady = Boolean(redditStatus.communityCommandReady && redditStatus.devvitReady);
       const threadsReplies = capabilityById("threads_mentions_replies");
       const responseCard = ({ title, detail, ready, accent = "#64a9ff", tags = [], route = "", openUrl = "", openLabel = "Open" }) => `
@@ -9225,13 +9302,13 @@
           accent: "#ff4500",
           route: "/api/reddit/readiness",
           openUrl: redditPlaytestUrl,
-          openLabel: "Open Reddit workflow",
+          openLabel: "Open Reddit inbox",
           tags: [
             redditStatus.appSlug ? `app ${redditStatus.appSlug}` : "",
             redditStatus.playtestSubreddit ? `playtest r/${redditStatus.playtestSubreddit}` : "",
             redditStatus.commercialApproved ? "commercial review approved" : "public rollout gated",
             "installed command thread",
-            "manual / Devvit handoff"
+            "live Reddit-hosted comments"
           ]
         }),
         responseCard({
@@ -12007,7 +12084,7 @@
         if (platform.id === "reddit") {
           const redditStatus = metaState.redditStatus || {};
           const commandReady = Boolean(redditStatus.communityCommandReady && redditStatus.devvitReady);
-          const playtestUrl = safeRedditHostedUrl(redditStatus.playtestUrl);
+          const playtestUrl = safeRedditHostedUrl(redditStatus.commandThreadUrl || redditStatus.playtestUrl);
           const laneLabel = commandReady ? "Devvit ready" : redditStatus.projectReady ? "build gated" : "setup gated";
           return `<article class="variant account-card" data-account-lane="reddit" style="--accent:${escapeHtml(platform.accent)}">
             <div class="variant-head">
@@ -12021,11 +12098,11 @@
               ${redditStatus.appSlug ? `<span class="pill approved">app: ${escapeHtml(redditStatus.appSlug)}</span>` : `<span class="pill draft">app slug: not returned</span>`}
               ${redditStatus.playtestSubreddit ? `<span class="pill approved">playtest: r/${escapeHtml(redditStatus.playtestSubreddit)}</span>` : `<span class="pill draft">playtest community: not returned</span>`}
               <span class="pill ${redditStatus.commercialApproved ? "approved" : "revision"}">review: ${redditStatus.commercialApproved ? "commercial approved" : "public rollout gated"}</span>
-              <span class="pill draft">publishing: manual / Devvit</span>
+              <span class="pill approved">responses: Reddit-hosted</span>
             </div>
             <div class="variant-tools">
               <button class="connector-route" data-route="/api/reddit/readiness">Refresh status</button>
-              ${playtestUrl ? `<button data-reddit-hosted-url="${escapeHtml(playtestUrl)}">Open Reddit workflow</button>` : `<span class="tag">Reddit link not returned</span>`}
+              ${playtestUrl ? `<button data-reddit-hosted-url="${escapeHtml(playtestUrl)}">Open Reddit inbox</button>` : `<span class="tag">Reddit link not returned</span>`}
             </div>
           </article>`;
         }
@@ -13898,6 +13975,11 @@
         updateStandaloneQueueApproval(queueApprovalButton.dataset.queueApproval, queueApprovalButton.dataset.queueConfirm === "true");
         return;
       }
+      const quickRedditButton = event.target.closest("[data-quick-reddit][data-quick-variant]");
+      if (quickRedditButton) {
+        openRedditHandoff(quickRedditButton.dataset.quickVariant, quickRedditButton.dataset.quickReddit === "confirm");
+        return;
+      }
       const quickVariantButton = event.target.closest("[data-quick-action][data-quick-variant]");
       if (quickVariantButton) {
         const status = { approve: "approved", draft: "draft", queue: "queued" }[quickVariantButton.dataset.quickAction];
@@ -13913,6 +13995,8 @@
         if (variantButton.dataset.variantAction === "plan-media-edit") planMediaEdit(variantId);
         if (variantButton.dataset.variantAction === "attach-launch-asset") attachLaunchAsset(variantId);
         if (variantButton.dataset.variantAction === "attach-hosted-video") attachHostedVideo(variantId);
+        if (variantButton.dataset.variantAction === "confirm-reddit") openRedditHandoff(variantId, true);
+        if (variantButton.dataset.variantAction === "open-reddit") openRedditHandoff(variantId, false);
         if (variantButton.dataset.variantAction === "upload-media") {
           const input = $$("[data-media-input]").find(item => item.dataset.mediaInput === variantId);
           if (input) input.click();

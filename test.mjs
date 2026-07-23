@@ -630,7 +630,7 @@ try {
   if (!appHtml.includes('data-studio-mode="post"') || !appHtml.includes('data-studio-mode="video"') || !appHtml.includes("function setStudioMode") || !appHtml.includes("visibleCreationPlatforms().map(platform => platform.id)")) throw new Error("Create must expose one-shot posting and video campaigns as distinct first-class modes");
   if (!appHtml.includes("function providerSourceIsActive") || !appHtml.includes("visibleSources")) throw new Error("Audience, library, and commerce sources must follow selected or connected workspace services");
   if (!appHtml.includes("Analytics lanes ready - refresh live insights") || !appHtml.includes("Accounts connected - analytics permission still needed") || !appHtml.includes("escapeHtml(analysisStatus)")) throw new Error("Audience analysis must not say it is waiting for accounts after canonical connected assets are present");
-  if (!appHtml.includes('data-account-lane="reddit"') || !appHtml.includes("Reddit installed-community lane") || !appHtml.includes("Open Reddit workflow")) throw new Error("Accounts must expose the Reddit installed-community workflow without pretending it is OAuth");
+  if (!appHtml.includes('data-account-lane="reddit"') || !appHtml.includes("Reddit installed-community lane") || !appHtml.includes("Open Reddit inbox")) throw new Error("Accounts must expose the Reddit installed-community inbox without pretending it is OAuth");
   if (!appHtml.includes("function discordClientActionKey") || !appHtml.includes('"Idempotency-Key": idempotencyKey') || !appHtml.includes("clearDiscordClientActionKey(button)")) throw new Error("Discord live customer actions must send reusable idempotency keys and clear them only after success");
   if (!appHtml.includes("function providerStateChips") || !appHtml.includes('data-provider-state="${escapeHtml(label)}"') || !appHtml.includes("function providerAccountEvidenceLine")) throw new Error("account cards must separate connection, publishing, analytics, and review while showing asset evidence");
   if (!appHtml.includes("integrationsStatus?.providerServices") || !appHtml.includes("integrationsStatus?.coreServices")) throw new Error("provider readiness services must not be dropped from GUI state");
@@ -1516,6 +1516,7 @@ try {
   const historicalCampaign = historicalModel.campaigns.find(item => item.id === scheduledCampaign.id) || historicalModel.campaigns[0];
   const historicalAt = new Date().toISOString();
   const historicalPublishedId = `published-facebook-${Date.now()}`;
+  const staleQueuedReceiptId = `queued-youtube-receipt-${Date.now()}`;
   const historicalBlockedId = `blocked-tiktok-${Date.now()}`;
   historicalCampaign.variants.push(
     {
@@ -1527,6 +1528,16 @@ try {
       updatedAt: historicalAt,
       providerPostId: "provider-history-test",
       copy: "Published history smoke test."
+    },
+    {
+      id: staleQueuedReceiptId,
+      platform: "youtube",
+      status: "queued",
+      scheduledFor: dueAt,
+      publishedAt: historicalAt,
+      updatedAt: historicalAt,
+      providerPostId: "provider-stale-ledger-test",
+      copy: "Receipt-backed publication reconciliation smoke test."
     },
     {
       id: historicalBlockedId,
@@ -1549,6 +1560,7 @@ try {
   });
   if (!publishQueue.ok || publishQueue.summary?.total < 2 || !publishQueue.rows?.some(item => item.platform === "facebook")) throw new Error("durable publish queue did not persist scheduled provider items");
   if (!publishQueue.rows.some(item => item.variantId === historicalPublishedId && item.status === "published") || !publishQueue.rows.some(item => item.variantId === historicalBlockedId && item.status === "blocked")) throw new Error("publish queue must retain terminal provider history from campaign variants");
+  if (!publishQueue.rows.some(item => item.variantId === staleQueuedReceiptId && item.status === "published")) throw new Error("provider receipt evidence must reconcile a stale queued ledger status to published");
   if (publishQueue.summary.dueNow >= publishQueue.summary.total) throw new Error("published and blocked history must not be counted as due work");
 
   const providerStateSnapshot = await request("/api/provider/state", {
@@ -1751,6 +1763,7 @@ try {
   if (!youtubeReadiness.ok || !youtubeReadiness.redirectUri.includes("/api/oauth/youtube/callback") || !youtubeReadiness.connectRoute.includes("/api/oauth/youtube/start")) throw new Error("youtube readiness failed");
   const redditReadiness = await request("/api/reddit/readiness");
   if (!redditReadiness.ok || !redditReadiness.projectReady || !redditReadiness.communityCommandReady || !redditReadiness.devvitReady) throw new Error("reddit community command readiness failed");
+  if (!/^https:\/\/([a-z0-9-]+\.)?reddit\.com\//i.test(redditReadiness.commandThreadUrl || "") || !redditReadiness.records?.some(item => item.url === redditReadiness.commandThreadUrl)) throw new Error("reddit readiness should expose the safe hosted command-thread handoff");
   if (!redditReadiness.implementedCapabilities?.some(item => item.includes("Moderator-gated")) || !redditReadiness.implementedCapabilities?.some(item => item.includes("app-attributed replies"))) throw new Error("reddit readiness should expose implemented moderation and reply capabilities");
   if (!redditReadiness.capabilityLimits?.some(item => item.includes("Ads Manager handoff is not Reddit Ads API"))) throw new Error("reddit readiness must keep Ads Manager handoff separate from live Ads API access");
   if (redditReadiness.dataApi?.implemented !== false || redditReadiness.dataApi?.oauthConnected !== false) throw new Error("Reddit readiness must not label credential metadata as an implemented Data API connection");

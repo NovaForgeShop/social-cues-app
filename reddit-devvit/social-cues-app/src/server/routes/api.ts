@@ -20,8 +20,11 @@ import {
   moderationPermissionError,
 } from '../core/moderation';
 import {
+  COMMAND_THREAD_POST_DATA,
+  hasCommandThreadPostData,
+  isRegisteredCommandThread,
   lastSignalKey,
-  requireRegisteredCommandThread,
+  registerCommandThread,
   signalCountKey,
 } from '../core/thread-registry';
 
@@ -52,6 +55,10 @@ function isModerationAction(value: unknown): value is ModerationAction {
 
 function isReplyTargetId(value: string): value is `t1_${string}` | `t3_${string}` {
   return value.startsWith('t1_') || value.startsWith('t3_');
+}
+
+function isPostId(value: string): value is `t3_${string}` {
+  return value.startsWith('t3_');
 }
 
 function isCommentId(value: string): value is `t1_${string}` {
@@ -102,6 +109,29 @@ async function requireModerator(): Promise<ModeratorContext> {
   const moderator = await moderatorContext();
   if (!moderator.isModerator) throw new Error('A subreddit moderator account is required for this action.');
   return moderator;
+}
+
+async function ensureRegisteredCommandThread(postId: string): Promise<void> {
+  if (!isPostId(postId)) throw new Error('The Reddit command thread ID is invalid.');
+  if (await isRegisteredCommandThread(postId)) return;
+
+  if (hasCommandThreadPostData(context.postData)) {
+    await registerCommandThread(postId);
+    return;
+  }
+
+  // Older playtest installs can lose their Redis registration while the Reddit post survives.
+  // Only a moderator may recover a legacy post, and only when the post was created by this app.
+  const [moderator, post] = await Promise.all([
+    moderatorContext(),
+    reddit.getPostById(postId),
+  ]);
+  if (!moderator.isModerator || post.authorName !== context.appSlug) {
+    throw new Error('This post is not a registered Social Cues command thread.');
+  }
+
+  await reddit.mergePostData(postId, COMMAND_THREAD_POST_DATA);
+  await registerCommandThread(postId);
 }
 
 async function requireModerationPermission(action: ModerationAction): Promise<ModeratorContext> {
@@ -228,7 +258,7 @@ async function moderatorSignalSummary(postId: string): Promise<ModeratorThreadSt
 async function threadState(): Promise<ThreadState> {
   const postId = context.postId;
   if (!postId) throw new Error('Open Social Cues from its Reddit thread before managing replies.');
-  await requireRegisteredCommandThread(postId);
+  await ensureRegisteredCommandThread(postId);
 
   const listing = reddit.getComments({
     postId,
@@ -310,7 +340,7 @@ async function threadState(): Promise<ThreadState> {
 async function targetForThread(targetId: string): Promise<Comment | Post> {
   const postId = context.postId;
   if (!postId) throw new Error('Thread context is missing.');
-  await requireRegisteredCommandThread(postId);
+  await ensureRegisteredCommandThread(postId);
   if (targetId === postId) return reddit.getPostById(postId);
   if (!isCommentId(targetId)) throw new Error('The target must be this thread or one of its comments.');
   const comment = await reddit.getCommentById(targetId);
