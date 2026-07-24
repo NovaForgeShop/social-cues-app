@@ -4739,6 +4739,9 @@
       if (status === "queued") {
         variant.queuedAt = new Date().toISOString();
         variant.approvalConfirmedAt = variant.queuedAt;
+        variant.updatedAt = variant.queuedAt;
+        variant.retryCount = 0;
+        delete variant.nextRetryAt;
         const scheduledAt = Date.parse(variant.scheduledFor || "");
         variant.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
           ? variant.scheduledFor
@@ -4812,6 +4815,9 @@
         variant.status = "queued";
         variant.queuedAt = new Date().toISOString();
         variant.approvalConfirmedAt = variant.queuedAt;
+        variant.updatedAt = variant.queuedAt;
+        variant.retryCount = 0;
+        delete variant.nextRetryAt;
         const scheduledAt = Date.parse(variant.scheduledFor || "");
         variant.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
           ? variant.scheduledFor
@@ -4824,6 +4830,8 @@
           variant.status = "queued";
           variant.queuedAt = new Date().toISOString();
           variant.approvalConfirmedAt = variant.queuedAt;
+          variant.retryCount = 0;
+          delete variant.nextRetryAt;
           const scheduledAt = Date.parse(variant.scheduledFor || "");
           variant.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
             ? variant.scheduledFor
@@ -7995,6 +8003,8 @@
       if (status === "queued") {
         item.variant.queuedAt = item.variant.updatedAt;
         item.variant.approvalConfirmedAt = item.variant.updatedAt;
+        item.variant.retryCount = 0;
+        delete item.variant.nextRetryAt;
         const scheduledAt = Date.parse(item.variant.scheduledFor || "");
         item.variant.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
           ? item.variant.scheduledFor
@@ -8038,6 +8048,8 @@
         variant.status = "queued";
         variant.queuedAt = now;
         variant.approvalConfirmedAt = now;
+        variant.retryCount = 0;
+        delete variant.nextRetryAt;
         const scheduledAt = Date.parse(variant.scheduledFor || "");
         variant.scheduledFor = Number.isFinite(scheduledAt) && scheduledAt > Date.now()
           ? variant.scheduledFor

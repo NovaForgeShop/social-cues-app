@@ -3145,25 +3145,17 @@ function queueRecordFromVariant(item = {}, session = null) {
   const lastAttempt = item.variant?.lastPublishAttempt || null;
   const variantStatus = String(item.variant?.status || "").toLowerCase();
   const hasPublishedEvidence = Boolean(item.variant?.providerPostId && item.variant?.publishedAt);
-  const status = variantStatus === "published" || hasPublishedEvidence
-    ? "published"
-    : variantStatus === "approved"
-      ? "approved"
-    : variantStatus === "failed"
-      ? "failed"
-      : variantStatus === "blocked"
-        ? "blocked"
-        : ["submitted", "processing"].includes(variantStatus)
-          ? "processing"
-          : variantStatus === "retrying"
-            ? "retrying"
-      : item.variant?.nextRetryAt
-        ? "retrying"
-    : lastAttempt?.ok === false
-      ? "blocked"
-      : lastAttempt?.ok && lastAttempt?.result?.dryRun !== false
-        ? "dry-run-ready"
-        : "queued";
+  let status = "queued";
+  if (variantStatus === "published" || hasPublishedEvidence) status = "published";
+  else if (variantStatus === "approved") status = "approved";
+  else if (variantStatus === "failed") status = "failed";
+  else if (variantStatus === "blocked") status = "blocked";
+  else if (["submitted", "processing"].includes(variantStatus)) status = "processing";
+  else if (variantStatus === "retrying") status = "retrying";
+  else if (["queued", "scheduled"].includes(variantStatus)) status = "queued";
+  else if (item.variant?.nextRetryAt) status = "retrying";
+  else if (lastAttempt?.ok === false) status = "blocked";
+  else if (lastAttempt?.ok && lastAttempt?.result?.dryRun !== false) status = "dry-run-ready";
   return {
     id: `variant-${item.variant?.id || uid("queue")}`,
     source: item.campaign?.type === "quick-post" ? "quick-post-variant" : "campaign-variant",
@@ -6887,7 +6879,7 @@ async function mirrorNormalizedWorkspaceRows(model, user = {}, workspaceRows = {
         scheduled_for: row.scheduledFor || row.queuedAt || now,
         published_at: row.publishedAt || null,
         provider_post_id: row.providerPostId || null,
-        publish_error: row.lastAttempt?.error || null,
+        publish_error: ["blocked", "failed", "retrying"].includes(row.status) ? row.lastAttempt?.error || null : null,
         idempotency_key: row.idempotencyKey || null,
         retry_count: Number(row.retryCount || 0),
         max_attempts: 5,
