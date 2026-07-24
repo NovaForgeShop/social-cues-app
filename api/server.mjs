@@ -13783,16 +13783,76 @@ function shouldRetainServerProviderAccount(existingAccount, incomingAccounts = [
   return !incomingMatch;
 }
 
+const serverVariantRuntimeFields = [
+  "status",
+  "updatedAt",
+  "lastPublishAttempt",
+  "publishAttempts",
+  "publishReceipts",
+  "providerPostId",
+  "publishedAt",
+  "providerSubmissionId",
+  "submittedAt",
+  "retryCount",
+  "nextRetryAt",
+  "connectionEvidence"
+];
+
+function variantRuntimeTimestamp(variant = {}, includeApproval = false) {
+  const candidates = [
+    variant.updatedAt,
+    variant.lastPublishAttempt?.at,
+    variant.publishedAt,
+    variant.submittedAt
+  ];
+  if (includeApproval) candidates.push(variant.approvalConfirmedAt, variant.queuedAt);
+  return candidates.reduce((latest, value) => {
+    const timestamp = Date.parse(value || "");
+    return Number.isFinite(timestamp) ? Math.max(latest, timestamp) : latest;
+  }, 0);
+}
+
+function preserveNewerServerVariant(incomingVariant = {}, existingVariant = {}) {
+  if (!existingVariant?.id || String(incomingVariant?.id || "") !== String(existingVariant.id)) return incomingVariant;
+  const incomingTimestamp = variantRuntimeTimestamp(incomingVariant, true);
+  const existingTimestamp = variantRuntimeTimestamp(existingVariant, false);
+  if (existingTimestamp <= incomingTimestamp) return incomingVariant;
+  const mergedVariant = cloneJson(incomingVariant);
+  for (const field of serverVariantRuntimeFields) {
+    if (Object.prototype.hasOwnProperty.call(existingVariant, field)) mergedVariant[field] = cloneJson(existingVariant[field]);
+    else delete mergedVariant[field];
+  }
+  return mergedVariant;
+}
+
+function mergeVariantRuntimeState(key, incomingRows = [], existingRows = []) {
+  if (!["campaigns", "quickPosts"].includes(key)) return incomingRows;
+  const existingById = new Map(existingRows.map(row => [String(row?.id || ""), row]));
+  return incomingRows.map(incomingRow => {
+    const existingRow = existingById.get(String(incomingRow?.id || ""));
+    if (!existingRow) return incomingRow;
+    const nextRow = cloneJson(incomingRow);
+    if (Array.isArray(nextRow.variants)) {
+      const existingVariants = new Map((existingRow.variants || []).map(variant => [String(variant?.id || ""), variant]));
+      nextRow.variants = nextRow.variants.map(variant =>
+        preserveNewerServerVariant(variant, existingVariants.get(String(variant?.id || "")))
+      );
+    }
+    if (nextRow.variant) nextRow.variant = preserveNewerServerVariant(nextRow.variant, existingRow.variant);
+    return nextRow;
+  });
+}
+
 function mergeOwnedArray(key, merged, existing, user, workspaceId) {
   if (!Array.isArray(merged[key])) return;
   if (serverRetainedWorkspaceCollectionKeys.has(key)) {
     merged[key] = Array.isArray(existing[key]) ? cloneJson(existing[key]) : [];
     return;
   }
-  const incomingOwned = merged[key].map(item => stampWorkspaceOwnership(item, user, workspaceId));
-  const existingOther = Array.isArray(existing[key])
-    ? existing[key].filter(item => !ownedByUser(item, user.id))
-    : [];
+  const existingRows = Array.isArray(existing[key]) ? existing[key] : [];
+  const incomingRows = mergeVariantRuntimeState(key, merged[key], existingRows);
+  const incomingOwned = incomingRows.map(item => stampWorkspaceOwnership(item, user, workspaceId));
+  const existingOther = existingRows.filter(item => !ownedByUser(item, user.id));
   merged[key] = [...incomingOwned, ...existingOther];
 }
 
