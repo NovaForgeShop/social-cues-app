@@ -17184,6 +17184,27 @@ function completedPublishReceipt(variant = {}, idempotencyKey = "") {
   ) || null;
 }
 
+async function durableCompletedPublishReceipt(item = {}, user = null, idempotencyKey = "") {
+  if (!supabaseEnabled || !user || !idempotencyKey) return null;
+  const workspaceId = workspaceModelIdForUser(user);
+  if (!isUuid(workspaceId)) return null;
+  const rows = await optionalSupabaseRequest(
+    `/publish_receipts?workspace_id=eq.${encodeURIComponent(workspaceId)}&idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&status=eq.published&provider_post_id=not.is.null&select=provider,platform,idempotency_key,provider_post_id,status,published_at,receipt_summary&order=published_at.desc&limit=1`
+  );
+  const row = Array.isArray(rows) ? rows[0] || null : null;
+  if (!row?.provider_post_id) return null;
+  return {
+    provider: row.provider || item.variant?.platform || "",
+    platform: row.platform || item.variant?.platform || "",
+    idempotencyKey: row.idempotency_key || idempotencyKey,
+    providerPostId: row.provider_post_id,
+    status: row.status || "published",
+    publishedAt: row.published_at || null,
+    duplicateSuppressed: true,
+    recoveredFromDurableReceipt: true
+  };
+}
+
 function providerPostIdFromResult(result = {}) {
   return String(
     result.response?.data?.id
@@ -17291,7 +17312,10 @@ async function attemptQueuedVariantPublish(model, item, options = {}) {
   const live = Boolean(options.live);
   const textValue = variantPublishText(item);
   const idempotencyKey = publishIdempotencyKey(item);
-  const previousReceipt = live ? completedPublishReceipt(item.variant, idempotencyKey) : null;
+  const localReceipt = live ? completedPublishReceipt(item.variant, idempotencyKey) : null;
+  const previousReceipt = localReceipt || (live
+    ? await durableCompletedPublishReceipt(item, options.user || null, idempotencyKey)
+    : null);
   const selectedIdentity = options.providerAccount || selectedProviderAccount(model, item.variant.platform, options.user || null);
   const base = {
     campaignId: item.campaign.id,
