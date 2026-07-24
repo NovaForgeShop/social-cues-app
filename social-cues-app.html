@@ -4777,6 +4777,7 @@
       const data = await response.json().catch(() => ({}));
       if (response.ok && data.ok !== false) {
         metaState.publishQueue = data;
+        renderVariants();
         renderApprovalIndicators();
         renderCalendar();
         return data;
@@ -7836,7 +7837,7 @@
           : ["queued", "scheduled", "processing", "submitted", "published"].includes(String(v.status || "").toLowerCase())
             ? `<button disabled>Approval complete</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button>`
             : `<button class="primary" data-variant-action="set-status" data-variant-id="${id}" data-status="approved">Approve content (1 of 2)</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button><button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Draft</button>`;
-      return `<article class="variant" data-approval-variant="${id}" style="--accent:${accent}">
+      return `<article class="variant" data-approval-variant="${id}"${approvalFocusAttribute(id)} style="--accent:${accent}">
         <div class="variant-head">
           <div>
             <h3>${escapeHtml(p?.name || "Platform")}</h3>
@@ -7900,12 +7901,17 @@
       );
     }
 
+    function approvalFocusAttribute(id = "") {
+      const requestedId = String(currentWorkspaceDeepLink().approvalId || "").trim();
+      return requestedId && requestedId === String(id || "").trim() ? ' data-approval-focus="true"' : "";
+    }
+
     function queueApprovalCard(record = {}) {
       const platform = platformById(record.platform) || { name: record.platform || "Provider", accent: "#28d7ee" };
       const status = String(record.status || "queued-review-only").toLowerCase();
       const firstStep = status === "queued-review-only";
       const buttonLabel = firstStep ? "Approve content (1 of 2)" : "Confirm & queue (2 of 2)";
-      return `<article class="variant" data-approval-queue="${escapeHtml(record.id)}" style="--accent:${escapeHtml(platform.accent || "#28d7ee")}">
+      return `<article class="variant" data-approval-queue="${escapeHtml(record.id)}"${approvalFocusAttribute(record.id)} style="--accent:${escapeHtml(platform.accent || "#28d7ee")}">
         <div class="variant-head">
           <div><h3>${escapeHtml(platform.name)}${record.campaignTitle ? ` - ${escapeHtml(record.campaignTitle)}` : ""}</h3><p>${escapeHtml(record.copyPreview || "Queued content awaiting review")}</p></div>
           <span class="pill ${firstStep ? "draft" : "approved"}">${firstStep ? "approval needed" : "final confirmation"}</span>
@@ -8089,7 +8095,7 @@
         : ["queued", "scheduled", "processing", "submitted", "published"].includes(status)
           ? `<button disabled>Approval complete</button>`
           : `<button class="primary" data-quick-action="approve" data-quick-variant="${escapeHtml(variant.id)}">Approve content (1 of 2)</button><button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Draft</button>`;
-      return `<article class="variant" data-approval-variant="${escapeHtml(variant.id)}" style="--accent:${escapeHtml(platform.accent || "#28d7ee")}">
+      return `<article class="variant" data-approval-variant="${escapeHtml(variant.id)}"${approvalFocusAttribute(variant.id)} style="--accent:${escapeHtml(platform.accent || "#28d7ee")}">
         <div class="variant-head">
           <div>
             <h3>${escapeHtml(platform.name)}: ${escapeHtml(variant.postingIdentity || "selected account")}</h3>
@@ -8151,6 +8157,46 @@
       `).join("");
     }
 
+    const deliveryStatusPriority = Object.freeze({
+      published: 100,
+      processing: 90,
+      submitted: 85,
+      retrying: 80,
+      failed: 75,
+      blocked: 70,
+      "dry-run-ready": 60,
+      queued: 50,
+      scheduled: 50,
+      approved: 40,
+      "queued-review-only": 30
+    });
+
+    function deliveryRecordTimestamp(item = {}) {
+      return Date.parse(item.updatedAt || item.lastAttempt?.at || item.publishedAt || item.blockedAt || item.createdAt || item.queuedAt || item.scheduledFor || "") || 0;
+    }
+
+    function preferredDeliveryRecord(previous = {}, next = {}) {
+      const previousTime = deliveryRecordTimestamp(previous);
+      const nextTime = deliveryRecordTimestamp(next);
+      const previousPriority = deliveryStatusPriority[String(previous.status || "").toLowerCase()] || 0;
+      const nextPriority = deliveryStatusPriority[String(next.status || "").toLowerCase()] || 0;
+      const previousHasReceipt = Boolean(previous.providerPostId && previous.publishedAt);
+      const nextHasReceipt = Boolean(next.providerPostId && next.publishedAt);
+      const nextWins = previousHasReceipt !== nextHasReceipt
+        ? nextHasReceipt
+        : nextTime > previousTime || (nextTime === previousTime && nextPriority >= previousPriority);
+      const winner = nextWins ? next : previous;
+      const alternate = nextWins ? previous : next;
+      const merged = {
+        ...alternate,
+        ...winner,
+        providerPostId: winner.providerPostId || alternate.providerPostId || "",
+        publishedAt: winner.publishedAt || alternate.publishedAt || null
+      };
+      if (merged.providerPostId && merged.publishedAt) merged.status = "published";
+      return merged;
+    }
+
     function customerDeliveryLedgerRows() {
       const trackedStatuses = new Set(["approved", "queued", "scheduled", "queued-review-only", "dry-run-ready", "retrying", "processing", "submitted", "published", "blocked", "failed"]);
       const campaignRows = model.campaigns.flatMap(c => (c.variants || [])
@@ -8167,13 +8213,11 @@
       [...campaignRows, ...quickPostRows, ...queueRows].forEach(item => {
         const key = item.variantId || item.id || `${item.campaignId || "campaign"}:${item.platform || "provider"}:${item.scheduledFor || item.queuedAt || "unscheduled"}`;
         const previous = byVariant.get(key);
-        const previousTime = Date.parse(previous?.updatedAt || previous?.publishedAt || previous?.blockedAt || previous?.scheduledFor || previous?.queuedAt || "") || 0;
-        const nextTime = Date.parse(item.updatedAt || item.publishedAt || item.blockedAt || item.scheduledFor || item.queuedAt || "") || 0;
-        if (!previous || ["campaign-variant", "quick-post-variant"].includes(item.source) || nextTime >= previousTime) byVariant.set(key, { ...previous, ...item });
+        byVariant.set(key, previous ? preferredDeliveryRecord(previous, item) : item);
       });
       return [...byVariant.values()].sort((left, right) => {
-        const leftTime = Date.parse(left.updatedAt || left.publishedAt || left.blockedAt || left.scheduledFor || left.queuedAt || "") || 0;
-        const rightTime = Date.parse(right.updatedAt || right.publishedAt || right.blockedAt || right.scheduledFor || right.queuedAt || "") || 0;
+        const leftTime = deliveryRecordTimestamp(left);
+        const rightTime = deliveryRecordTimestamp(right);
         return rightTime - leftTime;
       });
     }
@@ -8217,7 +8261,7 @@
       const items = customerDeliveryLedgerRows();
       const counts = items.reduce((summary, item) => {
         const status = String(item.status || "queued").toLowerCase();
-        if (["approved", "queued", "scheduled", "processing", "submitted"].includes(status)) summary.upcoming += 1;
+        if (["approved", "queued", "scheduled", "dry-run-ready", "processing", "submitted"].includes(status)) summary.upcoming += 1;
         if (["blocked", "failed", "retrying"].includes(status)) summary.attention += 1;
         if (status === "published") summary.published += 1;
         return summary;
@@ -8294,7 +8338,15 @@
         capabilityList.innerHTML = `<div class="empty">Capability truth will appear after provider status loads.</div>`;
         return;
       }
-      truthNote.innerHTML = `<strong>Current operating mode</strong><br>${escapeHtml(data.truthNote || "Approval-first controls are active.")}`;
+      const dispatcher = data.workers?.dispatcher || null;
+      truthNote.innerHTML = `
+        <strong>Current operating mode</strong><br>${escapeHtml(data.truthNote || "Approval-first controls are active.")}
+        ${dispatcher ? `<div class="tags" style="margin-top:8px">
+          <span class="tag">worker ${escapeHtml(dispatcher.status || "unavailable")}</span>
+          <span class="tag">${data.workers?.ledgerReady ? "job ledger ready" : "job ledger unavailable"}</span>
+          ${dispatcher.lastRunAt ? `<span class="tag">last check ${escapeHtml(formatDateTime(dispatcher.lastRunAt))}</span>` : ""}
+        </div>` : ""}
+      `;
       laneList.innerHTML = (data.lanes || []).map(lane => `
         <article class="variant" data-automation-lane="${escapeHtml(lane.id)}">
           <div class="variant-head">
@@ -14075,6 +14127,9 @@
         ? await syncModelFromServer("Synced account changes from server.")
         : false;
       if (!synced) render();
+      if (restored && (workspaceDeepLink.view === "approvals" || workspaceDeepLink.approvalId || workspaceDeepLink.notice === "publish-approval")) {
+        await refreshPublishQueueState();
+      }
       if (oauthReturn.provider) {
         await confirmOAuthReturn(oauthReturn);
         acknowledgeOAuthReturn(oauthReturn);

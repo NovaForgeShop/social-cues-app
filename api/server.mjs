@@ -157,6 +157,7 @@ const workerSecret = process.env.WORKER_SECRET || cronSecret;
 const workerBatchSize = Math.max(1, Math.min(Number(process.env.WORKER_BATCH_SIZE || 8), 25));
 const workerLeaseSeconds = Math.max(60, Math.min(Number(process.env.WORKER_LEASE_SECONDS || 240), 3600));
 const workerTimeBudgetMs = Math.max(5_000, Math.min(Number(process.env.WORKER_TIME_BUDGET_MS || 240_000), 280_000));
+const workerRunStaleMinutes = Math.max(2, Math.min(Number(process.env.WORKER_RUN_STALE_MINUTES || 5), 60));
 const tokenRefreshLeadMinutes = Math.max(15, Math.min(Number(process.env.TOKEN_REFRESH_LEAD_MINUTES || 1440), 20_160));
 const tokenRefreshLeadByPlatformMinutes = Object.freeze({
   youtube: 15,
@@ -2743,6 +2744,8 @@ async function providerPublishDryRunProbe(providerId, model = {}, session = null
   const item = syntheticProviderPublishItem(providerId);
   const providerAccount = providerProbeAccount(providerId, model, session) || row.account || null;
   const result = await attemptQueuedVariantPublish(model, item, { live: false, user: session?.user || null, providerAccount });
+  result.live = false;
+  result.idempotencyKey = result.idempotencyKey || publishIdempotencyKey(item);
   const ok = Boolean(result.ok && result.dryRun === true);
   return {
     at: new Date().toISOString(),
@@ -3038,6 +3041,8 @@ async function runDailyProviderOwnershipLoop(model = {}, session = null, options
   const publishResults = [];
   for (const item of dueItems) {
     const result = await attemptQueuedVariantPublish(model, item, { live: false, user });
+    result.live = false;
+    result.idempotencyKey = result.idempotencyKey || publishIdempotencyKey(item);
     rememberPublishAttempt(item, result);
     rememberQueuePublishResult(model, item, result, session);
     publishResults.push(result);
@@ -3141,12 +3146,84 @@ function publicPublishQueueRecord(item = {}) {
   return safe;
 }
 
+const publishQueueStatusPriority = Object.freeze({
+  published: 100,
+  processing: 90,
+  submitted: 85,
+  retrying: 80,
+  failed: 75,
+  blocked: 70,
+  "dry-run-ready": 60,
+  queued: 50,
+  scheduled: 50,
+  approved: 40,
+  "queued-review-only": 30
+});
+
+function publishQueueRecordIdentity(item = {}) {
+  const workspaceId = String(item.workspaceId || item.ownerUserId || "workspace");
+  const variantId = String(item.variantId || item.item?.id || "");
+  if (variantId) return `variant:${variantId}`;
+  const recordId = String(item.id || "");
+  return recordId ? `${workspaceId}:record:${recordId}` : "";
+}
+
+function publishQueueRecordTimestamp(item = {}) {
+  const candidates = [
+    item.updatedAt,
+    item.lastAttempt?.at,
+    item.publishedAt,
+    item.blockedAt,
+    item.createdAt,
+    item.queuedAt,
+    item.scheduledFor
+  ];
+  for (const candidate of candidates) {
+    const parsed = Date.parse(candidate || "");
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function preferredPublishQueueRecord(previous = {}, next = {}) {
+  const previousTime = publishQueueRecordTimestamp(previous);
+  const nextTime = publishQueueRecordTimestamp(next);
+  const previousPriority = publishQueueStatusPriority[String(previous.status || "").toLowerCase()] || 0;
+  const nextPriority = publishQueueStatusPriority[String(next.status || "").toLowerCase()] || 0;
+  const previousHasReceipt = Boolean(previous.providerPostId && previous.publishedAt);
+  const nextHasReceipt = Boolean(next.providerPostId && next.publishedAt);
+  const nextWins = previousHasReceipt !== nextHasReceipt
+    ? nextHasReceipt
+    : nextTime > previousTime || (nextTime === previousTime && nextPriority >= previousPriority);
+  const winner = nextWins ? next : previous;
+  const alternate = nextWins ? previous : next;
+  const winnerAttemptTime = Date.parse(winner.lastAttempt?.at || "") || 0;
+  const alternateAttemptTime = Date.parse(alternate.lastAttempt?.at || "") || 0;
+  const lastAttempt = alternateAttemptTime > winnerAttemptTime ? alternate.lastAttempt : winner.lastAttempt || alternate.lastAttempt || null;
+  const merged = {
+    ...alternate,
+    ...winner,
+    lastAttempt,
+    providerPostId: winner.providerPostId || alternate.providerPostId || "",
+    publishedAt: winner.publishedAt || alternate.publishedAt || null,
+    idempotencyKey: winner.idempotencyKey || alternate.idempotencyKey || ""
+  };
+  if (merged.providerPostId && merged.publishedAt) merged.status = "published";
+  return merged;
+}
+
 function queueRecordFromVariant(item = {}, session = null) {
   const lastAttempt = item.variant?.lastPublishAttempt || null;
   const variantStatus = String(item.variant?.status || "").toLowerCase();
   const hasPublishedEvidence = Boolean(item.variant?.providerPostId && item.variant?.publishedAt);
+  const successfulDryRun = Boolean(
+    lastAttempt?.ok
+    && (lastAttempt?.status === "dry-run" || lastAttempt?.result?.dryRun === true)
+    && lastAttempt?.result?.live !== true
+  );
   let status = "queued";
   if (variantStatus === "published" || hasPublishedEvidence) status = "published";
+  else if (successfulDryRun) status = "dry-run-ready";
   else if (variantStatus === "approved") status = "approved";
   else if (variantStatus === "failed") status = "failed";
   else if (variantStatus === "blocked") status = "blocked";
@@ -3155,9 +3232,8 @@ function queueRecordFromVariant(item = {}, session = null) {
   else if (["queued", "scheduled"].includes(variantStatus)) status = "queued";
   else if (item.variant?.nextRetryAt) status = "retrying";
   else if (lastAttempt?.ok === false) status = "blocked";
-  else if (lastAttempt?.ok && lastAttempt?.result?.dryRun !== false) status = "dry-run-ready";
   return {
-    id: `variant-${item.variant?.id || uid("queue")}`,
+    id: `variant-${item.variant?.id || `${item.campaign?.id || "campaign"}-${item.variant?.platform || "provider"}`}`,
     source: item.campaign?.type === "quick-post" ? "quick-post-variant" : "campaign-variant",
     campaignId: item.campaign?.id || "",
     campaignTitle: item.campaign?.title || "",
@@ -3166,13 +3242,17 @@ function queueRecordFromVariant(item = {}, session = null) {
     status,
     scheduledFor: item.variant?.scheduledFor || item.variant?.queuedAt || null,
     queuedAt: item.variant?.queuedAt || null,
-    live: false,
+    live: Boolean(lastAttempt?.result?.live),
     copyPreview: String(item.variant?.copy || "").replace(/\s+/g, " ").slice(0, 160),
     lastAttempt: lastAttempt ? {
       at: lastAttempt.at || "",
       ok: Boolean(lastAttempt.ok),
+      provider: lastAttempt.provider || lastAttempt.result?.provider || "",
       status: lastAttempt.status || "",
-      error: lastAttempt.error || lastAttempt.result?.error || ""
+      live: Boolean(lastAttempt.result?.live),
+      dryRun: lastAttempt.result?.dryRun === true,
+      error: lastAttempt.error || lastAttempt.result?.error || "",
+      nextAction: lastAttempt.result?.nextAction || ""
     } : null,
     retryCount: Number(item.variant?.retryCount || 0),
     nextRetryAt: item.variant?.nextRetryAt || null,
@@ -3211,15 +3291,14 @@ function publishQueueLedger(model = {}, session = null, options = {}) {
     now: options.now || new Date().toISOString(),
     platforms: Array.isArray(options.platforms) ? options.platforms : []
   }).map(item => queueRecordFromVariant(item, session));
-  const byId = new Map();
+  const byIdentity = new Map();
   for (const item of [...records, ...variantRecords]) {
-    if (!item?.id) continue;
-    const previous = byId.get(item.id);
-    if (!previous || Date.parse(item.updatedAt || item.queuedAt || item.scheduledFor || 0) >= Date.parse(previous.updatedAt || previous.queuedAt || previous.scheduledFor || 0)) {
-      byId.set(item.id, item);
-    }
+    const identity = publishQueueRecordIdentity(item);
+    if (!identity) continue;
+    const previous = byIdentity.get(identity);
+    byIdentity.set(identity, previous ? preferredPublishQueueRecord(previous, item) : item);
   }
-  const rows = [...byId.values()]
+  const rows = [...byIdentity.values()]
     .sort((a, b) => Date.parse(a.scheduledFor || a.queuedAt || a.createdAt || "") - Date.parse(b.scheduledFor || b.queuedAt || b.createdAt || ""));
   const summary = {
     total: rows.length,
@@ -3243,11 +3322,13 @@ function publishQueueLedger(model = {}, session = null, options = {}) {
       ? "Open the blocked queue items, fix their provider/account/media gate, then run the queue dry-run again."
       : summary.awaitingApproval
         ? "Open Approvals and complete content approval for the waiting posts."
-        : summary.awaitingConfirmation
+      : summary.awaitingConfirmation
           ? "Open Approvals and use Confirm & queue to complete the final safety check."
       : summary.queued
         ? "Run Push scheduled queue as a dry-run before any live publish attempt."
-        : "Queue approved campaign variants from Studio when content is ready.",
+        : summary.dryRunReady
+          ? "Dry-run checks passed. Review the provider targets, then use the live publish confirmation when you are ready."
+          : "Queue approved campaign variants from Studio when content is ready.",
     rows: rows.slice(0, 100)
   };
 }
@@ -3411,8 +3492,8 @@ async function automationStatusPayload(model = {}, session = null) {
     ? await notificationOutboxForUser(session.user).catch(() => [])
     : [];
   const workerState = session?.user
-    ? await workerStatusForUser(session.user).catch(error => ({ ready: false, summary: {}, rows: [], error: error.message }))
-    : { ready: false, summary: {}, rows: [] };
+    ? await workerStatusForUser(session.user).catch(error => ({ ready: false, ledgerReady: false, dispatcher: { status: "unavailable", active: false }, summary: {}, rows: [], error: error.message }))
+    : { ready: false, ledgerReady: false, dispatcher: { status: "unavailable", active: false }, summary: {}, rows: [] };
   const connectedRows = (providerTruth.rows || []).filter(row => row.connected && row.tokenStored);
   const livePublishProviderIds = new Set(["facebook", "instagram", "threads", "youtube", "x", "tiktok"]);
   const publishRows = connectedRows.filter(row => livePublishProviderIds.has(row.id) && row.canPublish);
@@ -3423,9 +3504,20 @@ async function automationStatusPayload(model = {}, session = null) {
   const communityRows = connectedRows.filter(row => ["discord", "reddit", "twitch"].includes(row.id));
   const metaEventsReady = Boolean(envPresent("WEBHOOK_SIGNING_SECRET") || metaAppSecret);
   const discordEventsReady = Boolean(discordPublicKey);
-  const renderWorkerReady = Boolean(workerState.ready && mediaRenderWorkerConfigured);
+  const dispatcherActive = workerState.dispatcher?.active === true;
+  const automaticPublishActive = Boolean(dispatcherActive && automaticPublishingEnabled);
+  const renderWorkerReady = Boolean(dispatcherActive && mediaRenderWorkerConfigured);
   const pendingNotifications = notificationRows.filter(row => ["pending", "retrying"].includes(row.status)).length;
   const laneState = (ready, attention = false) => ready ? "ready" : attention ? "attention" : "manual";
+  const workerTruthNote = dispatcherActive
+    ? `The secured worker dispatcher checked in recently and the Supabase job ledger is available. ${automaticPublishingEnabled ? "Approved scheduled publishing is enabled." : "Automatic live publishing is operator-disabled; manual approved publishing remains available."}`
+    : workerState.ledgerReady
+      ? workerState.dispatcher?.status === "stale"
+        ? `The Supabase job ledger is available, but the scheduled dispatcher has not checked in within ${workerState.dispatcher.staleAfterMinutes || workerRunStaleMinutes} minutes. Automatic work is unavailable until it resumes; manual controls remain available.`
+        : workerState.dispatcher?.status === "failed"
+          ? "The Supabase job ledger is available, but the latest scheduled dispatcher run failed. Automatic work is unavailable; manual controls remain available while the worker is repaired."
+          : "The Supabase job ledger is available, but no scheduled dispatcher run has been observed yet. Manual controls remain available."
+      : "Automatic worker status is unavailable for this workspace. Manual controls remain available while Social Cues checks the secured worker ledger.";
 
   return {
     ok: true,
@@ -3440,23 +3532,26 @@ async function automationStatusPayload(model = {}, session = null) {
       blockedPosts: publishQueue.summary.blocked,
       pendingNotifications,
       renderJobs: renderJobs.length,
-      automaticWorkers: workerState.ready ? 1 : 0,
+      automaticWorkers: dispatcherActive ? 1 : 0,
+      automaticPublishing: automaticPublishActive ? 1 : 0,
       workerQueued: Number(workerState.summary?.queued || 0) + Number(workerState.summary?.retrying || 0),
       workerClaimed: Number(workerState.summary?.claimed || 0),
       workerBlocked: Number(workerState.summary?.blocked || 0) + Number(workerState.summary?.dead || 0)
     },
-    truthNote: workerState.ready
-      ? "The Supabase job ledger and secured worker dispatcher are active. Publishing remains approval-first; media rendering is active only when the isolated renderer is configured."
-      : "Automatic worker status is unavailable for this workspace. Manual controls remain available while Social Cues checks the secured worker ledger.",
+    truthNote: workerTruthNote,
+    workers: {
+      ledgerReady: workerState.ledgerReady === true,
+      dispatcher: workerState.dispatcher || { status: "unavailable", active: false }
+    },
     lanes: [
       {
         id: "publishing",
         name: "Publishing queue",
-        mode: workerState.ready ? "approval-first automatic dispatch" : "approval-first manual dispatch",
+        mode: automaticPublishActive ? "approval-first automatic dispatch" : "approval-first manual dispatch",
         state: preferences.livePublishingPaused ? "paused" : laneState(publishRows.length > 0, publishQueue.summary.blocked > 0),
         detail: preferences.livePublishingPaused
           ? "Live provider sends are paused. Dry-runs and approvals remain available."
-          : `${publishQueue.summary.queued} queued, ${publishQueue.summary.dryRunReady} dry-run ready, ${publishQueue.summary.blocked} blocked.`,
+          : `${publishQueue.summary.queued} queued, ${publishQueue.summary.dryRunReady} dry-run ready, ${publishQueue.summary.blocked} blocked. ${automaticPublishActive ? "Scheduled dispatch is active." : "Live sends require the manual confirmation."}`,
         nextAction: publishQueue.nextAction,
         route: "/api/publish/queue",
         customerView: "calendar",
@@ -3465,10 +3560,10 @@ async function automationStatusPayload(model = {}, session = null) {
       {
         id: "account-health",
         name: "Account health",
-        mode: workerState.ready ? "proactive renewal and on demand" : "on demand",
+        mode: dispatcherActive ? "proactive renewal and on demand" : "on demand",
         state: laneState(connectedRows.length > 0, (providerTruth.summary?.needsReconnect || 0) > 0),
         detail: `${connectedRows.length} token-backed provider lane(s); status checks refresh tokens where the provider supports refresh.`,
-        nextAction: workerState.ready ? "Social Cues renews supported provider tokens before expiry and asks for reconnection only when renewal cannot succeed." : dailyLoop.nextAction,
+        nextAction: dispatcherActive ? "Social Cues renews supported provider tokens before expiry and asks for reconnection only when renewal cannot succeed." : dailyLoop.nextAction,
         route: "/api/provider/daily-loop/status",
         customerView: "accounts",
         canPause: false
@@ -3509,7 +3604,7 @@ async function automationStatusPayload(model = {}, session = null) {
       {
         id: "notifications",
         name: "Account notifications",
-        mode: workerState.ready ? "automatic queued delivery" : "queued",
+        mode: dispatcherActive ? "automatic queued delivery" : "queued",
         state: pendingNotifications ? "attention" : "manual",
         detail: `${pendingNotifications} pending notification(s); ${notificationRows.length} recent outbox record(s).`,
         nextAction: pendingNotifications ? "Review account alerts while delivery processing is completed." : "Alerts appear when sign-in, provider, or publish activity needs attention.",
@@ -8335,6 +8430,50 @@ function publicWorkerJob(row = {}) {
   };
 }
 
+function publicWorkerRun(row = {}) {
+  return {
+    status: row.status || "",
+    trigger: row.trigger || "",
+    startedAt: row.started_at || row.startedAt || null,
+    completedAt: row.completed_at || row.completedAt || null,
+    claimed: Number(row.claimed || 0),
+    succeeded: Number(row.succeeded || 0),
+    retried: Number(row.retried || 0),
+    blocked: Number(row.blocked || 0),
+    dead: Number(row.dead || 0),
+    durationMs: Math.max(0, Number(row.metadata?.durationMs || 0))
+  };
+}
+
+function workerDispatcherStatus(run = null) {
+  const configured = Boolean(runtimeMode === "vercel" && workerSecret);
+  const lastRunAt = run?.completedAt || run?.startedAt || null;
+  const lastRunMs = Date.parse(lastRunAt || "");
+  const ageSeconds = Number.isFinite(lastRunMs) ? Math.max(0, Math.round((Date.now() - lastRunMs) / 1000)) : null;
+  const fresh = ageSeconds !== null && ageSeconds <= workerRunStaleMinutes * 60;
+  const latestFailed = run?.status === "failed";
+  const active = Boolean(configured && fresh && !latestFailed);
+  const status = !configured
+    ? "not-configured"
+    : !run
+      ? "never-observed"
+      : latestFailed
+        ? "failed"
+        : fresh
+          ? "active"
+          : "stale";
+  return {
+    configured,
+    active,
+    status,
+    schedule: "* * * * *",
+    staleAfterMinutes: workerRunStaleMinutes,
+    lastRunAt,
+    ageSeconds,
+    lastRun: run
+  };
+}
+
 async function workerUserForJob(registry = {}, job = {}) {
   const payload = job.payload || {};
   const userId = String(job.user_id || payload.userId || "");
@@ -8838,6 +8977,8 @@ async function processScheduledPublishWorkerJob(job, registry) {
   markQueuePublishProcessing(model, item, { user });
   if (item.queueRecord) item.queueRecord.status = "processing";
   const result = await attemptQueuedVariantPublish(model, item, { live: true, user });
+  result.live = true;
+  result.idempotencyKey = result.idempotencyKey || publishIdempotencyKey(item);
   rememberPublishAttempt(item, result);
   rememberQueuePublishResult(model, item, result, { user });
   await saveModelForUser(model, user);
@@ -9204,11 +9345,20 @@ async function runDurableWorkerTick(options = {}) {
 
 async function workerStatusForUser(user = {}) {
   const workspaceId = workspaceModelIdForUser(user);
-  if (!supabaseEnabled || !workspaceId) return { ready: false, summary: {}, rows: [] };
-  const rows = await optionalSupabaseRequest(`/worker_jobs?workspace_id=eq.${encodeURIComponent(workspaceId)}&select=id,kind,status,priority,run_at,attempts,max_attempts,last_error,estimated_cost_microusd,actual_cost_microusd,created_at,updated_at,completed_at&order=created_at.desc&limit=100`);
+  if (!supabaseEnabled || !workspaceId) {
+    return { ready: false, ledgerReady: false, dispatcher: workerDispatcherStatus(null), summary: {}, rows: [] };
+  }
+  const [rows, runRows] = await Promise.all([
+    optionalSupabaseRequest(`/worker_jobs?workspace_id=eq.${encodeURIComponent(workspaceId)}&select=id,kind,status,priority,run_at,attempts,max_attempts,last_error,estimated_cost_microusd,actual_cost_microusd,created_at,updated_at,completed_at&order=created_at.desc&limit=100`),
+    optionalSupabaseRequest("/worker_runs?select=status,trigger,started_at,completed_at,claimed,succeeded,retried,blocked,dead,metadata&order=started_at.desc&limit=1")
+  ]);
+  const ledgerReady = Array.isArray(rows);
   const safeRows = (Array.isArray(rows) ? rows : []).map(publicWorkerJob);
+  const latestRun = Array.isArray(runRows) && runRows[0] ? publicWorkerRun(runRows[0]) : null;
   return {
-    ready: true,
+    ready: ledgerReady,
+    ledgerReady,
+    dispatcher: workerDispatcherStatus(latestRun),
     summary: safeRows.reduce((summary, row) => ({ ...summary, [row.status]: (summary[row.status] || 0) + 1 }), {}),
     rows: safeRows
   };
@@ -21648,6 +21798,8 @@ async function route(req, res) {
     for (const item of items) {
       if (live) markQueuePublishProcessing(model, item, session);
       const result = await attemptQueuedVariantPublish(model, item, { live, user });
+      result.live = live;
+      result.idempotencyKey = result.idempotencyKey || publishIdempotencyKey(item);
       rememberPublishAttempt(item, result);
       rememberQueuePublishResult(model, item, result, session);
       if (user && live && !result.ok) {

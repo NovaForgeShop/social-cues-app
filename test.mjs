@@ -346,6 +346,7 @@ try {
   if (!serverSource.includes("durableCompletedPublishReceipt") || !serverSource.includes("/publish_receipts?workspace_id=eq.") || !serverSource.includes("recoveredFromDurableReceipt")) throw new Error("live publish retries must consult durable provider receipts after restarts");
   if (!serverSource.includes('["queued", "scheduled"].includes(variantStatus)') || !serverSource.includes('["blocked", "failed", "retrying"].includes(row.status) ? row.lastAttempt?.error || null : null')) throw new Error("fresh final approval must override stale publish blockers in the durable queue");
   if (!serverSource.includes("preserveNewerServerVariant") || !serverSource.includes("variantRuntimeTimestamp") || !serverSource.includes('mergeVariantRuntimeState(key, merged[key], existingRows)')) throw new Error("stale client saves must not overwrite newer worker publish results");
+  if (!serverSource.includes("result.live = true;") || !serverSource.includes("result.live = live;") || !serverSource.includes("result.idempotencyKey = result.idempotencyKey || publishIdempotencyKey(item);")) throw new Error("publish results must retain live and idempotency context even when a provider blocks before sending");
   if (!serverSource.includes("PUBLISH_APPROVED_QUEUE") || !serverSource.includes("markQueuePublishProcessing") || !serverSource.includes('"retrying"')) throw new Error("live queue publishing must require explicit approval and durable retry states");
   if (!perUserMigrationSource.includes("publish_receipts") || !perUserMigrationSource.includes("scheduled_posts_worker_idx") || !serverSource.includes('"/publish_receipts?on_conflict=workspace_id,idempotency_key"')) throw new Error("publish queue and provider receipts must mirror to normalized Supabase rows");
   if (!serverSource.includes("publishIdempotencyKeys") || !perUserMigrationSource.includes("publish_idempotency_keys")) throw new Error("analytics snapshots must bind to exact publish idempotency keys");
@@ -387,6 +388,9 @@ try {
   if (!appHtml.includes("stripConsumedAuthCredentials") || !appHtml.includes('["verify", "token", "token_hash", "access_token", "refresh_token"]') || !/const oauthReturn = currentOAuthReturn\(\);\s+stripConsumedAuthCredentials\(\);/.test(appHtml)) throw new Error("consumed one-time authentication credentials must be removed from the app URL before session restoration");
   if (appHtml.includes("Storage path reserved; upload worker still needs the signed-upload pass.")) throw new Error("raw video intake must not claim that the implemented browser upload pass is still missing");
   if (!serverSource.includes('url.pathname === "/api/cron/workers"') || !serverSource.includes("workerRequestAuthorized") || !serverSource.includes('"Idempotency-Key"')) throw new Error("worker trigger must be secret-authenticated and provider deliveries idempotent");
+  if (!serverSource.includes("function workerDispatcherStatus") || !serverSource.includes("workerRunStaleMinutes") || !serverSource.includes('? "never-observed"') || !serverSource.includes('? "active"')) throw new Error("worker readiness must be based on a recent durable run instead of database availability alone");
+  if (!serverSource.includes("function publishQueueRecordIdentity") || !serverSource.includes("function preferredPublishQueueRecord") || !serverSource.includes("successfulDryRun")) throw new Error("publish queue reconciliation must deduplicate each variant and preserve successful dry-run evidence");
+  if (!appHtml.includes("function preferredDeliveryRecord") || !appHtml.includes("deliveryStatusPriority") || !appHtml.includes("worker ${escapeHtml(dispatcher.status")) throw new Error("customer delivery and automation views must surface canonical queue state and dispatcher truth");
   if (!serverSource.includes("uploadType=resumable") || !serverSource.includes('duplex: "half"') || !serverSource.includes("uploadYouTubeHostedVideo")) throw new Error("scheduled YouTube uploads must stream through the resumable protocol instead of buffering whole videos");
   for (const status of ["PROCESSING_UPLOAD", "PROCESSING_DOWNLOAD", "SEND_TO_USER_INBOX", "PUBLISH_COMPLETE", "FAILED"]) {
     if (!serverSource.includes(`"${status}"`)) throw new Error(`TikTok durable status worker missing ${status}`);
@@ -1513,6 +1517,13 @@ try {
   if (!duePublish.results.every(item => item.dryRun === true || item.status === "blocked")) throw new Error("due publish dry run should only report dry runs or blockers");
   if (!duePublish.results.filter(item => item.dryRun === true).every(item => item.providerAccountId)) throw new Error("due publish dry-run results must name the selected provider identity");
   if (!duePublish.publishQueue?.summary || !duePublish.providerState?.summary) throw new Error("due publish dry run should return durable queue and provider-state snapshots");
+  const successfulDryRunIds = duePublish.results.filter(item => item.ok && item.dryRun === true).map(item => item.variantId);
+  for (const variantId of successfulDryRunIds) {
+    const matchingRows = duePublish.publishQueue.rows.filter(item => item.variantId === variantId);
+    if (matchingRows.length !== 1 || matchingRows[0].status !== "dry-run-ready") throw new Error("successful dry runs must reconcile to one dry-run-ready queue row");
+    if (!matchingRows[0].lastAttempt?.ok || matchingRows[0].lastAttempt?.dryRun !== true || !matchingRows[0].lastAttempt?.provider) throw new Error("dry-run-ready queue rows must retain provider attempt evidence");
+    if (!/^[a-f0-9]{64}$/.test(matchingRows[0].idempotencyKey || "")) throw new Error("dry-run-ready queue rows must retain a stable idempotency key");
+  }
 
   const historicalModel = await request("/api/model", {
     headers: { Authorization: `Bearer ${login.session.token}` }
@@ -1551,6 +1562,14 @@ try {
       blockedAt: historicalAt,
       updatedAt: historicalAt,
       copy: "Blocked history smoke test."
+    },
+    {
+      id: staleQueuedReceiptId,
+      platform: "youtube",
+      status: "queued",
+      scheduledFor: dueAt,
+      updatedAt: new Date(Date.now() + 60_000).toISOString(),
+      copy: "Newer stale duplicate without provider evidence."
     }
   );
   await request("/api/model", {
@@ -1564,7 +1583,8 @@ try {
   });
   if (!publishQueue.ok || publishQueue.summary?.total < 2 || !publishQueue.rows?.some(item => item.platform === "facebook")) throw new Error("durable publish queue did not persist scheduled provider items");
   if (!publishQueue.rows.some(item => item.variantId === historicalPublishedId && item.status === "published") || !publishQueue.rows.some(item => item.variantId === historicalBlockedId && item.status === "blocked")) throw new Error("publish queue must retain terminal provider history from campaign variants");
-  if (!publishQueue.rows.some(item => item.variantId === staleQueuedReceiptId && item.status === "published")) throw new Error("provider receipt evidence must reconcile a stale queued ledger status to published");
+  const reconciledReceiptRows = publishQueue.rows.filter(item => item.variantId === staleQueuedReceiptId);
+  if (reconciledReceiptRows.length !== 1 || reconciledReceiptRows[0].status !== "published") throw new Error("provider receipt evidence must outrank and deduplicate a newer stale queued ledger row");
   if (publishQueue.summary.dueNow >= publishQueue.summary.total) throw new Error("published and blocked history must not be counted as due work");
 
   const providerStateSnapshot = await request("/api/provider/state", {
@@ -1582,6 +1602,8 @@ try {
   });
   if (!automationStatus.ok || !automationStatus.lanes?.some(row => row.id === "publishing") || !automationStatus.capabilities?.some(row => row.id === "analyze")) throw new Error("customer automation center did not expose background lanes and capability truth");
   if (automationStatus.summary?.automaticWorkers !== 0 || !/automatic worker status is unavailable/i.test(automationStatus.truthNote || "")) throw new Error("local automation center must distinguish unavailable worker status from a live dispatcher");
+  if (automationStatus.workers?.ledgerReady !== false || automationStatus.workers?.dispatcher?.active !== false || automationStatus.workers?.dispatcher?.status !== "not-configured") throw new Error("local automation status must expose an unavailable ledger and inactive dispatcher without guessing");
+  if (automationStatus.summary?.automaticPublishing !== 0 || automationStatus.lanes.find(row => row.id === "publishing")?.mode !== "approval-first manual dispatch") throw new Error("automatic publishing must remain distinct from a healthy dispatcher and explicit operator enablement");
   const publishCapability = automationStatus.capabilities.find(row => row.id === "publish");
   if (publishCapability?.providers?.some(name => ["Shopify", "Twitch", "Etsy", "Canva"].includes(name))) throw new Error("automation center must not describe context or creative-handoff providers as live publishers");
 
