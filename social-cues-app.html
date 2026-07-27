@@ -12486,9 +12486,6 @@
         </div>
         ${availableConnections}
       `;
-      $$("#socialAccountList .connector-route").forEach(button => {
-        button.addEventListener("click", () => openConnectorRoute(button.dataset.route || ""));
-      });
       $$("#socialAccountList [data-manychat-connect]").forEach(form => {
         form.addEventListener("submit", connectManychatAccount);
       });
@@ -12500,9 +12497,6 @@
       });
       $$("#socialAccountList [data-elevenlabs-connect]").forEach(form => {
         form.addEventListener("submit", connectElevenlabsAccount);
-      });
-      $$("#adminProviderDiagnostics .connector-route").forEach(button => {
-        button.addEventListener("click", () => openConnectorRoute(button.dataset.route || ""));
       });
     }
 

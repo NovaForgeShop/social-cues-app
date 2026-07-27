@@ -278,6 +278,8 @@ try {
   if (!appHtml.includes("/api/provider/publish-check") || !appHtml.includes("data-provider-publish-check")) throw new Error("provider publish-check UI/API hook missing");
   if (!appHtml.includes("/api/provider/acceptance-sweep") || !appHtml.includes("data-provider-acceptance-sweep")) throw new Error("provider acceptance sweep UI/API hook missing");
   if (!appHtml.includes('action.type === "Provider task"') || !appHtml.includes("action.providerGate") || !appHtml.includes('event.target.closest(".connector-route")')) throw new Error("provider action tasks should expose direct provider controls");
+  if ((appHtml.match(/addEventListener\("click", \(\) => openConnectorRoute/g) || []).length) throw new Error("provider connector buttons must use only the delegated click handler so one tap starts one OAuth flow");
+  if ((appHtml.match(/const functionConnectorButton = event\.target\.closest\("\.connector-route"\)/g) || []).length !== 1) throw new Error("provider connector buttons should have exactly one delegated OAuth navigation handler");
   if (!appHtml.includes('current.missing || []') || !appHtml.includes('current.owned')) throw new Error("Action Lab must hide historical provider tasks after the live acceptance ledger satisfies their gate");
   if (!appHtml.includes("data-external-route") || !appHtml.includes("openExternalRoute")) throw new Error("provider action tasks should expose safe external portal links");
   if (!appHtml.includes("data-copy-text") || !appHtml.includes("Copy callback") || !appHtml.includes("copyTextValue")) throw new Error("provider action tasks should expose callback copy controls");
