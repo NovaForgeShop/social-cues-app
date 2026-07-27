@@ -54,7 +54,10 @@ test('25-step Social Cues tester loop reaches the workstation and checks safe fu
     await page.locator('#emailInput').fill(email);
     await page.locator('#passwordInput').fill(password);
     await page.locator('#promoInput').fill(promoCode);
-    await page.locator('#createBtn').click();
+    await Promise.all([
+      page.waitForURL(/\/app/, { timeout: 10_000 }),
+      page.locator('#createBtn').click()
+    ]);
     let session = await sameOriginJson(page, '/api/auth/session');
     await expect.poll(async () => {
       session = await sameOriginJson(page, '/api/auth/session');
@@ -62,7 +65,6 @@ test('25-step Social Cues tester loop reaches the workstation and checks safe fu
     }, { timeout: 10_000 }).toBeTruthy();
     expect(session.ok).toBeTruthy();
     expect(JSON.stringify(session.body)).toContain(email);
-    await page.waitForURL(/\/app/, { timeout: 10_000 }).catch(() => {});
   });
 
   await test.step('05 - a new tester enters the private first-run scene', async () => {
@@ -124,6 +126,38 @@ test('25-step Social Cues tester loop reaches the workstation and checks safe fu
   });
 
   await test.step('12 - studio generates platform variants', async () => {
+    const seeded = await page.evaluate(async () => {
+      const sessionToken = localStorage.getItem('Social Cues-session-token') || '';
+      const response = await fetch('/api/e2e/provider-accounts', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {})
+        },
+        body: JSON.stringify({
+          accounts: [{
+            id: 'tester-loop-facebook-page',
+            platform: 'facebook',
+            oauthProvider: 'meta',
+            name: 'Tester Loop Page',
+            handle: '@testerlooppage',
+            providerAccountId: 'test-tester-loop-facebook-page-1',
+            status: 'connected',
+            credential: 'tester-loop-facebook-token',
+            tokenExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            scopes: ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts']
+          }]
+        })
+      });
+      return { ok: response.ok, body: await response.json() };
+    });
+    expect(seeded.ok, JSON.stringify(seeded.body)).toBeTruthy();
+    await Promise.all([
+      page.waitForResponse(response => response.url().endsWith('/api/model') && response.request().method() === 'GET' && response.ok()),
+      page.reload()
+    ]);
+    await expect(page.locator('#dashboard')).toBeVisible();
     await page.locator('[data-view="studio"]').click();
     await page.locator('[data-studio-mode="campaign"]').click();
     await page.locator('#generateVariants').click();

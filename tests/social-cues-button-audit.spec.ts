@@ -97,6 +97,40 @@ test('local workstation navigation and safe buttons respond', async ({ page }) =
   await page.locator('#rawVideoClipCountInput').selectOption('5');
   await expect(page.locator('[data-studio-lane="campaign"]').first()).toBeHidden();
   await page.locator('[data-studio-mode="campaign"]').click();
+  const seeded = await page.evaluate(async () => {
+    const sessionToken = localStorage.getItem('Social Cues-session-token') || '';
+    const response = await fetch('/api/e2e/provider-accounts', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {})
+      },
+      body: JSON.stringify({
+        accounts: [{
+          id: 'button-audit-facebook-page',
+          platform: 'facebook',
+          oauthProvider: 'meta',
+          name: 'Button Audit Page',
+          handle: '@buttonauditpage',
+          providerAccountId: 'test-button-audit-facebook-page-1',
+          status: 'connected',
+          credential: 'button-audit-facebook-token',
+          tokenExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          scopes: ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts']
+        }]
+      })
+    });
+    return { ok: response.ok, body: await response.json() };
+  });
+  expect(seeded.ok, JSON.stringify(seeded.body)).toBeTruthy();
+  await Promise.all([
+    page.waitForResponse(response => response.url().endsWith('/api/model') && response.request().method() === 'GET' && response.ok()),
+    page.reload()
+  ]);
+  await expect(page.locator('#dashboard')).toBeVisible();
+  await page.locator('[data-view="studio"]').click();
+  await page.locator('[data-studio-mode="campaign"]').click();
   await expect(page.locator('#rulesBox .variant')).toHaveCount(3);
   await page.locator('#generateVariants').click();
   await expect(page.locator('#variantList [data-copy]')).toHaveCount(3);

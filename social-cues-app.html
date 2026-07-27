@@ -4568,11 +4568,11 @@
       campaign.destinationUrl = clean($("#campaignDestinationInput").value);
       campaign.destinationCta = $("#campaignCtaInput").value;
       campaign.updatedAt = new Date().toISOString();
-      saveModel(`Saved campaign: ${campaign.title}.`);
+      return saveModel(`Saved campaign: ${campaign.title}.`);
     }
 
     async function generateVariants() {
-      saveCampaignFromForm();
+      await saveCampaignFromForm();
       const campaign = activeCampaign();
       const button = $("#generateVariants");
       const originalText = button?.textContent || "Generate variants";
@@ -4708,6 +4708,14 @@
       const item = campaignVariantForId(id);
       const variant = item?.variant;
       if (!variant) return;
+      if (["approved", "queued"].includes(status) && !campaignVariantCanApprove(variant)) {
+        showAppResult(
+          `${platformName(variant.platform)} draft prepared`,
+          "The campaign copy and media are saved, but this destination does not have a verified live delivery adapter yet. It will not be placed into a queue that can only fail.",
+          "info"
+        );
+        return;
+      }
       if (variant.platform === "reddit" && ["queued", "submitted", "published"].includes(status)) {
         void openRedditHandoff(id, true);
         return;
@@ -4787,7 +4795,7 @@
 
     async function publishApproved() {
       const approvedCampaignVariants = (model.campaigns || []).flatMap(campaign => (campaign.variants || [])
-        .filter(variant => variant.status === "approved" && variant.platform !== "reddit"));
+        .filter(variant => variant.status === "approved" && variant.platform !== "reddit" && campaignVariantCanApprove(variant)));
       const approvedQuickVariants = (model.quickPosts || []).flatMap(batch => (batch.variants || [])
         .filter(variant => variant.status === "approved" && variant.platform !== "reddit" && quickPostVariantCanApprove(variant)));
       const redditHandoffVariants = [
@@ -6285,6 +6293,10 @@
       return ["native-queue", "reddit-handoff"].includes(quickPostVariantDeliveryMode(variant));
     }
 
+    function campaignVariantCanApprove(variant = {}) {
+      return quickPostVariantCanApprove(variant);
+    }
+
     function quickPostCompatiblePlatforms(kind = "", format = "auto") {
       const preferred = kind === "video" && format !== "standard"
         ? ["instagram", "youtube", "tiktok", "threads", "facebook"]
@@ -6601,7 +6613,7 @@
       if (button?.disabled) return;
       if (button) button.disabled = true;
       try {
-        saveCampaignFromForm();
+        await saveCampaignFromForm();
         const campaign = activeCampaign();
         if (!campaign) return;
         const file = $("#rawVideoInput")?.files?.[0] || null;
@@ -7861,10 +7873,21 @@
       const spec = v.videoSpec || platformVideoSpec(v.platform);
       const specHtml = spec ? `<div class="notice"><strong>Video output:</strong> ${escapeHtml(spec.format)} - ${escapeHtml(spec.resolution)} - ${escapeHtml(spec.duration)}${spec.outputName ? `<br><strong>File:</strong> ${escapeHtml(spec.outputName)}` : ""}<br>${escapeHtml(spec.safeArea || "")}</div>` : "";
       const videoTags = (v.videoHashtags || []).length ? `<div class="tags">${v.videoHashtags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>` : "";
+      const deliveryMode = quickPostVariantDeliveryMode(v);
+      const draftOnly = deliveryMode === "draft-only";
       const redditHandoff = v.platform === "reddit";
       const redditReady = redditHandoff && v.status === "approved" && Boolean(v.approvalConfirmedAt);
-      const displayStatus = redditHandoff && v.status === "approved" ? (redditReady ? "ready in Reddit" : "awaiting confirmation") : v.status;
-      const approvalActions = redditHandoff
+      const displayStatus = draftOnly
+        ? "draft only"
+        : redditHandoff && v.status === "approved"
+          ? (redditReady ? "ready in Reddit" : "awaiting confirmation")
+          : v.status;
+      const connectedForDraft = accountConnectionState(authoritativeProviderAccount(v.platform) || {}).connected;
+      const approvalActions = draftOnly
+        ? `${connectedForDraft
+          ? `<button disabled>Native delivery not ready</button>`
+          : `<button class="primary" data-account-action="connect" data-platform="${escapeHtml(v.platform)}">Connect to deliver</button>`}<button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Keep draft</button>`
+        : redditHandoff
         ? redditReady
           ? `<button class="primary" data-variant-action="open-reddit" data-variant-id="${id}">Open Reddit inbox</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button><button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Return to draft</button>`
           : v.status === "approved"
@@ -7891,7 +7914,9 @@
         ${editHtml}
         ${flags}
         ${videoTags}
-        <div class="notice approval-step"><strong>${escapeHtml(approvalStepCopy(String(v.status || "draft").toLowerCase(), v.platform, v.approvalConfirmedAt))}</strong></div>
+        <div class="notice approval-step"><strong>${draftOnly
+          ? `${escapeHtml(p?.name || platformName(v.platform))} campaign copy and media are prepared. This stays a draft until a verified delivery workflow is available.`
+          : escapeHtml(approvalStepCopy(String(v.status || "draft").toLowerCase(), v.platform, v.approvalConfirmedAt))}</strong></div>
         <div class="tags">
           ${v.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
           <span class="tag">${escapeHtml(disclosureNote(activeCampaign()))}</span>
@@ -7899,7 +7924,7 @@
         <div class="variant-tools">
           ${approvalActions}
         </div>
-        ${redditHandoff ? "" : `<label class="field-label">Publish time (your local timezone)<input type="datetime-local" data-variant-schedule="${id}" value="${escapeHtml(formatDateTimeInput(v.scheduledFor))}"></label>`}
+        ${redditHandoff || draftOnly ? "" : `<label class="field-label">Publish time (your local timezone)<input type="datetime-local" data-variant-schedule="${id}" value="${escapeHtml(formatDateTimeInput(v.scheduledFor))}"></label>`}
         <div class="variant-tools">
           <button data-variant-action="upload-media" data-variant-id="${id}">Choose image or video</button>
           <button data-variant-action="attach-launch-asset" data-variant-id="${id}">Use coming-soon asset</button>
@@ -7921,7 +7946,7 @@
         .filter(variant => quickPostVariantCanApprove(variant) && ["draft", "approved", "queued", "failed", "blocked"].includes(String(variant.status || "").toLowerCase()))
         .map(variant => quickPostVariantCard(batch, variant, false)));
       const campaignApprovals = (model.campaigns || []).flatMap(item => (item.variants || [])
-        .filter(variant => ["draft", "needs revision", "approved", "queued", "failed", "blocked"].includes(String(variant.status || "").toLowerCase()))
+        .filter(variant => campaignVariantCanApprove(variant) && ["draft", "needs revision", "approved", "queued", "failed", "blocked"].includes(String(variant.status || "").toLowerCase()))
         .map(variant => variantCard(variant, item)));
       const queueApprovals = standaloneQueueApprovalRows().map(queueApprovalCard);
       $("#approvalList").innerHTML = [...queueApprovals, ...quickApprovals, ...campaignApprovals].join("") || `<div class="empty">Nothing needs approval. New drafts and emailed approval requests will appear here.</div>`;
@@ -7961,7 +7986,7 @@
     }
 
     function approvalSummary() {
-      const campaignVariants = (model.campaigns || []).flatMap(campaign => campaign.variants || []);
+      const campaignVariants = (model.campaigns || []).flatMap(campaign => campaign.variants || []).filter(campaignVariantCanApprove);
       const quickVariants = (model.quickPosts || []).flatMap(batch => batch.variants || []).filter(quickPostVariantCanApprove);
       const queueRows = standaloneQueueApprovalRows();
       const allLocal = [...campaignVariants, ...quickVariants];
