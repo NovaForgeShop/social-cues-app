@@ -4789,7 +4789,7 @@
       const approvedCampaignVariants = (model.campaigns || []).flatMap(campaign => (campaign.variants || [])
         .filter(variant => variant.status === "approved" && variant.platform !== "reddit"));
       const approvedQuickVariants = (model.quickPosts || []).flatMap(batch => (batch.variants || [])
-        .filter(variant => variant.status === "approved" && variant.platform !== "reddit"));
+        .filter(variant => variant.status === "approved" && variant.platform !== "reddit" && quickPostVariantCanApprove(variant)));
       const redditHandoffVariants = [
         ...(model.campaigns || []).flatMap(campaign => campaign.variants || []),
         ...(model.quickPosts || []).flatMap(batch => batch.variants || [])
@@ -4827,7 +4827,7 @@
       });
       (model.quickPosts || []).forEach(batch => {
         (batch.variants || []).forEach(variant => {
-          if (variant.status !== "approved" || variant.platform === "reddit") return;
+          if (variant.status !== "approved" || variant.platform === "reddit" || !quickPostVariantCanApprove(variant)) return;
           variant.status = "queued";
           variant.queuedAt = new Date().toISOString();
           variant.approvalConfirmedAt = variant.queuedAt;
@@ -6267,6 +6267,24 @@
       "google_business", "shopify", "etsy", "twitch"
     ];
 
+    const quickPostNativeQueuePlatformIds = new Set([
+      "facebook", "instagram", "threads", "youtube", "tiktok", "x", "linkedin", "discord"
+    ]);
+
+    function quickPostDeliveryMode(platformId = "", account = null) {
+      if (platformId === "reddit") return "reddit-handoff";
+      const connected = account && accountConnectionState(account).connected && account.disabled !== true;
+      return connected && quickPostNativeQueuePlatformIds.has(platformId) ? "native-queue" : "draft-only";
+    }
+
+    function quickPostVariantDeliveryMode(variant = {}) {
+      return quickPostDeliveryMode(variant.platform, authoritativeProviderAccount(variant.platform));
+    }
+
+    function quickPostVariantCanApprove(variant = {}) {
+      return ["native-queue", "reddit-handoff"].includes(quickPostVariantDeliveryMode(variant));
+    }
+
     function quickPostCompatiblePlatforms(kind = "", format = "auto") {
       const preferred = kind === "video" && format !== "standard"
         ? ["instagram", "youtube", "tiktok", "threads", "facebook"]
@@ -6287,12 +6305,14 @@
         return state.connected && account?.disabled !== true ? {
           platformId,
           account,
-          identity: knownIdentity
+          identity: knownIdentity,
+          deliveryMode: quickPostDeliveryMode(platformId, account)
         } : {
           platformId,
           account: null,
           identity: knownIdentity || platformById(platformId)?.name || platformName(platformId),
-          draftOnly: true
+          draftOnly: true,
+          deliveryMode: "draft-only"
         };
       }).filter(Boolean);
     }
@@ -6306,7 +6326,7 @@
       const previous = select.value;
       const rows = quickPostConnectedTargets(kind, format);
       select.innerHTML = rows.length
-        ? rows.map(row => `<option value="${escapeHtml(row.platformId)}">${escapeHtml(platformName(row.platformId))}: ${escapeHtml(row.identity)}</option>`).join("")
+        ? rows.map(row => `<option value="${escapeHtml(row.platformId)}">${escapeHtml(platformName(row.platformId))}: ${escapeHtml(row.identity)}${row.deliveryMode === "draft-only" ? " (draft only)" : ""}</option>`).join("")
         : `<option value="">Connect a compatible posting account first</option>`;
       select.disabled = !rows.length;
       if (rows.some(row => row.platformId === previous)) select.value = previous;
@@ -6322,7 +6342,10 @@
     }
 
     function connectedAccountProfileUrl(account = {}) {
-      const direct = [account.profileUrl, account.profile_url, account.permalink, account.channelUrl, account.pageUrl, account.url]
+      const direct = [
+        account.profileUrl, account.profile_url, account.permalink, account.channelUrl, account.pageUrl, account.url,
+        account.mapsUri, account.profile?.mapsUri, account.profile?.url, account.profile?.webUrl
+      ]
         .map(safeQuickPostUrl)
         .find(Boolean);
       if (direct) return direct;
@@ -6335,8 +6358,18 @@
       if (platform === "x" && handle) return `https://x.com/${encodeURIComponent(handle)}`;
       if (platform === "tiktok" && handle) return `https://www.tiktok.com/@${encodeURIComponent(handle)}`;
       if (platform === "youtube" && providerId) return `https://www.youtube.com/channel/${encodeURIComponent(providerId)}`;
+      if (platform === "youtube" && handle) return `https://www.youtube.com/@${encodeURIComponent(handle)}`;
+      if (platform === "linkedin" && account.accountType === "member" && handle) return `https://www.linkedin.com/in/${encodeURIComponent(handle)}`;
       if (platform === "linkedin" && providerId) return `https://www.linkedin.com/company/${encodeURIComponent(providerId)}`;
       if (platform === "pinterest" && handle) return `https://www.pinterest.com/${encodeURIComponent(handle)}/`;
+      if (platform === "twitch" && handle) return `https://www.twitch.tv/${encodeURIComponent(handle)}`;
+      if (platform === "patreon" && handle) return `https://www.patreon.com/${encodeURIComponent(handle)}`;
+      if (platform === "shopify" && /\.myshopify\.com$/i.test(providerId)) return `https://${providerId}`;
+      if (platform === "etsy" && handle) return `https://www.etsy.com/shop/${encodeURIComponent(handle)}`;
+      if (platform === "discord" && account.profile?.selectedGuildId) {
+        const channelId = account.profile?.selectedChannelId || "@me";
+        return `https://discord.com/channels/${encodeURIComponent(account.profile.selectedGuildId)}/${encodeURIComponent(channelId)}`;
+      }
       return "";
     }
 
@@ -6353,7 +6386,11 @@
           seen.add(platformId);
           rows.push({ platformId, label: platformName(platformId), url });
         });
-      return rows.slice(0, 8);
+      const redditUrl = safeQuickPostUrl(metaState.redditStatus?.commandThreadUrl || "");
+      if (excludePlatform !== "reddit" && redditUrl && !seen.has("reddit")) {
+        rows.push({ platformId: "reddit", label: "Reddit", url: redditUrl });
+      }
+      return rows;
     }
 
     function quickPostFormatName(platformId, kind, format) {
@@ -6482,6 +6519,7 @@
             platform: row.platformId,
             providerAccountId: row.account?.providerAccountId || "",
             postingIdentity: row.identity,
+            deliveryMode: row.deliveryMode || quickPostDeliveryMode(row.platformId, row.account),
             status: "draft",
             title: titleInput || (row.platformId === "youtube" ? file.name.replace(/\.[^.]+$/, "") : ""),
             copy: quickPostDescription(row.platformId, caption, input),
@@ -7880,8 +7918,8 @@
       const html = campaign?.variants.length ? campaign.variants.map(variant => variantCard(variant, campaign)).join("") : `<div class="empty">Generate variants for the active campaign.</div>`;
       $("#variantList").innerHTML = html;
       const quickApprovals = (model.quickPosts || []).flatMap(batch => (batch.variants || [])
-        .filter(variant => ["draft", "approved", "queued", "failed", "blocked"].includes(String(variant.status || "").toLowerCase()))
-        .map(variant => quickPostVariantCard(batch, variant)));
+        .filter(variant => quickPostVariantCanApprove(variant) && ["draft", "approved", "queued", "failed", "blocked"].includes(String(variant.status || "").toLowerCase()))
+        .map(variant => quickPostVariantCard(batch, variant, false)));
       const campaignApprovals = (model.campaigns || []).flatMap(item => (item.variants || [])
         .filter(variant => ["draft", "needs revision", "approved", "queued", "failed", "blocked"].includes(String(variant.status || "").toLowerCase()))
         .map(variant => variantCard(variant, item)));
@@ -7924,7 +7962,7 @@
 
     function approvalSummary() {
       const campaignVariants = (model.campaigns || []).flatMap(campaign => campaign.variants || []);
-      const quickVariants = (model.quickPosts || []).flatMap(batch => batch.variants || []);
+      const quickVariants = (model.quickPosts || []).flatMap(batch => batch.variants || []).filter(quickPostVariantCanApprove);
       const queueRows = standaloneQueueApprovalRows();
       const allLocal = [...campaignVariants, ...quickVariants];
       return {
@@ -7984,6 +8022,14 @@
       const item = quickPostBatchForVariant(variantId);
       if (!item) return;
       syncQuickPostCopy(variantId);
+      if (["approved", "queued"].includes(status) && !quickPostVariantCanApprove(item.variant)) {
+        showAppResult(
+          `${platformName(item.variant.platform)} draft prepared`,
+          "The copy and media are saved, but this destination does not have a verified live delivery adapter yet. It will not be placed into a queue that can only fail.",
+          "info"
+        );
+        return;
+      }
       if (item.variant.platform === "reddit" && status === "queued") {
         void openRedditHandoff(variantId, true);
         return;
@@ -8038,7 +8084,11 @@
     async function approveAndQueueQuickPost(batchId = "") {
       const batch = (model.quickPosts || []).find(item => item.id === batchId);
       if (!batch) return;
-      const approved = (batch.variants || []).filter(variant => variant.status === "approved" && (variant.platform !== "reddit" || !variant.approvalConfirmedAt));
+      const approved = (batch.variants || []).filter(variant =>
+        quickPostVariantCanApprove(variant)
+        && variant.status === "approved"
+        && (variant.platform !== "reddit" || !variant.approvalConfirmedAt)
+      );
       if (!approved.length) {
         showAppResult("Content approval needed", "Approve at least one post in this batch before the final queue confirmation.", "error");
         return;
@@ -8076,17 +8126,69 @@
       saveModel("Removed one-shot post drafts.");
     }
 
-    function quickPostVariantCard(batch, variant) {
+    const quickPostPrivatePreviewCache = new Map();
+
+    function quickPostMediaSourceAttributes(mediaUrl = "") {
+      const normalized = String(mediaUrl || "");
+      return /^\/api\/media\/assets\/[^/]+\/content$/.test(normalized)
+        ? `data-private-media-preview="${escapeHtml(normalized)}"`
+        : `src="${escapeHtml(normalized)}"`;
+    }
+
+    async function resolveQuickPostPrivatePreview(mediaUrl = "") {
+      const normalized = String(mediaUrl || "");
+      const cached = quickPostPrivatePreviewCache.get(normalized);
+      if (cached && cached.expiresAt > Date.now()) return cached.promise;
+      const promise = authedFetch(`${normalized}?resolve=1`)
+        .then(async response => {
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.url) throw new Error(payload.error || "Private media preview is unavailable.");
+          return payload.url;
+        });
+      quickPostPrivatePreviewCache.set(normalized, { promise, expiresAt: Date.now() + 4 * 60 * 1000 });
+      try {
+        return await promise;
+      } catch (error) {
+        quickPostPrivatePreviewCache.delete(normalized);
+        throw error;
+      }
+    }
+
+    async function hydrateQuickPostPrivatePreviews(root) {
+      const previews = [...(root?.querySelectorAll?.("[data-private-media-preview]") || [])];
+      await Promise.all(previews.map(async preview => {
+        const mediaUrl = preview.getAttribute("data-private-media-preview") || "";
+        try {
+          const resolvedUrl = await resolveQuickPostPrivatePreview(mediaUrl);
+          if (preview.isConnected && preview.getAttribute("data-private-media-preview") === mediaUrl) preview.src = resolvedUrl;
+        } catch {
+          preview.setAttribute("aria-label", "Private media preview unavailable");
+        }
+      }));
+    }
+
+    function quickPostVariantCard(batch, variant, showMediaPreview = false) {
       const platform = platformById(variant.platform) || { name: variant.platform || "Platform", accent: "#28d7ee" };
       const media = variant.media || {};
-      const mediaPreview = media.url
-        ? `<div class="media-preview">${media.type === "video" ? `<video src="${escapeHtml(media.url)}" controls preload="metadata"></video>` : `<img src="${escapeHtml(media.url)}" alt="${escapeHtml(media.name || "Post media")}">`}<div class="media-copy">${escapeHtml(media.name || "Media")}<br>${escapeHtml(variant.contentFormat || media.type || "post")}</div></div>`
-        : `<div class="notice">${escapeHtml(media.name || "Private media")}</div>`;
+      const mediaPreview = showMediaPreview && media.url
+        ? `<div class="media-preview">${media.type === "video" ? `<video ${quickPostMediaSourceAttributes(media.url)} controls preload="none"></video>` : `<img ${quickPostMediaSourceAttributes(media.url)} alt="${escapeHtml(media.name || "Post media")}">`}<div class="media-copy">${escapeHtml(media.name || "Media")}<br>${escapeHtml(variant.contentFormat || media.type || "post")}</div></div>`
+        : `<div class="notice"><strong>Shared media:</strong> ${escapeHtml(media.name || "Private media")} - ${escapeHtml(variant.contentFormat || media.type || "post")}</div>`;
       const status = String(variant.status || "draft").toLowerCase();
+      const deliveryMode = quickPostVariantDeliveryMode(variant);
+      const draftOnly = deliveryMode === "draft-only";
       const redditHandoff = variant.platform === "reddit";
       const redditReady = redditHandoff && status === "approved" && Boolean(variant.approvalConfirmedAt);
-      const displayStatus = redditHandoff && status === "approved" ? (redditReady ? "ready in Reddit" : "awaiting confirmation") : (variant.status || "draft");
-      const approvalActions = redditReady
+      const displayStatus = draftOnly
+        ? "draft only"
+        : redditHandoff && status === "approved"
+          ? (redditReady ? "ready in Reddit" : "awaiting confirmation")
+          : (variant.status || "draft");
+      const connectedForDraft = accountConnectionState(authoritativeProviderAccount(variant.platform) || {}).connected;
+      const approvalActions = draftOnly
+        ? `${connectedForDraft
+          ? `<button disabled>Native delivery not ready</button>`
+          : `<button class="primary" data-account-action="connect" data-platform="${escapeHtml(variant.platform)}">Connect to deliver</button>`}<button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Keep draft</button>`
+        : redditReady
         ? `<button class="primary" data-quick-reddit="open" data-quick-variant="${escapeHtml(variant.id)}">Open Reddit inbox</button><button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Return to draft</button>`
         : status === "approved"
         ? redditHandoff
@@ -8107,8 +8209,10 @@
         ${mediaPreview}
         ${variant.destinationUrl ? `<div class="notice"><strong>Primary link</strong><br><a href="${escapeHtml(variant.destinationUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(variant.destinationUrl)}</a></div>` : ""}
         ${redditHandoff ? `<div class="notice"><strong>Reddit-hosted workflow.</strong> Live comments, replies, and moderation stay inside the installed Reddit app.</div>` : ""}
-        <div class="notice approval-step"><strong>${escapeHtml(approvalStepCopy(status, variant.platform, variant.approvalConfirmedAt))}</strong></div>
-        ${redditHandoff ? "" : `<label class="field-label">Publish time (your local timezone)<input type="datetime-local" data-quick-schedule="${escapeHtml(variant.id)}" value="${escapeHtml(formatDateTimeInput(variant.scheduledFor))}"></label>`}
+        <div class="notice approval-step"><strong>${draftOnly
+          ? `${escapeHtml(platform.name)} copy and media are prepared. This stays a draft until a verified delivery workflow is available.`
+          : escapeHtml(approvalStepCopy(status, variant.platform, variant.approvalConfirmedAt))}</strong></div>
+        ${redditHandoff || draftOnly ? "" : `<label class="field-label">Publish time (your local timezone)<input type="datetime-local" data-quick-schedule="${escapeHtml(variant.id)}" value="${escapeHtml(formatDateTimeInput(variant.scheduledFor))}"></label>`}
         <div class="variant-tools">
           ${approvalActions}
         </div>
@@ -8116,7 +8220,11 @@
     }
 
     function quickBatchPendingConfirmationCount(batch) {
-      return (batch.variants || []).filter(variant => variant.status === "approved" && (variant.platform !== "reddit" || !variant.approvalConfirmedAt)).length;
+      return (batch.variants || []).filter(variant =>
+        quickPostVariantCanApprove(variant)
+        && variant.status === "approved"
+        && (variant.platform !== "reddit" || !variant.approvalConfirmedAt)
+      ).length;
     }
 
     function renderQuickPosts() {
@@ -8127,15 +8235,16 @@
       target.innerHTML = batches.length ? batches.map(batch => `
         <div class="stack" data-quick-batch="${escapeHtml(batch.id)}">
           <div class="row">
-            <div><h3>${escapeHtml(batch.title || "Quick post")}</h3><p>${escapeHtml(batch.mode === "everywhere" ? "Every compatible connected account" : "One connected account")} - ${escapeHtml(batch.mediaKind || "media")}</p></div>
+            <div><h3>${escapeHtml(batch.title || "Quick post")}</h3><p>${escapeHtml(batch.mode === "everywhere" ? "Every prepared destination" : "One selected destination")} - ${escapeHtml(batch.mediaKind || "media")}</p></div>
             <div class="actions">
               <button class="primary" data-quick-batch-action="queue-all" data-quick-batch-id="${escapeHtml(batch.id)}" ${quickBatchPendingConfirmationCount(batch) ? "" : "disabled"}>Confirm approved (${quickBatchPendingConfirmationCount(batch)})</button>
               <button class="danger" data-quick-batch-action="remove" data-quick-batch-id="${escapeHtml(batch.id)}">Remove</button>
             </div>
           </div>
-          ${(batch.variants || []).map(variant => quickPostVariantCard(batch, variant)).join("")}
+          ${(batch.variants || []).map((variant, index) => quickPostVariantCard(batch, variant, index === 0)).join("")}
         </div>
       `).join("") : `<div class="empty">Prepared one-shot posts will appear here.</div>`;
+      hydrateQuickPostPrivatePreviews(target);
     }
 
     function renderRules() {

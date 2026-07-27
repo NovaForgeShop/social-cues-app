@@ -165,7 +165,8 @@ const tokenRefreshLeadByPlatformMinutes = Object.freeze({
   x: 15,
   etsy: 15,
   tiktok: 360,
-  discord: 1440
+  discord: 1440,
+  threads: 1440
 });
 const automaticPublishingEnabled = /^(1|true|yes|enabled)$/i.test(process.env.AUTOMATIC_PUBLISHING_ENABLED || "");
 const notificationEmailMaxAgeHours = Math.max(1, Math.min(Number(process.env.NOTIFICATION_EMAIL_MAX_AGE_HOURS || 24), 168));
@@ -8218,6 +8219,7 @@ function providerExpiryAlertsForUser(model, user = {}) {
       const daysRemaining = Math.ceil((expiresAtMs - now) / (24 * 60 * 60 * 1000));
       if (daysRemaining > 14) return null;
       const expired = daysRemaining <= 0;
+      if (!expired && account.platform === "threads") return null;
       const identity = account.handle || account.displayName || account.name || platformDisplayName(account.platform);
       return publicAuthAlert({
         id: `provider-expiry-${account.platform}-${account.providerAccountId || account.id}`,
@@ -8609,7 +8611,7 @@ async function discoverWorkerJobs() {
   for (const profile of Array.isArray(scheduledProfiles) ? scheduledProfiles : []) {
     if (!ownerByWorkspace.has(profile.workspace_id)) ownerByWorkspace.set(profile.workspace_id, profile.id);
   }
-  const supportedRefreshPlatforms = new Set(["x", "etsy", "tiktok", "twitch", "discord", "youtube"]);
+  const supportedRefreshPlatforms = new Set(["x", "etsy", "tiktok", "twitch", "discord", "youtube", "threads"]);
   const jobs = [];
   const hourKey = now.slice(0, 13).replace(/[-T:]/g, "");
   const dayKey = now.slice(0, 10).replace(/-/g, "");
@@ -8911,7 +8913,8 @@ async function processTokenRefreshWorkerJob(job, registry) {
     tiktok: refreshTikTokAccount,
     twitch: refreshTwitchAccount,
     discord: refreshDiscordAccount,
-    youtube: refreshYouTubeAccount
+    youtube: refreshYouTubeAccount,
+    threads: refreshThreadsAccount
   };
   const refresher = refreshers[platform];
   if (!refresher) throw new WorkerJobError(`Automatic refresh is not implemented for ${platform}.`, { blocked: true });
@@ -11914,16 +11917,21 @@ function threadsTokenHealth(account = null) {
   const expiresAt = account?.tokenExpiresAt || null;
   const expiresMs = expiresAt ? Date.parse(expiresAt) : NaN;
   const remainingMs = Number.isFinite(expiresMs) ? expiresMs - Date.now() : null;
+  const stored = Boolean(account && hasStoredToken(account));
+  const expired = remainingMs !== null ? remainingMs <= 0 : false;
+  const expiresSoon = remainingMs !== null ? remainingMs > 0 && remainingMs <= 14 * 24 * 60 * 60 * 1000 : false;
   return {
-    stored: Boolean(account && hasStoredToken(account)),
+    stored,
     expiresAt,
-    expired: remainingMs !== null ? remainingMs <= 0 : false,
-    expiresSoon: remainingMs !== null ? remainingMs > 0 && remainingMs <= 14 * 24 * 60 * 60 * 1000 : false,
+    expired,
+    expiresSoon,
     daysRemaining: remainingMs !== null ? Math.max(0, Math.ceil(remainingMs / (24 * 60 * 60 * 1000))) : null,
-    refreshSupported: false,
-    action: remainingMs !== null && remainingMs <= 14 * 24 * 60 * 60 * 1000
-      ? "Reconnect Threads before the stored token expires."
-      : "No token action is currently required."
+    refreshSupported: stored && !expired,
+    action: expired
+      ? "Reconnect Threads because expired tokens cannot be renewed."
+      : expiresSoon
+        ? "Automatic Threads token renewal is scheduled before expiry."
+        : "No token action is currently required."
   };
 }
 
@@ -11959,6 +11967,31 @@ async function verifyThreadsAccountIdentity(account, user = null) {
   const profile = await threadsApi("/me", { fields: "id,username,name,threads_profile_picture_url,threads_biography" }, accessToken);
   if (!profile?.id) throw new Error("Threads /me did not return a provider account id.");
   return { profile, changed: applyVerifiedThreadsProfile(account, profile, user), skipped: false };
+}
+
+async function refreshThreadsAccount(model, account, user = null) {
+  if (!account) throw new Error("No Threads account is stored.");
+  const accessToken = tokenForThreadsAccount(account);
+  if (!accessToken) throw new Error("Threads access token is missing. Reconnect Threads OAuth.");
+  if (threadsTokenHealth(account).expired) throw new Error("Threads access token expired before it could be renewed. Reconnect Threads OAuth.");
+  const token = await threadsApi("/refresh_access_token", {
+    grant_type: "th_refresh_token",
+    access_token: accessToken
+  });
+  if (!token?.access_token) throw new Error("Threads token renewal returned no access token.");
+  const updatedAt = new Date().toISOString();
+  account.credential = encryptedToken(token.access_token);
+  account.credentialUpdatedAt = updatedAt;
+  account.tokenType = token.token_type || account.tokenType || "bearer";
+  account.tokenExpiresAt = token.expires_in
+    ? new Date(Date.now() + Number(token.expires_in) * 1000).toISOString()
+    : account.tokenExpiresAt || null;
+  account.status = "connected";
+  account.connectedAt = account.connectedAt || updatedAt;
+  account.connectionEvidence = "Threads long-lived access token renewed server-side.";
+  clearProviderTokenErrors(account);
+  await saveModelForUser(model, user);
+  return account;
 }
 
 function refreshTokenForYouTubeAccount(account) {
@@ -12371,6 +12404,21 @@ async function usablePatreonAccount(model, options = {}) {
     } catch (error) {
       await markProviderReconnectNeeded(model, account, "Patreon", error.message, options.user || null);
       return account;
+    }
+  }
+  return account;
+}
+
+async function usableThreadsAccount(model, options = {}) {
+  const account = usableProviderAccount(model, "threads", { user: options.user || null });
+  if (!account) return null;
+  if (tokenExpiresSoon(account.tokenExpiresAt, 14 * 24 * 60 * 60 * 1000) || !tokenForThreadsAccount(account)) {
+    if (!options.refresh) return account;
+    try {
+      return await refreshThreadsAccount(model, account, options.user || null);
+    } catch (error) {
+      await markProviderReconnectNeeded(model, account, "Threads", error.message, options.user || null);
+      throw error;
     }
   }
   return account;
@@ -12823,7 +12871,18 @@ async function requireThreadsAccountForRead(req, res, purpose = "read Threads da
     return null;
   }
   const model = session?.user ? await modelForSession(session, sharedModel) : sharedModel;
-  let account = usableProviderAccount(model, "threads", { user: session?.user || null });
+  let account = null;
+  try {
+    account = await usableThreadsAccount(model, { refresh: true, user: session?.user || null });
+  } catch (error) {
+    json(res, 409, {
+      ok: false,
+      error: `Reconnect Threads OAuth before Social Cues can ${purpose}. ${error.message}`,
+      connectRoute: "/api/oauth/threads/start",
+      requiredScopes
+    });
+    return null;
+  }
   let verifiedProfile = null;
   if (account && threadsAccountNeedsIdentityRepair(account)) {
     try {
@@ -20480,7 +20539,15 @@ async function route(req, res) {
     const asset = (model.mediaAssets || []).find(item => item.id === mediaPreviewMatch[1] && ownedByUser(item, session.user.id));
     if (!asset || asset.status !== "uploaded" || !asset.storagePath) return json(res, 404, { ok: false, error: "This private media asset is not available." });
     try {
-      res.writeHead(302, { Location: await signedSupabaseMediaUrl(asset.storagePath, 300), "Cache-Control": "private, no-store" });
+      const signedUrl = await signedSupabaseMediaUrl(asset.storagePath, 300);
+      if (url.searchParams.get("resolve") === "1") {
+        return json(res, 200, { ok: true, url: signedUrl, expiresIn: 300 });
+      }
+      res.writeHead(302, {
+        Location: signedUrl,
+        "Cache-Control": "private, max-age=120, must-revalidate",
+        Vary: "Cookie, Authorization"
+      });
       return res.end();
     } catch (error) {
       return json(res, 502, { ok: false, error: `Private media preview failed: ${error.message}` });
