@@ -48,8 +48,7 @@ async function createIsolatedWorkspace(page: Page, projectName: string): Promise
   await page.locator('#passwordInput').fill(password);
   await page.locator('#promoInput').fill(promoCodes[projectName] || promoCodes.chromium);
   await page.locator('#createBtn').click();
-  await page.waitForURL(/\/app|\/portal/, { timeout: 10_000 });
-  await page.goto('/app');
+  await page.waitForURL(/\/app$/, { timeout: 10_000 });
 
   await expect(page.locator('#onboarding')).toBeVisible();
   await page.locator('#businessNameInput').fill('Media Journey Brand');

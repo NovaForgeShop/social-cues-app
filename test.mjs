@@ -181,6 +181,11 @@ try {
   if (/Cory Barton|ForgePilot|Forge Pilot|FPv2/i.test(appHtml)) throw new Error("app HTML contains stale personal or old brand defaults");
   if (/localStorage\.setItem\((SESSION_TOKEN_KEY|tokenKey|legacyTokenKey)/.test(`${appHtml}\n${serverSource}`)) throw new Error("session token should not be persisted into browser storage");
   if (!serverSource.includes("SOCIAL_CUES_PROMO_CODES") || /SC-TEST-[A-Z]+-[A-Z0-9]+/.test(serverSource)) throw new Error("active tester promo codes must be supplied through server environment, not deployed source");
+  if (!serverSource.includes("async function enforceHostedApiAccess") || !serverSource.includes('return "entitled";') || !serverSource.includes('if (!(await enforceHostedApiAccess(req, res, url))) return;')) throw new Error("hosted APIs must use a deny-by-default server-side access boundary");
+  if (!serverSource.includes('"/api/auth/login"') || !serverSource.includes('"/api/meta/webhook"') || !serverSource.includes('"/api/meta/data-deletion"') || !serverSource.includes('"/api/meta/deauthorize"') || !serverSource.includes('pathname.startsWith("/api/media/provider/")')) throw new Error("public auth, signed provider callbacks, compliance routes, and expiring provider media must remain explicitly allowlisted");
+  if (!serverSource.includes('"/api/security/audit"') || !serverSource.includes('accessLevel === "operator"') || !serverSource.includes("socialCuesProviderOperator(session.user)")) throw new Error("internal diagnostics must require the Social Cues owner role");
+  if (!serverSource.includes('status: "healthy"') || serverSource.includes("supabaseConfigured: supabaseEnabled")) throw new Error("public health output must not advertise internal persistence or provider configuration");
+  if (!vercelConfigSource.includes('"server.mjs"') || vercelConfigSource.includes('"api/server.mjs"') || vercelConfigSource.includes('"routes"')) throw new Error("Vercel must use the single root server entrypoint without a stale catch-all function route");
   if (!serverSource.includes("promo.email !== normalizedEmail") || !serverSource.includes("memberOnly: Boolean(promo.memberOnly)") || !serverSource.includes("if (entitlement.memberOnly) return \"Member\"") || !serverSource.includes("const assignedMemberPromo = testPromoCodes.find")) throw new Error("email-bound member promo codes must not inherit owner/admin access");
   if (!serverSource.includes("REDDIT_DEVVIT_PROJECT_READY") || !serverSource.includes("redditDevvitProjectDeclaredReady") || !serverSource.includes('if (runtimeMode === "vercel") return redditDevvitProjectDeclaredReady')) throw new Error("production Reddit readiness must use verified flags instead of packaging the Devvit toolchain");
   if (serverSource.includes("promoFromSupabaseUser") || /raw_user_meta_data[\s\S]{0,400}promo/i.test(serverSource)) throw new Error("user-editable Supabase metadata must never grant promo authorization");
@@ -541,7 +546,7 @@ try {
   if (!appHtml.includes("source.discordStatus?.account")) throw new Error("Discord readiness account evidence is not merged into the app account list");
   if (!appHtml.includes("function acceptedEnvTags") || !appHtml.includes("${name} accepts") || !appHtml.includes("acceptedEnvTags(service") || !appHtml.includes("acceptedEnvTags(backendService(\"pinterest\")")) throw new Error("provider UI should expose accepted env aliases for missing production credentials");
   if (!appHtml.includes("Production credential unlocks") || !appHtml.includes("credentialUnlocks") || !serverSource.includes('url.pathname === "/api/provider/credential-unlocks"') || !serverSource.includes("function serviceCredentialUnlocks")) throw new Error("provider credential unlock queue missing");
-  if (!serverSource.includes("Next provider unlock") || !serverSource.includes("integrations.nextCredentialUnlock") || !serverSource.includes("acceptedNames")) throw new Error("portal credential unlock alert missing");
+  if (serverSource.includes("Next provider unlock") || serverSource.includes("integrations.nextCredentialUnlock")) throw new Error("public account portal must not expose provider credential names or operator setup details");
   if (!appHtml.includes("/api/provider/setup-fields") || !serverSource.includes("function providerSetupFields") || !serverSource.includes('url.pathname === "/api/provider/setup-fields"')) throw new Error("provider setup field contract route/UI hook missing");
   if (!appHtml.includes("Provider setup contracts") || !appHtml.includes("metaState.setupFields") || !appHtml.includes("setupFieldsResponse") || !appHtml.includes("Refresh setup fields")) throw new Error("provider setup field contracts should be loaded and visible in Admin");
   if (!appHtml.includes('data-copy-text="${escapeHtml(item.callbackUrl)}"') || !appHtml.includes('data-external-route="${escapeHtml(item.portalRoute)}"') || !appHtml.includes('data-function-check-route="${escapeHtml(item.statusRoute)}"')) throw new Error("provider setup contracts should expose copy, portal, and status controls");
@@ -2097,17 +2102,9 @@ try {
   if (mediaEditorReady.outputs.some(output => !Array.isArray(output.hashtags) || !output.hashtags.length)) throw new Error("media editor outputs must include platform hashtag guidance");
 
   const authReady = await request("/api/auth/readiness");
-  if (!authReady.ok || !authReady.sessionStorage.includes("HMAC")) throw new Error("auth readiness failed");
+  if (!authReady.ok || !["emailVerificationRequired", "passwordRecoveryReady", "loginAlertingReady", "rateLimitGuarded"].every(key => Object.prototype.hasOwnProperty.call(authReady, key))) throw new Error("auth readiness failed");
   if (authReady.signupAccess?.mode !== "invite-only" || authReady.signupAccess?.activePromoCodeCount < 4) throw new Error("auth readiness must expose invite-only signup policy");
-  if (!["passwordRecoveryReady", "loginAlertingReady", "rateLimitGuarded", "refreshTokenRotationReady"].every(key => Object.prototype.hasOwnProperty.call(authReady, key))) {
-    throw new Error("auth readiness must expose Supabase Pro hardening flags");
-  }
-  if (!authReady.alphaLocalFallback && authReady.customSmtpReady) {
-    if (!authReady.passwordRecoveryReady || !authReady.loginAlertingReady || !authReady.rateLimitGuarded || !authReady.refreshTokenRotationReady) {
-      throw new Error("hosted auth readiness should mark the Supabase Pro hardening flags ready");
-    }
-    if (!String(authReady.nextSwitch || "").includes("Recovery")) throw new Error("hosted auth readiness next switch should reflect the live recovery/alert lane");
-  }
+  if (["sessionStorage", "nextSwitch", "missingEnv", "customSmtpReady", "refreshTokenRotationReady"].some(key => Object.prototype.hasOwnProperty.call(authReady, key))) throw new Error("public auth readiness must not expose internal implementation or environment details");
 
   const passwordRecoveryNoEmail = await fetch(base + "/api/auth/password-recovery", {
     method: "POST",
@@ -2130,7 +2127,8 @@ try {
   if (resetWithoutRecoveryLink.status !== 403) throw new Error("password update must reject requests that did not originate from an emailed recovery link");
 
   const storageReady = await request("/api/media/storage/readiness");
-  if (!storageReady.ok || !storageReady.bucket || !Array.isArray(storageReady.missingEnv)) throw new Error("media storage readiness failed");
+  if (!storageReady.ok || typeof storageReady.ready !== "boolean" || !storageReady.provider || !storageReady.maxUploadMb) throw new Error("media storage readiness failed");
+  if ("bucket" in storageReady || "missingEnv" in storageReady) throw new Error("public media storage readiness must not expose private storage names or environment details");
 
   const securityAudit = await request("/api/security/audit");
   if (!securityAudit.ok || !securityAudit.headers || !securityAudit.auth?.publicUserListHidden) throw new Error("security audit failed");

@@ -13,8 +13,7 @@ test('local workstation navigation and safe buttons respond', async ({ page }) =
   await page.locator('#passwordInput').fill(password);
   await page.locator('#promoInput').fill('SC-LOCAL-SIGNAL-9X2P');
   await page.locator('#createBtn').click();
-  await page.waitForURL(/\/app|\/portal/, { timeout: 10_000 });
-  await page.goto('/app');
+  await page.waitForURL(/\/app$/, { timeout: 10_000 });
   await expect(page.locator('#onboarding')).toBeVisible();
   await expect(page.locator('body')).toHaveClass(/onboarding-scene/);
   await expect(page.locator('.side')).toBeHidden();

@@ -8,6 +8,7 @@ import {
 } from "./instrument.mjs";
 import http from "node:http";
 import crypto from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -7510,7 +7511,7 @@ async function modelForSession(session = null, sharedModel = null) {
   return clientWorkspaceModelForUser(session.user, {}, base);
 }
 
-async function getModel() {
+async function loadModel() {
   let model;
   try {
     model = supabaseEnabled ? await supabaseGetModel() : await localGetModel();
@@ -7589,6 +7590,21 @@ async function getModel() {
   if (hydrateMetaLoginStatus(model)) changed = true;
   if (changed) await saveModel(model);
   return model;
+}
+
+const requestModelContext = new AsyncLocalStorage();
+
+async function getModel() {
+  const context = requestModelContext.getStore();
+  if (context?.modelPromise) return context.modelPromise;
+  const modelPromise = loadModel();
+  if (context) context.modelPromise = modelPromise;
+  try {
+    return await modelPromise;
+  } catch (error) {
+    if (context?.modelPromise === modelPromise) context.modelPromise = null;
+    throw error;
+  }
 }
 
 function isConnectedStatus(status) {
@@ -7900,6 +7916,98 @@ const externalSignedPostPaths = new Set([
   "/api/linkedin/webhook",
   "/api/billing/webhook"
 ]);
+
+const anonymousApiGetPaths = new Set([
+  "/api/auth/readiness",
+  "/api/auth/smtp/readiness",
+  "/api/billing/readiness",
+  "/api/cron/workers",
+  "/api/linkedin/webhook",
+  "/api/media/public-assets",
+  "/api/media/storage/readiness",
+  "/api/meta/data-deletion",
+  "/api/meta/data-deletion/status",
+  "/api/meta/deauthorize",
+  "/api/meta/webhook"
+]);
+
+const anonymousApiPostPaths = new Set([
+  "/api/auth/login",
+  "/api/auth/password-recovery",
+  "/api/auth/password-update",
+  "/api/auth/resend-verification",
+  "/api/auth/signup",
+  "/api/cron/workers",
+  "/api/monitoring/client-error",
+  ...externalSignedPostPaths
+]);
+
+const sessionApiPaths = new Set([
+  "/api/auth/alerts",
+  "/api/auth/device/heartbeat",
+  "/api/auth/entitlement",
+  "/api/auth/logout",
+  "/api/auth/session",
+  "/api/billing/checkout",
+  "/api/billing/portal",
+  "/api/billing/status",
+  "/api/devices",
+  "/api/workspace/invites/accept"
+]);
+
+const operatorApiPaths = new Set([
+  "/api/app-shell/readiness",
+  "/api/dev-portal/audit",
+  "/api/monitoring/status",
+  "/api/oauth/debug-log",
+  "/api/oauth/tiktok/debug-start",
+  "/api/oauth/tiktok/diagnostic",
+  "/api/provider/credential-unlocks",
+  "/api/provider/setup-fields",
+  "/api/resend/readiness",
+  "/api/resend/status",
+  "/api/security/audit",
+  "/api/supabase/status",
+  "/api/test-panel"
+]);
+
+function hostedApiAccessLevel(req, url) {
+  const method = String(req.method || "GET").toUpperCase();
+  const pathname = url.pathname;
+  if (method === "GET" && /^\/api\/oauth\/[^/]+\/callback$/.test(pathname)) return "anonymous";
+  if (method === "GET" && pathname.startsWith("/api/media/provider/")) return "anonymous";
+  if (method === "GET" && anonymousApiGetPaths.has(pathname)) return "anonymous";
+  if (method === "POST" && anonymousApiPostPaths.has(pathname)) return "anonymous";
+  if (pathname.startsWith("/api/auth/mfa/") || /^\/api\/devices\/[^/]+\/revoke$/.test(pathname)) return "session";
+  if (sessionApiPaths.has(pathname)) return "session";
+  if (operatorApiPaths.has(pathname)) return "operator";
+  return "entitled";
+}
+
+async function enforceHostedApiAccess(req, res, url) {
+  if (runtimeMode !== "vercel" || !url.pathname.startsWith("/api/")) return true;
+  const accessLevel = hostedApiAccessLevel(req, url);
+  if (accessLevel === "anonymous") return true;
+
+  const model = await getModel();
+  const session = await sessionFromRequest(model, req);
+  if (!session?.user) {
+    json(res, 401, { ok: false, error: "Sign in to Social Cues before using this API." });
+    return false;
+  }
+  req.socialCuesAccessSession = session;
+  refreshSessionCookieIfNeeded(res, session);
+
+  if (accessLevel !== "session" && !hasActiveAppAccess(session.user)) {
+    appAccessRequiredResponse(res);
+    return false;
+  }
+  if (accessLevel === "operator" && !socialCuesProviderOperator(session.user)) {
+    json(res, 403, { ok: false, error: "This diagnostic is limited to the Social Cues owner." });
+    return false;
+  }
+  return true;
+}
 
 function allowedWriteOrigins(req) {
   const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
@@ -13663,6 +13771,7 @@ async function persistNormalizedDeviceAuthState(device = {}) {
 }
 
 async function sessionFromRequest(model, req) {
+  if (req.socialCuesAccessSession?.user) return req.socialCuesAccessSession;
   const token = bearerToken(req);
   if (!token) return null;
   if (!authSessionSecret) return null;
@@ -15514,7 +15623,7 @@ function portalPageHtml() {
     function renderAlerts(items){$("alertList").innerHTML=items.length?items.map(item=>'<div class="status-row"><div><strong>'+escapeHtml(item.label)+'</strong><br><span>'+escapeHtml(item.detail)+'</span></div><span class="pill">'+escapeHtml(item.status)+'</span></div>').join(""):'<div class="notice">Checking readiness after login.</div>'}
     function accessDetail(entitlement){if(!entitlement?.active)return"Pay with Stripe or use an active promo code during account creation.";if(entitlement.source==="promo-code"){const until=entitlement.expiresAt?new Date(entitlement.expiresAt).toLocaleDateString():"120 days";return"Promo code "+entitlement.promoCode+" gives highest-tier full access through "+until+". App fee and subscription gate are satisfied for the test window."}return(entitlement.selectedPlan||"Highest-tier paid access")+" active. App fee and subscription gate are satisfied."}
     async function acceptWorkspaceInvite(){const token=pageParams.get("invite");if(!token)return false;const accepted=await api("/api/workspace/invites/accept",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});history.replaceState({},document.title,"/portal?stay=1");$("authNotice").textContent="Workspace invitation accepted.";return Boolean(accepted.accepted)}
-    async function refreshPortal(){let entitlement=null;let session=null;try{session=await api("/api/auth/session");localStorage.removeItem(legacyTokenKey);renderSignedIn(session);renderDevices(session.devices||[]);entitlement=session.entitlement||null;if(pageParams.get("invite"))await acceptWorkspaceInvite();try{entitlement=(await api("/api/auth/entitlement")).entitlement||entitlement}catch{}}catch{}const [authReady,smtp,billing,media,integrations]=await Promise.all([fetch("/api/auth/readiness").then(r=>r.json()),fetch("/api/auth/smtp/readiness").then(r=>r.json()),fetch("/api/billing/readiness").then(r=>r.json()),fetch("/api/media/storage/readiness").then(r=>r.json()),fetch("/api/integrations/readiness").then(r=>r.json())]);const discord=[...(integrations.providerServices||[]),...(integrations.coreServices||[])].find(s=>s.id==="discord");const unlock=integrations.nextCredentialUnlock||(integrations.credentialUnlocks||[])[0]||null;const unlockNames=unlock?(unlock.acceptedNames||[]).slice(0,3).join(", "):"";const personalAlerts=(session?.alerts||[]).slice(0,3).map(item=>({label:item.label,status:item.status||"info",detail:item.detail||""}));const coreAlerts=[{label:"Access",status:entitlement?.active?"full access":"payment needed",detail:accessDetail(entitlement)},{label:"Supabase Auth",status:authReady.alphaLocalFallback?"needs setup":"ready",detail:authReady.sessionStorage||authReady.provider},{label:"Recovery and alerts",status:authReady.passwordRecoveryReady&&authReady.loginAlertingReady&&authReady.rateLimitGuarded?"ready":"in progress",detail:authReady.nextSwitch||"Keep hardening the account lane before public launch."},{label:"Custom SMTP",status:smtp.ready?"ready":"needed",detail:smtp.ready?"SMTP credentials are present; confirm they are saved in Supabase Auth settings.":"Needed for production signup email: "+(smtp.missingEnv||[]).join(", ")},{label:"Stripe checkout",status:billing.ready?"ready":"needed",detail:billing.mode||"billing not configured"},{label:"Media storage",status:media.ready?"ready":"needed",detail:media.provider||"storage"},{label:"Next provider unlock",status:unlock?unlock.env:"clear",detail:unlock?unlock.provider+": "+unlock.env+(unlockNames?" accepts "+unlockNames:""):"No required provider credentials are missing."},{label:"Discord community",status:discord?.ready?"ready":"needed",detail:discord?.missingEnv?.length?discord.missingEnv.join(", "):"community social lane configured"}];renderAlerts(personalAlerts.length?[...personalAlerts,...coreAlerts]:coreAlerts);if(entitlement?.active&&pageParams.get("stay")!=="1")location.replace("/app")}
+    async function refreshPortal(){let entitlement=null;let session=null;try{session=await api("/api/auth/session");localStorage.removeItem(legacyTokenKey);renderSignedIn(session);renderDevices(session.devices||[]);entitlement=session.entitlement||null;if(pageParams.get("invite"))await acceptWorkspaceInvite();try{entitlement=(await api("/api/auth/entitlement")).entitlement||entitlement}catch{}}catch{}const [authReady,smtp,billing,media]=await Promise.all([fetch("/api/auth/readiness").then(r=>r.json()),fetch("/api/auth/smtp/readiness").then(r=>r.json()),fetch("/api/billing/readiness").then(r=>r.json()),fetch("/api/media/storage/readiness").then(r=>r.json())]);const personalAlerts=(session?.alerts||[]).slice(0,3).map(item=>({label:item.label,status:item.status||"info",detail:item.detail||""}));const coreAlerts=[{label:"Access",status:entitlement?.active?"full access":"payment needed",detail:accessDetail(entitlement)},{label:"Account security",status:authReady.alphaLocalFallback?"in progress":"ready",detail:authReady.emailVerificationRequired?"Verified email and remembered-device protection are active.":"Account protection is being prepared."},{label:"Recovery and alerts",status:authReady.passwordRecoveryReady&&authReady.loginAlertingReady&&authReady.rateLimitGuarded?"ready":"in progress",detail:"Email recovery, login alerts, and request limits protect the account lane."},{label:"Account email",status:smtp.ready?"ready":"in progress",detail:smtp.ready?"Verification and recovery email delivery is ready.":"Email delivery is being prepared before public signup."},{label:"Stripe checkout",status:billing.ready?"ready":"opening soon",detail:billing.mode||"billing not configured"},{label:"Media storage",status:media.ready?"ready":"in progress",detail:media.ready?"Private customer media storage is ready.":"Private media storage is being prepared."}];renderAlerts(personalAlerts.length?[...personalAlerts,...coreAlerts]:coreAlerts);if(entitlement?.active&&pageParams.get("stay")!=="1")location.replace("/app")}
     async function openApp(){try{await api("/api/auth/session");localStorage.removeItem(legacyTokenKey);location.href="/app"}catch(error){$("authNotice").textContent="Log in again before opening the command center.";setCreateMode(false)}}
     $("loginBtn").addEventListener("click",()=>auth("login"));$("createBtn").addEventListener("click",()=>auth("create"));$("resendVerifyBtn").addEventListener("click",resendVerification);$("forgotPasswordBtn").addEventListener("click",()=>openRecoveryBox());$("sendRecoveryBtn").addEventListener("click",requestPasswordRecovery);$("backToLoginBtn").addEventListener("click",()=>setCreateMode(false));document.querySelectorAll(".openAppBtn").forEach(btn=>btn.addEventListener("click",openApp));$("logoutBtn").addEventListener("click",async()=>{await api("/api/auth/logout",{method:"POST"}).catch(()=>{});localStorage.removeItem(legacyTokenKey);location.reload()});$("copyAppLink").addEventListener("click",async()=>{await navigator.clipboard.writeText(location.origin+"/app");alert("App link copied.")});$("portalCheckout").addEventListener("click",async()=>{const data=await api("/api/billing/checkout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({selectedPlan:"Social Cues highest tier"})});if(data.url)location.href=data.url});if(hashParams.get("type")==="recovery"&&hashParams.get("access_token")){location.replace("/reset-password"+location.hash)}else{setCreateMode(createMode);if(pageParams.get("verified")==="1"){setCreateMode(false);$("authNotice").textContent="Email verified. Log in with that email and password to open Social Cues."}const inviteCode=pageParams.get("promo")||pageParams.get("code")||"";if(inviteCode)$("promoInput").value=inviteCode.toUpperCase();if(pageParams.get("mode")==="forgot-password"||pageParams.get("mode")==="reset-password")openRecoveryBox("Request a fresh password reset email. The new-password screen opens only from that email link.");refreshPortal()}
   </script>
@@ -17949,6 +18058,7 @@ async function route(req, res) {
   if (!sameOriginWriteAllowed(req, url)) {
     return json(res, 403, { ok: false, error: "Cross-site write blocked. Reload Social Cues and try again." });
   }
+  if (!(await enforceHostedApiAccess(req, res, url))) return;
   if (/^\/api\/oauth\/[^/]+\/callback$/.test(url.pathname) && req.method === "GET") {
     try {
       const oauthModel = await getModel();
@@ -18065,7 +18175,12 @@ async function route(req, res) {
   }
 
   if (url.pathname.startsWith("/media/social-cues-promo-pack/") && (req.method === "GET" || req.method === "HEAD")) {
-    const fileName = decodeURIComponent(url.pathname.split("/").pop() || "");
+    let fileName = "";
+    try {
+      fileName = decodeURIComponent(url.pathname.split("/").pop() || "");
+    } catch {
+      return json(res, 404, { ok: false, error: "Media asset not found" });
+    }
     const allowed = launchPromoAssets.some(asset => asset.fileName === fileName);
     if (!allowed || fileName.includes("/") || fileName.includes("\\") || fileName.includes("..")) {
       return json(res, 404, { ok: false, error: "Media asset not found" });
@@ -18090,11 +18205,7 @@ async function route(req, res) {
     return json(res, 200, {
       ok: true,
       app: "Social Cues",
-      mode: runtimeMode,
-      port,
-      persistence: lastPersistence,
-      supabaseConfigured: supabaseEnabled,
-      monitoringConfigured: sentryStatus().configured
+      status: "healthy"
     });
   }
 
@@ -20397,30 +20508,18 @@ async function route(req, res) {
       ok: true,
       ready,
       provider: authProvider,
-      supabaseConfigured: Boolean(supabaseUrl && (supabaseAnonKey || supabaseServiceKey)),
       alphaLocalFallback: !supabaseAuthEnabled(),
-      customSmtpReady: smtp.ready,
       emailVerificationRequired: supabaseAuthEnabled(),
       passwordRecoveryReady: Boolean(supabaseAuthEnabled() && smtp.ready),
       loginAlertingReady: true,
       rateLimitGuarded: true,
-      refreshTokenRotationReady: Boolean(supabaseAuthEnabled()),
-      signupAccess: signupGateSummary(),
-      signupSessionPolicy: supabaseAuthEnabled()
-        ? "Alpha signup is invite-only. Owner allowlist and active promo codes may create accounts, then Supabase email verification is required before Social Cues issues an app session or applies promo/paid access."
-        : "Alpha signup is invite-only. Owner allowlist and active promo codes can create local sessions immediately; production uses Supabase email verification.",
-      sessionStorage: supabaseAuthEnabled()
-        ? "Supabase Auth access tokens identify users; Social Cues stores only HMAC-hashed remembered-device bindings."
-        : "Alpha fallback stores HMAC-hashed device sessions; plaintext tokens are returned once at login only.",
-      nextSwitch: supabaseAuthEnabled()
-        ? (smtp.ready && smtp.supabaseDashboardApplied ? "Recovery, trusted-device alerts, and password reset are live. Next: add CAPTCHA, tune Supabase dashboard rate limits, and enable password-change notification templates before public launch." : smtp.ready ? "Confirm SMTP is saved in Supabase Auth settings, then run a real password reset and verification flow before public launch." : "Configure Supabase custom SMTP before public customer signup.")
-        : "Configure Supabase Auth keys so server APIs can validate Supabase access tokens instead of alpha device tokens.",
-      missingEnv: [...["SUPABASE_URL"].filter(name => !envPresent(name)), ...missingSupabasePublicAuthEnv(), ...smtp.missingEnv]
+      signupAccess: signupGateSummary()
     });
   }
 
   if (url.pathname === "/api/auth/smtp/readiness" && req.method === "GET") {
-    return json(res, 200, { ok: true, ...authSmtpReadiness() });
+    const smtp = authSmtpReadiness();
+    return json(res, 200, { ok: true, ready: smtp.ready });
   }
 
   if ((url.pathname === "/api/resend/readiness" || url.pathname === "/api/resend/status") && req.method === "GET") {
@@ -20492,12 +20591,7 @@ async function route(req, res) {
       ok: true,
       provider: mediaStorageProvider,
       ready: mediaStorageReady(),
-      bucket: mediaStorageBucket,
-      maxUploadMb: mediaMaxUploadMb,
-      serverSideOnly: true,
-      missingEnv: mediaStorageProvider === "supabase-storage"
-        ? [...["SUPABASE_URL"].filter(name => !envPresent(name)), ...missingSupabaseServiceEnv()]
-        : ["VERCEL_BLOB_READ_WRITE_TOKEN"].filter(name => !envPresent(name))
+      maxUploadMb: mediaMaxUploadMb
     });
   }
 
@@ -24097,7 +24191,6 @@ async function route(req, res) {
       ready: checkoutReady && webhookReady,
       checkoutReady,
       webhookReady,
-      webhookEndpoint: `${brandHomeUrl}/api/billing/webhook`,
       customerPortalReady: Boolean(stripeSecretKey),
       customerPortalEndpoint: "/api/billing/portal",
       entitlementEvents: [
@@ -24114,14 +24207,7 @@ async function route(req, res) {
           ? "checkout-blocked-until-webhook"
           : stripeSecretKey
             ? "stripe-price-required"
-            : "payment-link-first",
-      priceIds: {
-        founderAudit: Boolean(stripePriceFounderAudit),
-        campaignBuild: Boolean(stripePriceCampaignBuild),
-        proMonthly: Boolean(stripePriceProMonthly)
-      },
-      missingEnv: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"].filter(name => !envPresent(name)),
-      optionalMissingEnv: ["STRIPE_PRICE_FOUNDER_AUDIT", "STRIPE_PRICE_CAMPAIGN_BUILD", "STRIPE_PRICE_PRO_MONTHLY"].filter(name => !envPresent(name))
+            : "payment-link-first"
     });
   }
 
@@ -27442,7 +27528,7 @@ export default async function handler(req, res) {
       durationMs
     });
   });
-  return route(req, res).catch(async error => {
+  return requestModelContext.run({}, () => route(req, res).catch(async error => {
     runtimeRequestLog("error", "unhandled_request_error", req, {
       errorName: error?.name || "Error",
       errorMessage: error?.message || "Unknown server error"
@@ -27459,7 +27545,7 @@ export default async function handler(req, res) {
       error: runtimeMode === "vercel" ? "Social Cues could not complete this request." : error.message,
       requestId: req.socialCuesRequestId
     });
-  });
+  }));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

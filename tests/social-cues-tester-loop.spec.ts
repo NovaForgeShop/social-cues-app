@@ -160,7 +160,11 @@ test('25-step Social Cues tester loop reaches the workstation and checks safe fu
     await expect(page.locator('#dashboard')).toBeVisible();
     await page.locator('[data-view="studio"]').click();
     await page.locator('[data-studio-mode="campaign"]').click();
-    await page.locator('#generateVariants').click();
+    const [variantResponse] = await Promise.all([
+      page.waitForResponse(response => response.url().endsWith('/api/generate/platform-variants') && response.request().method() === 'POST'),
+      page.locator('#generateVariants').click()
+    ]);
+    expect(variantResponse.ok(), `variant generation returned ${variantResponse.status()}`).toBeTruthy();
     await expect(page.locator('#variantList [data-copy]')).toHaveCount(activePlatforms.length);
   });
 

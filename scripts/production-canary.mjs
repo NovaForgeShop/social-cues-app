@@ -1,6 +1,7 @@
 import process from "node:process";
 
 const baseUrl = String(process.env.SOCIAL_CUES_CANARY_URL || "https://socialcuesapp.com").replace(/\/$/, "");
+const previewCookie = String(process.env.SOCIAL_CUES_CANARY_COOKIE || "").trim();
 const failures = [];
 const checks = [];
 
@@ -10,7 +11,9 @@ function record(name, ok, detail = "") {
 }
 
 async function request(pathname, options = {}) {
-  const response = await fetch(`${baseUrl}${pathname}`, { redirect: "manual", ...options });
+  const headers = new Headers(options.headers || {});
+  if (previewCookie) headers.set("Cookie", previewCookie);
+  const response = await fetch(`${baseUrl}${pathname}`, { redirect: "manual", ...options, headers });
   const text = options.method === "HEAD" ? "" : await response.text();
   return { response, text };
 }
@@ -24,6 +27,7 @@ let healthBody = {};
 try { healthBody = JSON.parse(health.text); } catch {}
 record("health endpoint", health.response.status === 200 && healthBody.ok === true, `status ${health.response.status}`);
 record("health response secret scan", !leakedSecret(health.text), "health output must never contain credential material");
+record("health response is minimal", healthBody.status === "healthy" && !("mode" in healthBody) && !("persistence" in healthBody) && !("supabaseConfigured" in healthBody), "health output exposed internal configuration");
 
 const robots = await request("/robots.txt");
 record("robots policy", robots.response.status === 200 && /Disallow:\s*\/api\//i.test(robots.text) && /Disallow:\s*\/app/i.test(robots.text), `status ${robots.response.status}`);
@@ -35,13 +39,48 @@ record("content type protection", app.response.headers.get("x-content-type-optio
 record("frame protection", Boolean(app.response.headers.get("x-frame-options") || /frame-ancestors/i.test(app.response.headers.get("content-security-policy") || "")), "frame protection missing");
 record("app response secret scan", !leakedSecret(app.text), "app shell must never contain credential material");
 
-for (const pathname of ["/api/model", "/api/responses", "/api/push/status", "/api/workers/status"]) {
+for (const pathname of [
+  "/api/model",
+  "/api/responses",
+  "/api/push/status",
+  "/api/workers/status",
+  "/api/integrations/readiness",
+  "/api/monitoring/status",
+  "/api/oauth/tiktok/diagnostic",
+  "/api/provider/setup-fields",
+  "/api/security/audit",
+  "/api/supabase/status",
+  "/api/this-route-does-not-exist"
+]) {
   const result = await request(pathname);
   record(`protected ${pathname}`, [401, 402, 403].includes(result.response.status), `anonymous status ${result.response.status}`);
 }
 
 const worker = await request("/api/cron/workers");
 record("secured worker schedule", worker.response.status === 401, `anonymous status ${worker.response.status}`);
+
+for (const pathname of ["/api/auth/readiness", "/api/auth/smtp/readiness", "/api/billing/readiness", "/api/media/storage/readiness"]) {
+  const result = await request(pathname);
+  record(`public readiness ${pathname}`, result.response.status === 200, `status ${result.response.status}`);
+  record(
+    `sanitized readiness ${pathname}`,
+    !leakedSecret(result.text) && !/(missingEnv|optionalMissingEnv|webhookEndpoint|priceIds|sessionStorage|bucket)/i.test(result.text),
+    "readiness output exposed internal configuration"
+  );
+}
+
+for (const pathname of ["/api/meta/data-deletion", "/api/meta/deauthorize"]) {
+  const result = await request(pathname);
+  record(`public compliance route ${pathname}`, result.response.status === 200 && !leakedSecret(result.text), `status ${result.response.status}`);
+}
+
+for (const pathname of [
+  "/media/social-cues-promo-pack/%2e%2e%2f.env",
+  "/media/social-cues-promo-pack/%E0%A4%A"
+]) {
+  const result = await request(pathname);
+  record(`blocked media path ${pathname}`, [400, 404].includes(result.response.status) && !leakedSecret(result.text), `status ${result.response.status}`);
+}
 
 const assets = await request("/api/media/public-assets");
 let assetBody = {};

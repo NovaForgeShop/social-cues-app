@@ -1,7 +1,8 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "functions": {
-    "api/server.mjs": {
+    "server.mjs": {
       "maxDuration": 300,
       "includeFiles": "{social-cues-app.html,icon.svg,manifest.webmanifest,sw.js,favicon.png,apple-touch-icon.png,sc-icon-192.png,sc-icon-512.png,sc-icon-1024.png,social-cues-coming-soon.png,public/**}",
       "excludeFiles": "{reddit-devvit/**,data/**,outputs/**,server.corrupt-*,*.md}"
@@ -11,12 +12,6 @@
     {
       "path": "/api/cron/workers",
       "schedule": "* * * * *"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/api/server.mjs"
     }
   ]
 }

@@ -12,8 +12,12 @@ test('private workstation is gated without an active session', async ({ page }) 
   }
 });
 
-test('TikTok OAuth status is sandbox configured', async ({ request }) => {
+test('TikTok OAuth status is private in production and sandbox configured locally', async ({ request }) => {
   const response = await request.get('/api/oauth/tiktok/status');
+  if (!process.env.E2E_USE_LOCAL_SERVER) {
+    expect(response.status()).toBe(401);
+    return;
+  }
   expect(response.ok()).toBeTruthy();
 
   const status = await response.json();
@@ -32,8 +36,12 @@ test('TikTok OAuth status is sandbox configured', async ({ request }) => {
   });
 });
 
-test('TikTok authorize probe accepts the sandbox client key', async ({ request }) => {
+test('TikTok authorize diagnostics reject anonymous production traffic', async ({ request }) => {
   const response = await request.get('/api/oauth/tiktok/diagnostic?probe=1');
+  if (!process.env.E2E_USE_LOCAL_SERVER) {
+    expect(response.status()).toBe(401);
+    return;
+  }
   expect(response.ok()).toBeTruthy();
 
   const body = await response.text();
