@@ -7837,7 +7837,7 @@
     }
 
     function approvalStepCopy(status = "draft", platform = "", approvalConfirmedAt = "") {
-      if (platform === "reddit" && status === "approved" && approvalConfirmedAt) return "Both approval checks are complete. Open the Reddit inbox to review live comments or use the approved copy.";
+      if (platform === "reddit" && status === "approved" && approvalConfirmedAt) return "Both approval checks are complete. View Reddit comments or use the approved copy.";
       if (platform === "reddit" && status === "approved") return "Step 1 complete. Step 2: confirm this copy for the installed Reddit community workflow.";
       if (["draft", "needs revision", "queued-review-only"].includes(status)) return "Step 1 of 2: review the copy and approve the content.";
       if (status === "approved") return "Step 1 complete. Step 2 of 2: confirm this post should enter the publishing queue.";
@@ -7889,7 +7889,7 @@
           : `<button class="primary" data-account-action="connect" data-platform="${escapeHtml(v.platform)}">Connect to deliver</button>`}<button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Keep draft</button>`
         : redditHandoff
         ? redditReady
-          ? `<button class="primary" data-variant-action="open-reddit" data-variant-id="${id}">Open Reddit inbox</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button><button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Return to draft</button>`
+          ? `<button class="primary" data-variant-action="open-reddit" data-variant-id="${id}">View Reddit comments</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button><button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Return to draft</button>`
           : v.status === "approved"
             ? `<button class="primary" data-variant-action="confirm-reddit" data-variant-id="${id}">Confirm &amp; open Reddit (2 of 2)</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button><button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Return to draft</button>`
             : `<button class="primary" data-variant-action="set-status" data-variant-id="${id}" data-status="approved">Approve content (1 of 2)</button><button data-variant-action="strengthen" data-variant-id="${id}">Strengthen</button><button data-variant-action="set-status" data-variant-id="${id}" data-status="draft">Draft</button>`
@@ -8214,7 +8214,7 @@
           ? `<button disabled>Native delivery not ready</button>`
           : `<button class="primary" data-account-action="connect" data-platform="${escapeHtml(variant.platform)}">Connect to deliver</button>`}<button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Keep draft</button>`
         : redditReady
-        ? `<button class="primary" data-quick-reddit="open" data-quick-variant="${escapeHtml(variant.id)}">Open Reddit inbox</button><button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Return to draft</button>`
+        ? `<button class="primary" data-quick-reddit="open" data-quick-variant="${escapeHtml(variant.id)}">View Reddit comments</button><button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Return to draft</button>`
         : status === "approved"
         ? redditHandoff
           ? `<button class="primary" data-quick-reddit="confirm" data-quick-variant="${escapeHtml(variant.id)}">Confirm &amp; open Reddit (2 of 2)</button><button data-quick-action="draft" data-quick-variant="${escapeHtml(variant.id)}">Return to draft</button>`
@@ -9500,7 +9500,7 @@
           accent: "#ff4500",
           route: "/api/reddit/readiness",
           openUrl: redditPlaytestUrl,
-          openLabel: "Open Reddit inbox",
+          openLabel: "View Reddit comments",
           tags: [
             redditStatus.appSlug ? `app ${redditStatus.appSlug}` : "",
             redditStatus.playtestSubreddit ? `playtest r/${redditStatus.playtestSubreddit}` : "",
@@ -12377,7 +12377,7 @@
             </div>
             <div class="variant-tools">
               <button class="connector-route" data-route="/api/reddit/readiness">Refresh status</button>
-              ${playtestUrl ? `<button data-reddit-hosted-url="${escapeHtml(playtestUrl)}">Open Reddit inbox</button>` : `<span class="tag">Reddit link not returned</span>`}
+              ${playtestUrl ? `<button data-reddit-hosted-url="${escapeHtml(playtestUrl)}">View Reddit comments</button>` : `<span class="tag">Reddit link not returned</span>`}
             </div>
           </article>`;
         }

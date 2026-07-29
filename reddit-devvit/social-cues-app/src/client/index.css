@@ -84,6 +84,11 @@ h1, h2, p { margin-top: 0; }
 .danger-button { border-color: #7f2752; color: #ffbadb; }
 
 .audit-panel { align-self: start; position: sticky; top: 96px; padding: 18px; border: 1px solid #303038; border-radius: 6px; background: #101014; }
+.moderator-details { display: grid; gap: 12px; margin: 18px 0 22px; }
+.moderator-details div { display: grid; gap: 4px; padding-bottom: 12px; border-bottom: 1px solid #2a2a31; }
+.moderator-details dt { color: #8f8f9a; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+.moderator-details dd { margin: 0; color: #e7e7ec; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.audit-heading { margin-top: 4px; }
 .audit-list { display: grid; gap: 8px; margin-top: 18px; }
 .audit-list > div { display: grid; gap: 3px; padding: 10px; border-left: 2px solid #2ad9ed; background: #17171c; }
 .audit-list span, .audit-list small { color: #9696a2; overflow-wrap: anywhere; }
@@ -104,6 +109,11 @@ h1, h2, p { margin-top: 0; }
 .splash-shell h1 { max-width: 760px; margin-bottom: 0; font-size: clamp(32px, 7vw, 64px); line-height: 1; }
 .splash-shell p { max-width: 630px; margin-bottom: 4px; color: #b6b6c1; font-size: 17px; line-height: 1.55; }
 .splash-shell small, .loading-screen { color: #a5a5b0; }
+.splash-error { max-width: 630px; color: #ff8cae !important; }
+.comment-count-button { display: grid; min-width: 156px; min-height: 112px; place-items: center; align-content: center; gap: 2px; border-color: #ff4500; background: #111116; }
+.comment-count-button:hover { border-color: #ff7043; background: #19191f; }
+.comment-count-button strong { font-size: 42px; line-height: 1; }
+.comment-count-button span { color: #c8c8d1; font-size: 13px; }
 
 @media (max-width: 760px) {
   .topbar, .thread-band, .ad-guardrail, .coverage-band, .signal-summary { align-items: stretch; }

@@ -121,6 +121,14 @@ try {
   }
 
   const appHtml = await readFile(new URL("./social-cues-app.html", import.meta.url), "utf8");
+  const redditSplashSource = await readFile(new URL("./reddit-devvit/social-cues-app/src/client/splash.tsx", import.meta.url), "utf8");
+  const redditGameSource = await readFile(new URL("./reddit-devvit/social-cues-app/src/client/game.tsx", import.meta.url), "utf8");
+  if (!redditSplashSource.includes("fetch('/api/comments')") || !redditSplashSource.includes("state.summary.loadedComments") || !redditSplashSource.includes("requestExpandedMode(event.nativeEvent, 'game')")) {
+    throw new Error("Reddit inline view must show the live comment count and expand into the thread reader");
+  }
+  if (!redditGameSource.includes('state.isModerator && <aside className="audit-panel">') || !redditGameSource.includes("state.moderatorPermissions") || !redditGameSource.includes("state.moderationCapabilities")) {
+    throw new Error("Reddit moderator information must stay inside the moderator-only expanded view");
+  }
   if (!appHtml.includes("Choose image or video") || !appHtml.includes("Use coming-soon asset") || !appHtml.includes('accept="image/*,video/*"')) throw new Error("publish media UI must expose a general image/video picker and keep the approved launch asset optional");
   for (const quickPostContract of ['data-studio-mode="post"', 'id="quickPostMediaInput"', 'id="prepareQuickPostOne"', 'id="prepareQuickPostEverywhere"', "function prepareQuickPost", "function quickPostDescription", "function renderQuickPosts"]) {
     if (!appHtml.includes(quickPostContract)) throw new Error(`quick post foreground contract missing: ${quickPostContract}`);
@@ -657,7 +665,7 @@ try {
   if (!appHtml.includes('data-studio-mode="post"') || !appHtml.includes('data-studio-mode="video"') || !appHtml.includes("function setStudioMode") || !appHtml.includes("visibleCreationPlatforms().map(platform => platform.id)")) throw new Error("Create must expose one-shot posting and video campaigns as distinct first-class modes");
   if (!appHtml.includes("function providerSourceIsActive") || !appHtml.includes("visibleSources")) throw new Error("Audience, library, and commerce sources must follow selected or connected workspace services");
   if (!appHtml.includes("Analytics lanes ready - refresh live insights") || !appHtml.includes("Accounts connected - analytics permission still needed") || !appHtml.includes("escapeHtml(analysisStatus)")) throw new Error("Audience analysis must not say it is waiting for accounts after canonical connected assets are present");
-  if (!appHtml.includes('data-account-lane="reddit"') || !appHtml.includes("Reddit installed-community lane") || !appHtml.includes("Open Reddit inbox")) throw new Error("Accounts must expose the Reddit installed-community inbox without pretending it is OAuth");
+  if (!appHtml.includes('data-account-lane="reddit"') || !appHtml.includes("Reddit installed-community lane") || !appHtml.includes("View Reddit comments")) throw new Error("Accounts must expose the Reddit installed-community inbox without pretending it is OAuth");
   if (!appHtml.includes("function discordClientActionKey") || !appHtml.includes('"Idempotency-Key": idempotencyKey') || !appHtml.includes("clearDiscordClientActionKey(button)")) throw new Error("Discord live customer actions must send reusable idempotency keys and clear them only after success");
   if (!appHtml.includes("function providerStateChips") || !appHtml.includes('data-provider-state="${escapeHtml(label)}"') || !appHtml.includes("function providerAccountEvidenceLine")) throw new Error("account cards must separate connection, publishing, analytics, and review while showing asset evidence");
   if (!appHtml.includes("integrationsStatus?.providerServices") || !appHtml.includes("integrationsStatus?.coreServices")) throw new Error("provider readiness services must not be dropped from GUI state");

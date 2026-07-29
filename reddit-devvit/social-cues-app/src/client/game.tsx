@@ -271,7 +271,24 @@ export const App = () => {
           </div>
 
           {state.isModerator && <aside className="audit-panel">
-            <h2>Moderator action history</h2>
+            <span className="eyebrow">Moderator information</span>
+            <h2>u/{state.username}</h2>
+            <p>Private to moderators of r/{state.subredditName}. Public readers never receive this permission or report data.</p>
+            <dl className="moderator-details">
+              <div>
+                <dt>Permissions</dt>
+                <dd>{state.moderatorPermissions.length ? state.moderatorPermissions.join(', ') : 'No moderator permissions returned'}</dd>
+              </div>
+              <div>
+                <dt>Available actions</dt>
+                <dd>{Object.entries(state.moderationCapabilities).filter(([, enabled]) => enabled).map(([action]) => action).join(', ') || 'Read only'}</dd>
+              </div>
+              <div>
+                <dt>Reports in view</dt>
+                <dd>{state.summary.reportedLoaded}</dd>
+              </div>
+            </dl>
+            <h2 className="audit-heading">Social Cues action history</h2>
             <p>Only IDs and moderator actions are retained. Comment bodies are not copied into the audit log.</p>
             <div className="audit-list">
               {state.audit.length ? state.audit.map((event, index) => <div key={`${event.at}-${index}`}><strong>{event.action}</strong><span>{event.actor} - {new Date(event.at).toLocaleString()}</span><small>{event.targetId}</small></div>) : <div className="empty-state">No Social Cues actions yet.</div>}
