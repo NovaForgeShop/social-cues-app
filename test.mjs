@@ -522,14 +522,14 @@ try {
   if (!serverSource.includes("function recordOAuthEvent") || !serverSource.includes('url.pathname === "/api/oauth/debug-log"')) throw new Error("OAuth debugger should persist redacted provider OAuth events behind a dedicated endpoint");
   if (!serverSource.includes("callback_received") || !serverSource.includes("state_validation") || !serverSource.includes("token_exchange_result")) throw new Error("OAuth debugger should track callback, state, and token exchange events");
   if (!appHtml.includes('authedFetch("/api/oauth/debug-log")') || !appHtml.includes("function renderOAuthDebugLogCards") || !appHtml.includes("OAuth debug log")) throw new Error("Admin diagnostics should render the OAuth debug log without raw secrets");
-  for (const route of ["/api/discord/user", "/api/discord/guilds", "/api/discord/channels", "/api/discord/interactions/readiness", "/api/discord/webhook-events/readiness", "/api/discord/webhook-events", "/api/discord/bot/readiness", "/api/discord/commands/readiness", "/api/discord/commands", "/api/discord/commands/register", "/api/discord/verification-preflight", "/api/discord/community/select", "/api/discord/messages", "/api/discord/messages/reply", "/api/discord/messages/moderate", "/api/discord/announcement"]) {
+  for (const route of ["/api/discord/user", "/api/discord/guilds", "/api/discord/channels", "/api/discord/channels/create", "/api/discord/interactions/readiness", "/api/discord/webhook-events/readiness", "/api/discord/webhook-events", "/api/discord/bot/readiness", "/api/discord/commands/readiness", "/api/discord/commands", "/api/discord/commands/register", "/api/discord/verification-preflight", "/api/discord/community/select", "/api/discord/messages", "/api/discord/messages/reply", "/api/discord/messages/moderate", "/api/discord/announcement"]) {
     if (!appHtml.includes(route)) throw new Error(`Discord expansion route missing from function suite: ${route}`);
     if (!serverSource.includes(`url.pathname === "${route}"`)) throw new Error(`Discord expansion route missing backend handler: ${route}`);
   }
   if (!serverSource.includes('"/api/discord/interactions"') || !serverSource.includes("verifyDiscordInteractionSignature") || !serverSource.includes("DISCORD_PUBLIC_KEY") || !serverSource.includes("x-signature-ed25519")) throw new Error("Discord interactions endpoint must verify signed Discord requests");
   if (!serverSource.includes('"/api/discord/webhook-events"') || !serverSource.includes("APPLICATION_DEAUTHORIZED") || !serverSource.includes("claimDurableWebhookEvent(\"discord\"") || !serverSource.includes("clearDiscordAccountCredentials")) throw new Error("Discord webhook events should verify, deduplicate, and synchronize authorization lifecycle changes");
   if (!/externalSignedPostPaths[\s\S]*?"\/api\/discord\/webhook-events"/.test(serverSource)) throw new Error("Discord signed webhook events must bypass browser-origin checks and rely on Ed25519 verification");
-  if (!serverSource.includes("function discordVerificationPreflight") || !appHtml.includes("Discord pre-verification console") || !appHtml.includes("verify locked")) throw new Error("Discord should expose a pre-verification console that keeps verification last");
+  if (!serverSource.includes("function discordVerificationPreflight") || !serverSource.includes("discordVerificationServerThreshold = 100") || !appHtml.includes("Discord operations console") || !appHtml.includes("verification deferred")) throw new Error("Discord should expose an operations console that defers app verification until 100 servers");
   if (!serverSource.includes('method: "PUT", authScheme: "Bot"') || !serverSource.includes('confirm === "REGISTER_DISCORD_COMMANDS"')) throw new Error("Discord command registration should use explicit live approval and bulk overwrite semantics");
   if (!serverSource.includes('name: "Send to Social Cues"') || !serverSource.includes('name: "Community profile"')) throw new Error("Discord should expose message and member context commands alongside /cue");
   if (!serverSource.includes("requireDiscordAccountForRead") || !serverSource.includes('discordApi("/users/@me"') || !serverSource.includes('discordApi("/users/@me/guilds"') || !serverSource.includes('authScheme: "Bot"')) throw new Error("Discord expansion should use OAuth and bot-gated API routes behind the connected account gate");
@@ -541,6 +541,8 @@ try {
   if (serverSource.includes("Message captured for the Social Cues community response workflow") || serverSource.includes("Community profile handoff created")) throw new Error("Discord context commands must not claim durable capture before a workspace mapping exists");
   if (!serverSource.includes("escapeHtml(error)") || !serverSource.includes("escapeHtml(stateCheck.error)")) throw new Error("Discord callback errors must be HTML escaped");
   if (!appHtml.includes("data-discord-save-target") || !appHtml.includes("data-discord-message-reply") || !appHtml.includes("data-discord-message-moderate")) throw new Error("Discord community target, reply, and moderation controls should be present in Responses");
+  if (!appHtml.includes("data-discord-room-action") || !serverSource.includes('confirm === "CREATE_DISCORD_CHANNEL"') || !serverSource.includes('action: "channel_create"')) throw new Error("Discord room creation should be approval-gated, idempotent, and visible in Responses");
+  if (!/url\.pathname === "\/api\/discord\/channels\/create"[\s\S]*?requireDiscordAccountForRead[\s\S]*?discordSavedTarget[\s\S]*?authorizedDiscordGuild/.test(serverSource)) throw new Error("Discord room creation must require an entitled connected account and stay bound to its authorized saved server");
   if (!/url\.pathname === "\/api\/oauth\/discord\/callback"[\s\S]*?modelForSession\(\{ user: owner \}, sharedModel\)/.test(serverSource)) throw new Error("Discord callback must save connected account evidence into the signed-in user workspace");
   if (!/url\.pathname === "\/api\/oauth\/discord\/status"[\s\S]*?account: account \? publicAccount\(account\) : null/.test(serverSource)) throw new Error("Discord OAuth status must include signed-in account evidence after a successful handshake");
   if (!appHtml.includes("source.discordStatus?.account")) throw new Error("Discord readiness account evidence is not merged into the app account list");
@@ -1053,6 +1055,12 @@ try {
     body: JSON.stringify({ channelId: "test-discord-channel", messageId: "test-discord-message", live: false })
   });
   if (!discordModerationDryRun.ok || discordModerationDryRun.mode !== "dry-run" || discordModerationDryRun.moderation?.action !== "delete" || !discordModerationDryRun.moderation?.idempotencyKey) throw new Error("Discord moderation dry-run failed");
+  const discordChannelDryRun = await request("/api/discord/channels/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    body: JSON.stringify({ guildId: "test-discord-guild", name: "Launch Room", topic: "Coordinate an approved launch.", live: false })
+  });
+  if (!discordChannelDryRun.ok || discordChannelDryRun.mode !== "dry-run" || discordChannelDryRun.channel?.name !== "launch-room" || discordChannelDryRun.channel?.live !== false || !discordChannelDryRun.channel?.idempotencyKey) throw new Error("Discord channel creation dry-run failed");
   const discordCommandDryRun = await request("/api/discord/commands/register", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
@@ -1062,7 +1070,7 @@ try {
   const discordPreflight = await request("/api/discord/verification-preflight", {
     headers: { Authorization: `Bearer ${login.session.token}` }
   });
-  if (!discordPreflight.ok || !Array.isArray(discordPreflight.gates) || !discordPreflight.gates.some(gate => gate.id === "verification-final" && gate.finalStep) || discordPreflight.verificationPolicy?.indexOf("dead last") === -1) throw new Error("Discord verification preflight should keep verification locked as the final portal step");
+  if (!discordPreflight.ok || !Array.isArray(discordPreflight.gates) || !discordPreflight.gates.some(gate => gate.id === "verification-final" && gate.finalStep && gate.deferred) || discordPreflight.verificationPolicy?.indexOf("not an operating prerequisite below 100 servers") === -1) throw new Error("Discord verification preflight should defer app verification below 100 servers");
   const signedInXStatus = await request("/api/oauth/x/status", {
     headers: { Authorization: `Bearer ${login.session.token}` }
   });
@@ -2063,7 +2071,7 @@ try {
 
   const discordReady = await request("/api/discord/readiness");
   if (!discordReady.ok || !discordReady.redirectUri.includes("/api/oauth/discord/callback") || discordReady.connectRoute !== "/api/oauth/discord/start" || !discordReady.scopes.includes("identify")) throw new Error("discord readiness failed");
-  if (!discordReady.install?.guildUrl?.includes("scope=bot+applications.commands") || discordReady.install?.botPermissionBits !== "126016" || !discordReady.install?.botPermissions?.includes("Manage Messages")) throw new Error("discord install URL readiness failed");
+  if (!discordReady.install?.guildUrl?.includes("scope=bot+applications.commands") || discordReady.install?.botPermissionBits !== "126032" || !discordReady.install?.botPermissions?.includes("Manage Messages") || !discordReady.install?.botPermissions?.includes("Manage Channels")) throw new Error("discord install URL readiness failed");
   if (!discordReady.configured || discordReady.missingEnv?.includes("DISCORD_CLIENT_ID") || discordReady.missingEnv?.includes("DISCORD_CLIENT_SECRET")) throw new Error("discord alias credentials were not recognized");
   const discordInteractionsReady = await request("/api/discord/interactions/readiness");
   if (!discordInteractionsReady.ok || !discordInteractionsReady.endpoint.includes("/api/discord/interactions") || !discordInteractionsReady.publicKeyConfigured || !discordInteractionsReady.commandIdeas.some(item => item.includes("/cue status"))) throw new Error("discord interactions readiness failed");
@@ -2074,7 +2082,7 @@ try {
   const discordBotReady = await request("/api/discord/bot/readiness");
   if (!discordBotReady.ok || !Object.prototype.hasOwnProperty.call(discordBotReady, "botTokenConfigured") || !Array.isArray(discordBotReady.errors)) throw new Error("discord bot readiness failed");
   const discordVerificationPreflight = await request("/api/discord/verification-preflight");
-  if (!discordVerificationPreflight.ok || !discordVerificationPreflight.dashboardFields?.some(field => field.label === "Interactions Endpoint URL") || !discordVerificationPreflight.gates?.some(gate => gate.id === "verification-final" && gate.finalStep)) throw new Error("discord verification preflight failed");
+  if (!discordVerificationPreflight.ok || !discordVerificationPreflight.dashboardFields?.some(field => field.label === "Interactions Endpoint URL") || !discordVerificationPreflight.gates?.some(gate => gate.id === "verification-final" && gate.finalStep && gate.deferred) || discordVerificationPreflight.verificationServerThreshold !== 100) throw new Error("discord verification preflight failed");
   const discordCommandsListResponse = await fetch(base + "/api/discord/commands");
   if (![200, 409].includes(discordCommandsListResponse.status)) throw new Error("discord registered command list should either return commands or a bot-config gate");
 

@@ -59,6 +59,13 @@ for (const pathname of [
 const worker = await request("/api/cron/workers");
 record("secured worker schedule", worker.response.status === 401, `anonymous status ${worker.response.status}`);
 
+const discordRoomCreate = await request("/api/discord/channels/create", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ guildId: "canary-forbidden", name: "canary-forbidden", live: false })
+});
+record("protected Discord room creation", [401, 402, 403].includes(discordRoomCreate.response.status), `anonymous status ${discordRoomCreate.response.status}`);
+
 for (const pathname of ["/api/auth/readiness", "/api/auth/smtp/readiness", "/api/billing/readiness", "/api/media/storage/readiness"]) {
   const result = await request(pathname);
   record(`public readiness ${pathname}`, result.response.status === 200, `status ${result.response.status}`);

@@ -9563,6 +9563,38 @@
       ` : "";
       const discordAnnouncementsSupported = Boolean(discordCommunity.ok && (discordCommunity.allowedUse || []).some(item => /announcement/i.test(item)));
       const discordAnnouncementReady = Boolean(discordCommunity.configuredTargets?.botReady && selectedChannelId);
+      const discordRoomCreationSupported = Boolean(discordCommunity.ok && (discordCommunity.allowedUse || []).some(item => /room creation/i.test(item)));
+      const discordRoomCreationReady = Boolean(discordCommunity.configuredTargets?.botReady && selectedGuildId);
+      const discordRoomComposer = discordRoomCreationSupported ? `
+        <article class="variant" style="--accent:#57f287">
+          <div class="variant-head">
+            <div>
+              <h3>Create Discord room</h3>
+              <p>${discordRoomCreationReady ? "Create a text room in the saved server. Previewing is harmless; live creation needs one explicit approval." : "Choose a server and install the bot with Manage Channels before creating rooms."}</p>
+            </div>
+            <span class="pill ${discordRoomCreationReady ? "approved" : "revision"}">${discordRoomCreationReady ? "approval required" : "server gated"}</span>
+          </div>
+          <div class="form-grid">
+            <div>
+              <label for="discordRoomName">Room name</label>
+              <input id="discordRoomName" maxlength="80" placeholder="launch-room">
+            </div>
+            <div>
+              <label for="discordRoomTopic">Topic</label>
+              <input id="discordRoomTopic" maxlength="1024" placeholder="Coordinate the next approved launch">
+            </div>
+          </div>
+          <label class="approval-check">
+            <input type="checkbox" data-discord-room-approval ${discordRoomCreationReady ? "" : "disabled"}>
+            <span>I approve creating this room in the saved Discord server.</span>
+          </label>
+          <div class="variant-tools">
+            <button data-discord-room-action="preview">Preview</button>
+            <button data-discord-room-action="create" data-discord-can-create="${discordRoomCreationReady ? "true" : "false"}" disabled>Create approved</button>
+          </div>
+          <div class="notice" id="discordRoomResult">No room has been created.</div>
+        </article>
+      ` : "";
       const discordAnnouncementComposer = discordAnnouncementsSupported ? `
         <article class="variant" style="--accent:#5865f2">
           <div class="variant-head">
@@ -9586,7 +9618,7 @@
           </div>
         </article>
       ` : "";
-      $("#responseReadiness").innerHTML = cards.join("") + discordTargetControls + discordAnnouncementComposer;
+      $("#responseReadiness").innerHTML = cards.join("") + discordTargetControls + discordRoomComposer + discordAnnouncementComposer;
       const youtubeItems = (youtubeComments.comments || []).slice(0, 6).map(item => {
         const snippet = item.snippet?.topLevelComment?.snippet || item.snippet || {};
         return {
@@ -9974,6 +10006,51 @@
         if (live) {
           clearDiscordClientActionKey(button);
           if (input) input.value = "";
+          if (approval) approval.checked = false;
+          await refreshMetaState();
+        }
+      } catch (error) {
+        if (result) result.textContent = error.message;
+        alert(error.message);
+      } finally {
+        button.disabled = live ? !approval?.checked : false;
+      }
+    }
+
+    async function submitDiscordRoom(button) {
+      const action = button.dataset.discordRoomAction || "preview";
+      const live = action === "create";
+      const nameInput = $("#discordRoomName");
+      const topicInput = $("#discordRoomTopic");
+      const approval = document.querySelector("[data-discord-room-approval]");
+      const result = $("#discordRoomResult");
+      const name = String(nameInput?.value || "").trim();
+      const topic = String(topicInput?.value || "").trim();
+      const guildId = String(metaState.reactionSurfaces?.discordCommunity?.selectedTarget?.guildId || "").trim();
+      if (!name) return alert("Name the Discord room before previewing or creating it.");
+      if (live && (!guildId || button.dataset.discordCanCreate !== "true")) return alert("Choose and save a Discord server before creating a room.");
+      if (live && !approval?.checked) return alert("Approve this one Discord room creation first.");
+      if (live && !confirm(`Create #${name.replace(/^#/, "")} in the saved Discord server now?`)) return;
+      const idempotencyKey = live ? discordClientActionKey(button, "channel", `${guildId}:${name}:${topic}`) : "";
+      button.disabled = true;
+      try {
+        const response = await authedFetch("/api/discord/channels/create", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {})
+          },
+          body: JSON.stringify({ guildId: guildId || undefined, name, topic, live, approved: live })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false) throw new Error(data.error || "Discord did not accept the room request.");
+        if (result) result.textContent = live
+          ? `#${data.channel?.name || name} created.`
+          : `Preview ready for #${data.channel?.name || name}; nothing was created.`;
+        if (live) {
+          clearDiscordClientActionKey(button);
+          if (nameInput) nameInput.value = "";
+          if (topicInput) topicInput.value = "";
           if (approval) approval.checked = false;
           await refreshMetaState();
         }
@@ -10433,10 +10510,10 @@
         <article class="variant" style="--accent:#5865f2">
           <div class="variant-head">
             <div>
-              <h3>Discord pre-verification console</h3>
-              <p>${escapeHtml(discordPreflight.nextAction || "Finish every Discord app, bot, command, OAuth, and server gate before verification.")}</p>
+              <h3>Discord operations console</h3>
+              <p>${escapeHtml(discordPreflight.nextAction || "Finish the Discord app, bot, command, OAuth, and server operating gates.")}</p>
             </div>
-            <span class="pill ${discordPreflight.readyForVerification ? "published" : "revision"}">${discordPreflight.readyForVerification ? "ready for final verify" : "verify locked"}</span>
+            <span class="pill ${discordPreflight.readyForOperations ? "published" : "revision"}">${discordPreflight.readyForOperations ? (discordPreflight.verificationDeferred ? "operations ready" : "ready for verification") : "setup incomplete"}</span>
           </div>
           <div class="tags">
             <span class="tag">${escapeHtml(`${discordGates.filter(item => item.ready).length}/${discordGates.length} gates`)}</span>
@@ -10448,7 +10525,7 @@
           <div class="stack" style="margin-top:10px">
             ${discordGates.map(item => `
               <div class="notice">
-                <strong>${escapeHtml(item.label)} - ${item.finalStep ? "final" : item.ready ? "ready" : "blocked"}</strong>
+                <strong>${escapeHtml(item.label)} - ${item.deferred ? "deferred" : item.finalStep ? "final" : item.ready ? "ready" : "blocked"}</strong>
                 <p>${escapeHtml(item.detail || "")}</p>
               </div>
             `).join("")}
@@ -10860,7 +10937,7 @@
         const ready = gates.filter(item => item.ready).length;
         const blocked = gates.filter(item => !item.ready && !item.finalStep);
         return [
-          data.readyForVerification ? "ready for final verify" : "verification locked",
+          data.readyForOperations ? (data.verificationDeferred ? "operations ready; verification deferred" : "ready for verification") : "Discord setup incomplete",
           `${ready}/${gates.length} gates`,
           blocked[0]?.label || "",
           data.nextAction || ""
@@ -14020,6 +14097,11 @@
         submitDiscordAnnouncement(discordAnnouncementButton);
         return;
       }
+      const discordRoomButton = event.target.closest("[data-discord-room-action]");
+      if (discordRoomButton) {
+        submitDiscordRoom(discordRoomButton);
+        return;
+      }
       const redditHostedButton = event.target.closest("[data-reddit-hosted-url]");
       if (redditHostedButton) {
         const url = safeRedditHostedUrl(redditHostedButton.dataset.redditHostedUrl || "");
@@ -14222,6 +14304,10 @@
       if (event.target.matches("[data-discord-announcement-approval]")) {
         const sendButton = document.querySelector('[data-discord-announcement-action="send"]');
         if (sendButton) sendButton.disabled = !(event.target.checked && sendButton.dataset.discordCanSend === "true");
+      }
+      if (event.target.matches("[data-discord-room-approval]")) {
+        const createButton = document.querySelector('[data-discord-room-action="create"]');
+        if (createButton) createButton.disabled = !(event.target.checked && createButton.dataset.discordCanCreate === "true");
       }
       if (event.target.matches("[data-provider-account-select]")) {
         selectProviderAccount(event.target.dataset.providerAccountSelect, event.target.value);

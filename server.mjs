@@ -266,7 +266,8 @@ const discordPublicKey = envValue("DISCORD_PUBLIC_KEY");
 const discordBotToken = envValue("DISCORD_BOT_TOKEN");
 const discordGuildId = envValue("DISCORD_GUILD_ID");
 const discordAnnouncementChannelId = envValue("DISCORD_ANNOUNCEMENT_CHANNEL_ID");
-const discordBotPermissionBits = "126016";
+const discordVerificationServerThreshold = 100;
+const discordBotPermissionBits = "126032";
 const manychatApiBaseUrl = (process.env.MANYCHAT_API_BASE_URL || "https://api.manychat.com").replace(/\/$/, "");
 const manychatAccountApiKey = envValue("MANYCHAT_ACCOUNT_API_KEY");
 const manychatProfileApiKey = envValue("MANYCHAT_PROFILE_API_KEY");
@@ -4981,8 +4982,8 @@ function platformDepthCapabilities() {
       dataSignals: ["user identity", "server membership", "channel structure", "announcement readiness", "member feedback", "support questions", "role/channel context"],
       requiredProducts: ["Discord application", "OAuth2", "Bot", "Interactions", "Webhooks", "Server & Channel Management"],
       requiredEnv: ["DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET", "DISCORD_PUBLIC_KEY", "DISCORD_BOT_TOKEN", "DISCORD_GUILD_ID", "DISCORD_ANNOUNCEMENT_CHANNEL_ID"],
-      routes: ["/api/discord/readiness", "/api/oauth/discord/status", "/api/discord/interactions/readiness", "/api/discord/interactions", "/api/discord/webhook-events/readiness", "/api/discord/webhook-events", "/api/discord/community", "/api/discord/community/select", "/api/discord/user", "/api/discord/guilds", "/api/discord/channels", "/api/discord/messages", "/api/discord/messages/reply", "/api/discord/messages/moderate", "/api/discord/announcement"],
-      nextBuild: "Connect a signed-in Discord user, configure bot/guild/channel IDs, then add a signed Interactions endpoint so Social Cues can run campaign commands inside the community."
+      routes: ["/api/discord/readiness", "/api/oauth/discord/status", "/api/discord/interactions/readiness", "/api/discord/interactions", "/api/discord/webhook-events/readiness", "/api/discord/webhook-events", "/api/discord/community", "/api/discord/community/select", "/api/discord/user", "/api/discord/guilds", "/api/discord/channels", "/api/discord/channels/create", "/api/discord/messages", "/api/discord/messages/reply", "/api/discord/messages/moderate", "/api/discord/announcement"],
+      nextBuild: "Connect a signed-in Discord user, install the bot, select a server, then use the operations console for commands, rooms, announcements, inbox replies, and moderation."
     },
     {
       provider: "meta",
@@ -10961,6 +10962,9 @@ async function discordBotRuntimeStatus(input = {}) {
     guildId: guildId || null,
     announcementChannelId: channelId || null,
     bot: null,
+    installedGuildCount: null,
+    verificationServerThreshold: discordVerificationServerThreshold,
+    verificationRequired: false,
     guild: null,
     announcementChannel: null,
     errors: [],
@@ -10981,6 +10985,13 @@ async function discordBotRuntimeStatus(input = {}) {
     };
   } catch (error) {
     status.errors.push(`Bot identity probe failed: ${error.message}`);
+  }
+  try {
+    const guilds = await discordApi("/users/@me/guilds", { limit: "200", with_counts: "true" }, discordBotToken, { authScheme: "Bot" });
+    status.installedGuildCount = Array.isArray(guilds) ? guilds.length : null;
+    status.verificationRequired = Number(status.installedGuildCount || 0) >= discordVerificationServerThreshold;
+  } catch (error) {
+    status.errors.push(`Bot server-count probe failed: ${error.message}`);
   }
   if (guildId) {
     try {
@@ -11009,7 +11020,9 @@ async function discordBotRuntimeStatus(input = {}) {
   }
   status.ready = Boolean(status.applicationIdConfigured && status.bot && (!guildId || status.guild) && (!channelId || status.announcementChannel));
   status.nextAction = status.ready
-    ? "Bot runtime can reach the configured Discord server/channel. Keep verification for the final portal pass."
+    ? status.verificationRequired
+      ? `Bot runtime can reach the configured Discord server/channel. Discord verification is now required at ${discordVerificationServerThreshold} servers.`
+      : `Bot runtime can reach the configured Discord server/channel. App verification is deferred until ${discordVerificationServerThreshold} servers.`
     : status.errors[0] || "Install the bot to the owner Discord server, then set DISCORD_GUILD_ID and DISCORD_ANNOUNCEMENT_CHANNEL_ID.";
   return status;
 }
@@ -11162,6 +11175,16 @@ function discordVerificationPreflight(model = {}, session = null, botRuntime = {
   const savedChannelId = String(account?.profile?.discordSelectedChannelId || "").trim();
   const commandsTarget = discordCommandRegisterTarget({ guildId: savedGuildId || discordGuildId });
   const envRows = discordEnvChecklist();
+  const installedGuildCount = botRuntime.installedGuildCount !== null
+    && botRuntime.installedGuildCount !== undefined
+    && botRuntime.installedGuildCount !== ""
+    && Number.isFinite(Number(botRuntime.installedGuildCount))
+    ? Number(botRuntime.installedGuildCount)
+    : null;
+  const verificationRequired = Boolean(
+    botRuntime.verificationRequired
+    || (installedGuildCount !== null && installedGuildCount >= discordVerificationServerThreshold)
+  );
   const gates = [
     {
       id: "oauth-dashboard",
@@ -11223,19 +11246,31 @@ function discordVerificationPreflight(model = {}, session = null, botRuntime = {
     },
     {
       id: "verification-final",
-      label: "Discord verification",
-      ready: false,
+      label: "Discord application verification",
+      ready: !verificationRequired,
+      required: verificationRequired,
+      deferred: !verificationRequired,
       finalStep: true,
-      detail: "Do this last in Discord Developer Portal after every earlier gate is green, because verification makes portal changes harder."
+      detail: verificationRequired
+        ? `The bot is at Discord's ${discordVerificationServerThreshold}-server verification threshold. Complete application verification after the operating gates are green.`
+        : `Not required yet. Discord requires verified apps at ${discordVerificationServerThreshold}+ servers; current bot server count: ${installedGuildCount ?? "not available"}.`
     }
   ];
   const blocking = gates.filter(gate => !gate.ready && !gate.finalStep);
   return {
     ok: true,
-    readyForVerification: blocking.length === 0,
-    verificationLocked: blocking.length > 0,
-    verificationPolicy: "Discord verification comes dead last. Do not submit while any setup, command, bot, OAuth, or test-send gate is incomplete.",
-    nextAction: blocking[0]?.detail || "All pre-verification gates are green. Capture proof, then verification can be the final portal action.",
+    readyForOperations: blocking.length === 0,
+    readyForVerification: verificationRequired && blocking.length === 0,
+    verificationRequired,
+    verificationDeferred: !verificationRequired,
+    verificationLocked: verificationRequired && blocking.length > 0,
+    verificationServerThreshold: discordVerificationServerThreshold,
+    installedGuildCount,
+    verificationPolicy: `Discord application verification is not an operating prerequisite below ${discordVerificationServerThreshold} servers. Keep it deferred until the threshold, then submit only after bot, OAuth, command, and live-action proof is complete.`,
+    nextAction: blocking[0]?.detail
+      || (verificationRequired
+        ? "All operating gates are green. Capture proof and complete Discord application verification."
+        : `Discord operations are ready. Keep application verification deferred until ${discordVerificationServerThreshold} servers.`),
     dashboardFields: discordDashboardFields(),
     env: {
       required: envRows,
@@ -11246,6 +11281,7 @@ function discordVerificationPreflight(model = {}, session = null, botRuntime = {
       guildUrl: discordGuildInstallUrl(),
       userUrl: discordUserInstallUrl(),
       botPermissionBits: discordBotPermissionBits,
+      botPermissions: ["View Channels", "Send Messages", "Manage Channels", "Manage Messages", "Embed Links", "Attach Files", "Read Message History", "Add Reactions"],
       scopes: ["bot", "applications.commands"]
     },
     commands: {
@@ -23502,14 +23538,14 @@ async function route(req, res) {
         guildUrl: discordGuildInstallUrl(),
         userUrl: discordUserInstallUrl(),
         botPermissionBits: discordBotPermissionBits,
-        botPermissions: ["View Channels", "Send Messages", "Manage Messages", "Embed Links", "Attach Files", "Read Message History", "Add Reactions"]
+        botPermissions: ["View Channels", "Send Messages", "Manage Channels", "Manage Messages", "Embed Links", "Attach Files", "Read Message History", "Add Reactions"]
       },
       webhookEvents: {
         endpoint: `${discordPublicAppUrl}/api/discord/webhook-events`,
         readinessRoute: "/api/discord/webhook-events/readiness",
         subscriptions: ["APPLICATION_AUTHORIZED", "APPLICATION_DEAUTHORIZED"]
       },
-      allowedUse: ["customer community login", "social community server", "support server handoff", "campaign status notifications", "member feedback loops", "admin alerts", "guild/channel context", "community inbox", "approved replies", "approval-gated moderation", "slash commands", "message context capture", "dry-run announcement preparation"],
+      allowedUse: ["customer community login", "social community server", "support server handoff", "campaign status notifications", "member feedback loops", "admin alerts", "guild/channel context", "approval-gated room creation", "community inbox", "approved replies", "approval-gated moderation", "slash commands", "message context capture", "dry-run announcement preparation"],
       connectRoute: "/api/oauth/discord/start",
       missingEnv: ["DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET"].filter(name => !envPresent(name)),
       optionalMissingEnv: ["DISCORD_PUBLIC_KEY", "DISCORD_BOT_TOKEN", "DISCORD_GUILD_ID", "DISCORD_ANNOUNCEMENT_CHANNEL_ID"].filter(name => !envPresent(name))
@@ -23827,10 +23863,11 @@ async function route(req, res) {
         botReady: Boolean(discordBotToken),
         channelReady: Boolean(selectedChannelId),
         messageContentIntentRequired: true,
+        manageChannelsPermissionRequested: true,
         manageMessagesPermissionRequested: true
       },
       warnings: [channelError, memberError, !discordBotToken ? "Install the Social Cues bot before channel messages, replies, and moderation can run." : ""].filter(Boolean),
-      allowedUse: ["server identity", "community context", "campaign announcement planning", "support-room handoff", "community inbox", "approved replies", "approval-gated moderation"]
+      allowedUse: ["server identity", "community context", "approval-gated room creation", "campaign announcement planning", "support-room handoff", "community inbox", "approved replies", "approval-gated moderation"]
     });
   }
 
@@ -24124,6 +24161,75 @@ async function route(req, res) {
         position: channel.position ?? null
       })),
       use: "Channel structure lets Social Cues place alerts, campaign rooms, and support handoffs in the right Discord surfaces."
+    });
+  }
+
+  if (url.pathname === "/api/discord/channels/create" && req.method === "POST") {
+    const input = await bodyJson(req);
+    const context = await requireDiscordAccountForRead(req, res, "create a room in the selected Discord server");
+    if (!context) return;
+    const { account, accessToken, model, session } = context;
+    const live = input.live === true;
+    let target;
+    try {
+      target = discordSavedTarget(account, input, { requireChannel: false });
+      if (live) await authorizedDiscordGuild(accessToken, target.guildId, "create rooms in the selected community");
+    } catch (error) {
+      return json(res, error.status || 403, { ok: false, error: error.message });
+    }
+    const name = String(input.name || input.channelName || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-_]/g, "")
+      .replace(/-{2,}/g, "-")
+      .replace(/^[-_]+|[-_]+$/g, "")
+      .slice(0, 80);
+    const topic = String(input.topic || "").trim().slice(0, 1024);
+    const approved = input.approved === true || input.confirm === "CREATE_DISCORD_CHANNEL";
+    const idempotencyKey = discordActionIdempotencyKey(req, input) || (!live ? uid("discord-channel") : "");
+    if (!name) return json(res, 400, { ok: false, error: "Choose a room name using letters, numbers, dashes, or underscores." });
+    const dryRun = {
+      guildId: target.guildId,
+      name,
+      topic,
+      type: "text",
+      live,
+      approved,
+      idempotencyKey,
+      requires: ["connected Discord OAuth account", "saved authorized server", "bot Manage Channels permission", "explicit approval for live creation", "idempotency key"]
+    };
+    if (!live) return json(res, 200, { ok: true, mode: "dry-run", channel: dryRun });
+    if (!approved) return json(res, 409, { ok: false, mode: "approval-required", error: "Explicit approval is required before creating a Discord room.", channel: dryRun });
+    if (!idempotencyKey) return json(res, 400, { ok: false, error: "A unique idempotency key is required before live Discord room creation." });
+    const priorReceipt = existingDiscordActionReceipt(model, idempotencyKey, "channel_create");
+    if (priorReceipt) return json(res, 200, { ok: true, mode: "created", duplicateSuppressed: true, receipt: publicDiscordActionReceipt({ ...priorReceipt, duplicateSuppressed: true }) });
+    if (!discordBotToken) return json(res, 409, { ok: false, error: "Install the Discord bot before creating server rooms.", installUrl: discordGuildInstallUrl() });
+    const channel = await discordApi(`/guilds/${target.guildId}/channels`, {
+      name,
+      type: 0,
+      ...(topic ? { topic } : {})
+    }, discordBotToken, { method: "POST", authScheme: "Bot" });
+    const receipt = recordDiscordActionReceipt(model, session, account, {
+      idempotencyKey,
+      action: "channel_create",
+      guildId: target.guildId,
+      channelId: channel.id || null,
+      providerObjectId: channel.id || null,
+      content: `${name}\n${topic}`
+    });
+    await saveModelForUser(model, session?.user || null);
+    return json(res, 200, {
+      ok: true,
+      mode: "created",
+      channel: {
+        id: channel.id || "",
+        guildId: channel.guild_id || target.guildId,
+        name: channel.name || name,
+        topic: channel.topic || topic,
+        type: channel.type
+      },
+      receipt: publicDiscordActionReceipt(receipt)
     });
   }
 
