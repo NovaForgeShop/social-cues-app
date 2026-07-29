@@ -99,6 +99,16 @@ test('first-run workspace stays usable on Android and iPhone', async ({ page }, 
   await expect(page.locator('#responseInbox')).toBeVisible();
   await expect(page.locator('#responseReadiness')).toBeVisible();
   await expect(page.locator('#responses h2').first()).toHaveText('Response inbox');
+  const mobileResponseGroups = page.locator('#responseInbox > [data-response-provider-group]');
+  await expect(mobileResponseGroups).toHaveCount(8);
+  const mobileDiscordGroup = page.locator('[data-response-provider-group="discord"]');
+  await expect(mobileDiscordGroup.locator('.response-count')).toHaveText(/^\d+$|^--$/);
+  await mobileDiscordGroup.locator('summary').click();
+  await expect(mobileDiscordGroup).toHaveAttribute('open', '');
+  await expect(mobileDiscordGroup.locator('.response-provider-context')).toContainText(/server\/channel context|permissions/i);
+  const responseOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(responseOverflow).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: path.resolve('outputs', `mobile-response-inbox-${testInfo.project.name}.png`), fullPage: true });
 
   await page.locator('#mobileViewSelect').selectOption('studio');
   await expect(page.locator('[data-studio-mode="post"]')).toHaveAttribute('aria-selected', 'true');

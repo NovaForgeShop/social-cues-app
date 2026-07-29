@@ -58,6 +58,18 @@ test('local workstation navigation and safe buttons respond', async ({ page }) =
   await expect(page.locator('#responseInbox')).toBeVisible();
   await expect(page.locator('#responseReadiness')).toBeVisible();
   await expect(page.locator('#refreshResponses')).toBeVisible();
+  const responseProviderGroups = page.locator('#responseInbox > [data-response-provider-group]');
+  await expect(responseProviderGroups).toHaveCount(8);
+  for (const provider of ['meta_comments', 'meta_messages', 'youtube', 'threads', 'x', 'linkedin', 'reddit', 'discord']) {
+    const group = page.locator(`[data-response-provider-group="${provider}"]`);
+    await expect(group, provider).toBeVisible();
+    await expect(group.locator('.response-count'), provider).toHaveText(/^\d+$|^--$/);
+  }
+  const youtubeResponseGroup = page.locator('[data-response-provider-group="youtube"]');
+  await youtubeResponseGroup.locator('summary').click();
+  await expect(youtubeResponseGroup).toHaveAttribute('open', '');
+  await expect(youtubeResponseGroup.locator('.response-provider-context')).toContainText(/author names|moderation controls/i);
+  await expect(youtubeResponseGroup.locator('.response-items')).toBeVisible();
   await page.locator('#moreNavigation summary').click();
   await expect(page.locator('[data-view="ads"]')).toBeVisible();
   const views = ['dashboard', 'brandkit', 'studio', 'library', 'approvals', 'calendar', 'growth', 'ads', 'responses', 'actionlab', 'devices', 'accounts', 'help', 'billing', 'settings'];

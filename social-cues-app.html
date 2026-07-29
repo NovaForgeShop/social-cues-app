@@ -529,6 +529,110 @@
       overflow-wrap: normal;
     }
     .variant textarea { min-height: 138px; margin-top: 10px; }
+    .response-provider-group {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--subtle-bg);
+    }
+    .response-provider-group > summary {
+      display: grid;
+      grid-template-columns: 48px minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      min-height: 68px;
+      padding: 10px 12px;
+      cursor: pointer;
+      list-style: none;
+    }
+    .response-provider-group > summary::-webkit-details-marker { display: none; }
+    .response-provider-group > summary:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: -2px;
+    }
+    .response-provider-group[open] > summary {
+      border-bottom: 1px solid var(--line);
+      background: var(--button-bg);
+    }
+    .response-count {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      border: 1px solid color-mix(in srgb, var(--accent, var(--cyan)) 54%, var(--line));
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--accent, var(--cyan)) 13%, transparent);
+      color: var(--text);
+      font-size: 17px;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+    }
+    .response-count.unavailable {
+      border-color: var(--line);
+      background: var(--button-bg);
+      color: var(--muted);
+    }
+    .response-summary-copy { min-width: 0; }
+    .response-summary-copy strong,
+    .response-summary-copy span {
+      display: block;
+      overflow-wrap: anywhere;
+    }
+    .response-summary-copy strong { font-size: 14px; }
+    .response-summary-copy span {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .response-provider-body { min-width: 0; }
+    .response-provider-context {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--accent, var(--cyan)) 5%, transparent);
+    }
+    .response-provider-context > p {
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .response-provider-context .variant-tools { margin-top: 10px; }
+    .response-items { min-width: 0; }
+    .response-item {
+      min-width: 0;
+      padding: 14px;
+      border-top: 1px solid var(--line);
+    }
+    .response-item:first-child { border-top: 0; }
+    .response-item-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+    .response-item-head > div { min-width: 0; }
+    .response-item-head h3,
+    .response-item-head p { overflow-wrap: anywhere; }
+    .response-item-head h3 { font-size: 13px; }
+    .response-item-head p { font-size: 11px; }
+    .response-item-body {
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+    }
+    .response-item-meta {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 9px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .response-item textarea {
+      min-height: 74px;
+      margin-top: 10px;
+    }
     .tags {
       display: flex;
       gap: 6px;
@@ -881,6 +985,11 @@
       .onboarding-requirement { grid-template-columns: minmax(130px, .7fr) minmax(0, 2fr); }
       .onboarding-requirement-state { grid-column: 1 / -1; justify-items: start; text-align: left; }
       .variant-tools { grid-template-columns: 1fr 1fr; }
+      .response-provider-group > summary { grid-template-columns: 48px minmax(0, 1fr); }
+      .response-provider-group > summary > .pill {
+        grid-column: 2;
+        justify-self: start;
+      }
       .manychat-connect-form, .manychat-connect-form.profile { grid-template-columns: 1fr; }
       .choice-grid { grid-template-columns: 1fr 1fr; }
       body[data-current-view="accounts"] .app,
@@ -899,6 +1008,9 @@
       .variant-tools button, .asset-picker select { min-height: 44px; }
       .variant-head { align-items: stretch; }
       .variant-head > .pill { flex: 0 0 auto; align-self: flex-start; }
+      .response-provider-group > summary { gap: 9px; padding: 10px; }
+      .response-item-head { display: grid; grid-template-columns: 1fr; }
+      .response-item-head > .pill { justify-self: start; }
       .provider-state-chips { display: grid; grid-template-columns: 1fr 1fr; }
       .provider-state-chips .pill { text-align: center; }
     }
@@ -9359,6 +9471,172 @@
       `).join("");
     }
 
+    function responseProviderGroupKey(provider = "", eventType = "") {
+      const normalized = String(provider || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+      const normalizedEvent = String(eventType || "").trim().toLowerCase();
+      if (normalized === "twitter") return "x";
+      if (normalized === "messenger") return "meta_messages";
+      if (["facebook", "facebook_pages", "instagram", "meta"].includes(normalized)) {
+        return /message|direct|dm/.test(normalizedEvent) ? "meta_messages" : "meta_comments";
+      }
+      return normalized || "other";
+    }
+
+    function responseProviderLabel(provider = "") {
+      const labels = {
+        meta_comments: "Meta comments",
+        meta_messages: "Meta messages",
+        google_business: "Google Business Profile",
+        manychat: "Manychat",
+        x: "X"
+      };
+      if (labels[provider]) return labels[provider];
+      const platform = platformName(provider);
+      if (platform && platform !== provider) return platform;
+      return String(provider || "Other").replace(/_/g, " ").replace(/\b\w/g, letter => letter.toUpperCase());
+    }
+
+    function mergeResponseInboxItems(items = []) {
+      const merged = new Map();
+      items.filter(Boolean).forEach((item, index) => {
+        const groupKey = responseProviderGroupKey(item.provider || item.platform, item.eventType);
+        const providerEventId = String(item.commentId || "").trim();
+        const fallbackId = String(item.responseEventId || `${item.title || "response"}:${item.observedAt || index}`);
+        const key = `${groupKey}:${providerEventId || fallbackId}`;
+        const previous = merged.get(key) || {};
+        merged.set(key, {
+          ...previous,
+          ...item,
+          groupKey,
+          provider: item.provider || previous.provider || groupKey,
+          platform: item.platform || previous.platform || responseProviderLabel(groupKey),
+          commentId: item.commentId || previous.commentId || "",
+          channelId: item.channelId || previous.channelId || "",
+          eventType: item.eventType || previous.eventType || "",
+          observedAt: item.observedAt || previous.observedAt || null,
+          responseEventId: item.responseEventId || previous.responseEventId || "",
+          durable: Boolean(item.durable || previous.durable)
+        });
+      });
+      return [...merged.values()].sort((left, right) => {
+        const leftTime = Date.parse(left.observedAt || "") || 0;
+        const rightTime = Date.parse(right.observedAt || "") || 0;
+        return rightTime - leftTime;
+      });
+    }
+
+    function responseObservedLabel(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
+    }
+
+    function renderResponseInboxItem(item) {
+      const status = String(item.status || "needs review").replace(/_/g, " ");
+      const observedLabel = responseObservedLabel(item.observedAt);
+      return `
+        <article class="response-item" data-response-provider-item="${escapeHtml(item.groupKey || item.provider)}">
+          <div class="response-item-head">
+            <div>
+              <h3>${escapeHtml(item.title)}</h3>
+              <p>${escapeHtml(item.platform)}</p>
+            </div>
+            <span class="pill ${["ready", "read", "replied", "moderated", "ignored"].includes(item.status) ? "published" : "approved"}">${escapeHtml(status)}</span>
+          </div>
+          <p class="response-item-body">${escapeHtml(item.text)}</p>
+          <div class="response-item-meta">
+            ${observedLabel ? `<span>${escapeHtml(observedLabel)}</span>` : ""}
+            ${item.eventType ? `<span>${escapeHtml(String(item.eventType).replace(/_/g, " "))}</span>` : ""}
+            ${item.channelId ? `<span>channel ${escapeHtml(item.channelId)}</span>` : ""}
+            ${item.durable ? `<span>secured workspace record</span>` : `<span>live provider read</span>`}
+          </div>
+          ${item.responseEventId ? `
+            <div class="stack" style="margin-top:10px">
+              <textarea rows="2" data-response-draft-input="${escapeHtml(item.responseEventId)}" placeholder="Save a response draft without sending it"></textarea>
+              <div class="variant-tools">
+                <button data-response-action="mark_read" data-response-event-id="${escapeHtml(item.responseEventId)}">Read</button>
+                <button data-response-action="needs_reply" data-response-event-id="${escapeHtml(item.responseEventId)}">Follow up</button>
+                <button data-response-action="save_draft" data-response-event-id="${escapeHtml(item.responseEventId)}">Save draft</button>
+                <button data-response-action="ignore" data-response-event-id="${escapeHtml(item.responseEventId)}">Ignore</button>
+              </div>
+            </div>
+          ` : ""}
+          ${item.provider === "youtube" && item.commentId ? `
+            <div class="stack" style="margin-top:10px">
+              <textarea rows="2" data-youtube-reply-input="${escapeHtml(item.commentId)}" placeholder="Write an approved reply"></textarea>
+              <div class="variant-tools">
+                <button data-youtube-comment-reply="${escapeHtml(item.commentId)}">Reply</button>
+                <button data-youtube-comment-moderate="${escapeHtml(item.commentId)}" data-moderation-status="rejected">Reject</button>
+              </div>
+            </div>
+          ` : ""}
+          ${item.provider === "threads" && item.commentId ? `
+            <div class="stack" style="margin-top:10px">
+              <textarea rows="2" data-threads-reply-input="${escapeHtml(item.commentId)}" placeholder="Write an approved reply"></textarea>
+              <div class="variant-tools">
+                <button data-threads-comment-reply="${escapeHtml(item.commentId)}">Reply</button>
+                <button data-threads-comment-moderate="${escapeHtml(item.commentId)}" data-threads-action="hide">Hide</button>
+              </div>
+            </div>
+          ` : ""}
+          ${item.provider === "x" && item.commentId ? `
+            <div class="stack" style="margin-top:10px">
+              <textarea rows="2" data-x-reply-input="${escapeHtml(item.commentId)}" placeholder="Write an approved reply"></textarea>
+              <div class="variant-tools">
+                <button data-x-comment-reply="${escapeHtml(item.commentId)}">Reply</button>
+              </div>
+            </div>
+          ` : ""}
+          ${item.provider === "discord" && item.commentId ? `
+            <div class="stack" style="margin-top:10px">
+              <textarea rows="2" data-discord-reply-input="${escapeHtml(item.commentId)}" placeholder="Write an approved Discord reply"></textarea>
+              <div class="variant-tools">
+                <button data-discord-message-reply="${escapeHtml(item.commentId)}" data-discord-channel-id="${escapeHtml(item.channelId)}">Reply</button>
+                <button data-discord-message-moderate="${escapeHtml(item.commentId)}" data-discord-channel-id="${escapeHtml(item.channelId)}">Delete</button>
+              </div>
+            </div>
+          ` : ""}
+        </article>
+      `;
+    }
+
+    function renderResponseProviderGroup(group, items = [], open = false) {
+      const countAvailable = Boolean(items.length || group.countAvailable);
+      const countLabel = countAvailable ? String(items.length) : "--";
+      const status = group.status || (group.ready ? "ready" : group.available ? "connected" : "gated");
+      const statusClass = group.ready ? "published" : group.available ? "approved" : "revision";
+      const emptyCopy = countAvailable
+        ? group.emptyText || `No ${group.itemLabel || "responses"} returned in the current provider window.`
+        : group.unavailableText || "This provider has not opened a response feed for this workspace yet.";
+      return `
+        <details class="response-provider-group" data-response-provider-group="${escapeHtml(group.key)}" style="--accent:${escapeHtml(group.accent || "#28d7ee")}" ${open ? "open" : ""}>
+          <summary aria-label="${escapeHtml(`${group.title}: ${countAvailable ? `${items.length} responses` : "response count unavailable"}. Expand for details.`)}">
+            <span class="response-count ${countAvailable ? "" : "unavailable"}" title="${escapeHtml(countAvailable ? `${items.length} responses` : "Count unavailable until this response feed is active")}">${escapeHtml(countLabel)}</span>
+            <span class="response-summary-copy">
+              <strong>${escapeHtml(group.title)}</strong>
+              <span>${escapeHtml(group.detail || emptyCopy)}</span>
+            </span>
+            <span class="pill ${statusClass}">${escapeHtml(status)}</span>
+          </summary>
+          <div class="response-provider-body">
+            <div class="response-provider-context">
+              <p>${escapeHtml(group.context || "Responses are kept inside this private workspace and remain subject to the provider's own permissions.")}</p>
+              <div class="tags">
+                ${(group.tags || []).filter(Boolean).slice(0, 12).map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
+              </div>
+              ${group.route || group.openUrl ? `<div class="variant-tools">
+                ${group.route ? `<button data-function-check-route="${escapeHtml(group.route)}" data-function-check-suite="responses" data-function-check-label="${escapeHtml(group.title)}">Check</button>` : ""}
+                ${group.openUrl ? `<button data-reddit-hosted-url="${escapeHtml(group.openUrl)}">${escapeHtml(group.openLabel || "Open")}</button>` : ""}
+              </div>` : ""}
+            </div>
+            <div class="response-items">
+              ${items.length ? items.map(renderResponseInboxItem).join("") : `<div class="empty">${escapeHtml(emptyCopy)}</div>`}
+            </div>
+          </div>
+        </details>
+      `;
+    }
+
     function renderReactionResponses() {
       const surfaces = metaState.reactionSurfaces || {};
       const comments = surfaces.metaComments || {};
@@ -9619,17 +9897,32 @@
         </article>
       ` : "";
       $("#responseReadiness").innerHTML = cards.join("") + discordTargetControls + discordRoomComposer + discordAnnouncementComposer;
-      const youtubeItems = (youtubeComments.comments || []).slice(0, 6).map(item => {
-        const snippet = item.snippet?.topLevelComment?.snippet || item.snippet || {};
-        return {
-          title: snippet.authorDisplayName || "YouTube comment",
+      const youtubeItems = (youtubeComments.comments || []).flatMap(thread => {
+        const topComment = thread.snippet?.topLevelComment || thread;
+        const topSnippet = topComment.snippet || thread.snippet || {};
+        const topItem = {
+          title: topSnippet.authorDisplayName || "YouTube comment",
           platform: "YouTube",
-          text: snippet.textDisplay || snippet.textOriginal || "Comment text unavailable.",
+          text: topSnippet.textDisplay || topSnippet.textOriginal || "Comment text unavailable.",
           status: "needs review",
           accent: "#ff386b",
-          commentId: item.snippet?.topLevelComment?.id || item.id || "",
-          provider: "youtube"
+          commentId: topComment.id || thread.id || "",
+          provider: "youtube",
+          eventType: "comment",
+          observedAt: topSnippet.publishedAt || null
         };
+        const replies = (thread.replies?.comments || []).map(reply => ({
+          title: reply.snippet?.authorDisplayName || "YouTube reply",
+          platform: "YouTube",
+          text: reply.snippet?.textDisplay || reply.snippet?.textOriginal || "Reply text unavailable.",
+          status: "needs review",
+          accent: "#ff386b",
+          commentId: reply.id || "",
+          provider: "youtube",
+          eventType: "reply",
+          observedAt: reply.snippet?.publishedAt || null
+        }));
+        return [topItem, ...replies].filter(item => item.commentId);
       });
       const threadItems = (threadsReactions.conversations || []).flatMap(conversation => (conversation.replies || []).map(reply => ({
         title: reply.username ? `@${String(reply.username).replace(/^@/, "")}` : "Threads reply",
@@ -9638,10 +9931,12 @@
         status: "needs review",
         accent: "#93dd55",
         commentId: reply.id || "",
-        provider: "threads"
-      }))).slice(0, 6);
+        provider: "threads",
+        eventType: reply.is_quote_post ? "quote reply" : "reply",
+        observedAt: reply.timestamp || null
+      })));
       const xUsers = new Map((xEngagementLive.includes?.mentions?.users || []).map(user => [String(user.id), user]));
-      const xItems = (xEngagementLive.mentions || []).slice(0, 6).map(post => {
+      const xItems = (xEngagementLive.mentions || []).map(post => {
         const author = xUsers.get(String(post.author_id || "")) || {};
         return {
           title: author.username ? `@${author.username}` : author.name || "X mention",
@@ -9650,7 +9945,9 @@
           status: "needs review",
           accent: "#f6bd4a",
           commentId: post.id || "",
-          provider: "x"
+          provider: "x",
+          eventType: "mention",
+          observedAt: post.created_at || null
         };
       });
       const linkedinItems = (linkedinComments.conversations || []).flatMap(conversation => (conversation.comments || []).map(comment => ({
@@ -9660,9 +9957,11 @@
         status: "needs review",
         accent: "#0a66c2",
         commentId: comment.id || "",
-        provider: "linkedin"
-      }))).slice(0, 8);
-      const discordItems = (discordMessages.messages || []).slice(0, 8).map(message => ({
+        provider: "linkedin",
+        eventType: "comment",
+        observedAt: comment.created?.time ? new Date(Number(comment.created.time)).toISOString() : comment.createdAt || null
+      })));
+      const discordItems = (discordMessages.messages || []).map(message => ({
         title: message.author?.globalName || message.author?.username || "Discord member",
         platform: "Discord",
         text: message.content || (message.attachmentCount ? `${message.attachmentCount} attachment(s)` : "Discord did not return message content for this item."),
@@ -9671,16 +9970,10 @@
         commentId: message.id || "",
         channelId: message.channelId || discordMessages.channelId || "",
         provider: "discord",
-        authorBot: Boolean(message.author?.bot)
+        authorBot: Boolean(message.author?.bot),
+        eventType: "message",
+        observedAt: message.timestamp || null
       })).filter(item => !item.authorBot);
-      const workflowItems = [
-        comments.ready ? { title: "Meta comment queue", platform: "Meta", text: "Triage Page and Instagram comments, draft replies, and hold live moderation until explicit approval.", status: "ready", accent: "#1877f2" } : null,
-        messages.ready ? { title: "Meta message handoff", platform: "Meta", text: "Prepare support replies and message handoffs from Messenger or Instagram when permission gates are open.", status: "ready", accent: "#ff2d78" } : null,
-        threadsReplies?.ready ? { title: "Threads reply lane", platform: "Threads", text: "Track replies and mentions as a response lane once route-level reads are expanded.", status: "ready", accent: "#93dd55" } : null,
-        xEngagement.ready ? { title: "X engagement lane", platform: "X", text: "Account is connected; live engagement monitoring depends on X plan and engagement scopes.", status: "plan gated", accent: "#f6bd4a" } : null,
-        linkedinComments.ok ? { title: "LinkedIn Company response lane", platform: "LinkedIn", text: "Recent Company Page comments are available for review. Live replies stay disabled until the approved write workflow is verified.", status: "ready", accent: "#0a66c2" } : null,
-        discordCommunity.ok ? { title: "Discord community lane", platform: "Discord", text: "Use server context for announcement replies, support-room handoff, and member prompts.", status: "ready", accent: "#5865f2" } : null
-      ].filter(Boolean);
       const durableItems = (metaState.responseInbox?.rows || []).map(item => ({
         title: item.author?.handle ? `@${String(item.author.handle).replace(/^@/, "")}` : item.author?.name || `${platformName(item.platform || item.provider)} response`,
         platform: platformName(item.platform || item.provider),
@@ -9690,72 +9983,229 @@
         commentId: item.providerEventId || "",
         responseEventId: item.id || "",
         channelId: item.metadata?.channelId || "",
-        provider: item.provider || item.platform || "",
+        provider: String(item.provider || item.platform || "").toLowerCase() === "twitter" ? "x" : String(item.provider || item.platform || "").toLowerCase(),
+        eventType: item.eventType || "",
         observedAt: item.observedAt || null,
         durable: true
       }));
-      const inboxItems = durableItems.length
-        ? durableItems
-        : [...youtubeItems, ...threadItems, ...xItems, ...linkedinItems, ...discordItems, ...workflowItems];
-      $("#responseInbox").innerHTML = inboxItems.length ? inboxItems.map(item => `
-        <article class="variant" style="--accent:${escapeHtml(item.accent)}">
-          <div class="variant-head">
-            <div>
-              <h3>${escapeHtml(item.title)}</h3>
-              <p>${escapeHtml(item.platform)}</p>
-            </div>
-            <span class="pill ${["ready", "read", "replied", "moderated"].includes(item.status) ? "published" : "approved"}">${escapeHtml(String(item.status).replace(/_/g, " "))}</span>
-          </div>
-          <p>${escapeHtml(item.text)}</p>
-          ${item.observedAt ? `<p>${escapeHtml(new Date(item.observedAt).toLocaleString())}</p>` : ""}
-          ${item.responseEventId ? `
-            <div class="stack" style="margin-top:10px">
-              <textarea rows="2" data-response-draft-input="${escapeHtml(item.responseEventId)}" placeholder="Save a response draft without sending it"></textarea>
-              <div class="variant-tools">
-                <button data-response-action="mark_read" data-response-event-id="${escapeHtml(item.responseEventId)}">Read</button>
-                <button data-response-action="needs_reply" data-response-event-id="${escapeHtml(item.responseEventId)}">Follow up</button>
-                <button data-response-action="save_draft" data-response-event-id="${escapeHtml(item.responseEventId)}">Save draft</button>
-                <button data-response-action="ignore" data-response-event-id="${escapeHtml(item.responseEventId)}">Ignore</button>
-              </div>
-            </div>
-          ` : ""}
-          ${item.provider === "youtube" && item.commentId ? `
-            <div class="stack" style="margin-top:10px">
-              <textarea rows="2" data-youtube-reply-input="${escapeHtml(item.commentId)}" placeholder="Write an approved reply"></textarea>
-              <div class="variant-tools">
-                <button data-youtube-comment-reply="${escapeHtml(item.commentId)}">Reply</button>
-                <button data-youtube-comment-moderate="${escapeHtml(item.commentId)}" data-moderation-status="rejected">Reject</button>
-              </div>
-            </div>
-          ` : ""}
-          ${item.provider === "threads" && item.commentId ? `
-            <div class="stack" style="margin-top:10px">
-              <textarea rows="2" data-threads-reply-input="${escapeHtml(item.commentId)}" placeholder="Write an approved reply"></textarea>
-              <div class="variant-tools">
-                <button data-threads-comment-reply="${escapeHtml(item.commentId)}">Reply</button>
-                <button data-threads-comment-moderate="${escapeHtml(item.commentId)}" data-threads-action="hide">Hide</button>
-              </div>
-            </div>
-          ` : ""}
-          ${item.provider === "x" && item.commentId ? `
-            <div class="stack" style="margin-top:10px">
-              <textarea rows="2" data-x-reply-input="${escapeHtml(item.commentId)}" placeholder="Write an approved reply"></textarea>
-              <div class="variant-tools">
-                <button data-x-comment-reply="${escapeHtml(item.commentId)}">Reply</button>
-              </div>
-            </div>
-          ` : ""}
-          ${item.provider === "discord" && item.commentId ? `
-            <div class="stack" style="margin-top:10px">
-              <textarea rows="2" data-discord-reply-input="${escapeHtml(item.commentId)}" placeholder="Write an approved Discord reply"></textarea>
-              <div class="variant-tools">
-                <button data-discord-message-reply="${escapeHtml(item.commentId)}" data-discord-channel-id="${escapeHtml(item.channelId)}">Reply</button>
-                <button data-discord-message-moderate="${escapeHtml(item.commentId)}" data-discord-channel-id="${escapeHtml(item.channelId)}">Delete</button>
-              </div>
-            </div>
-          ` : ""}
-        </article>
-      `).join("") : `<div class="empty">No reaction data has returned yet. Connect accounts or refresh after posts begin receiving comments.</div>`;
+      const inboxItems = mergeResponseInboxItems([
+        ...youtubeItems,
+        ...threadItems,
+        ...xItems,
+        ...linkedinItems,
+        ...discordItems,
+        ...durableItems
+      ]);
+      const groupedItems = new Map();
+      inboxItems.forEach(item => {
+        const existing = groupedItems.get(item.groupKey) || [];
+        existing.push(item);
+        groupedItems.set(item.groupKey, existing);
+      });
+      const selectedDiscordGuild = (discordCommunity.guilds || []).find(guild => String(guild.id) === String(selectedGuildId));
+      const responseProviderGroups = [
+        {
+          key: "meta_comments",
+          title: "Meta comments",
+          accent: "#1877f2",
+          ready: Boolean(comments.ready),
+          available: Boolean(comments.ready),
+          countAvailable: Boolean(comments.ready),
+          status: comments.ready ? "ready" : "gated",
+          detail: comments.ready ? "Facebook and Instagram comment conversations." : "Waiting for Meta comment permission or review.",
+          context: "Shows real Facebook Page and Instagram professional-account comments stored for this workspace. Reply and moderation controls appear only when Meta grants the matching asset permission.",
+          tags: [
+            ...(comments.workflows || []),
+            ...gateTags(comments.gates?.facebook),
+            ...gateTags(comments.gates?.instagram)
+          ],
+          route: "/api/meta/comments",
+          itemLabel: "Meta comments"
+        },
+        {
+          key: "meta_messages",
+          title: "Meta messages",
+          accent: "#ff2d78",
+          ready: Boolean(messages.ready),
+          available: Boolean(messages.ready),
+          countAvailable: Boolean(messages.ready),
+          status: messages.ready ? "ready" : "gated",
+          detail: messages.ready ? "Messenger and Instagram support conversations." : "Waiting for messaging permission, webhooks, or review.",
+          context: "Messenger and Instagram direct-message events stay separate from public comments. The expanded list identifies the author and conversation record without exposing provider tokens.",
+          tags: [
+            ...(messages.workflows || []),
+            ...gateTags(messages.gates?.messenger),
+            ...gateTags(messages.gates?.instagram)
+          ],
+          route: "/api/meta/messages",
+          itemLabel: "Meta messages"
+        },
+        {
+          key: "youtube",
+          title: "YouTube comments",
+          accent: "#ff386b",
+          ready: Boolean(youtubeComments.ok),
+          available: Boolean(youtubeComments.ok),
+          countAvailable: Boolean(youtubeComments.ok),
+          detail: youtubeComments.ok ? "Channel comments and replies from the current read window." : youtubeComments.error || "Connect a channel with comment-read access.",
+          context: "YouTube author names, timestamps, replies, and moderation controls come directly from the authorized channel. Reply and reject actions remain explicit live actions.",
+          tags: [
+            youtubeComments.account?.handle || youtubeComments.account?.name || "",
+            youtubeComments.use || "comment signal",
+            "reply",
+            "reject moderation"
+          ],
+          route: "/api/youtube/comments",
+          itemLabel: "YouTube comments"
+        },
+        {
+          key: "threads",
+          title: "Threads replies",
+          accent: "#93dd55",
+          ready: Boolean(threadsReactions.ok),
+          available: Boolean(threadsReactions.ok),
+          countAvailable: Boolean(threadsReactions.ok),
+          detail: threadsReactions.ok ? "Replies and mentions on the connected Threads profile." : threadsReactions.error || "Connect Threads with reply permissions.",
+          context: "Threads responses show the public author, reply text, and timestamp. Live reply and hide controls appear only for provider-returned reply IDs.",
+          tags: [
+            threadsReactions.account?.handle || "",
+            threadsReplies?.status || "",
+            ...(threadsReplies?.requiredScopes || []).map(scope => `scope ${scope}`),
+            ...(threadsReplies?.blockers || []),
+            "reply",
+            "hide moderation"
+          ],
+          route: "/api/threads/reactions",
+          itemLabel: "Threads replies"
+        },
+        {
+          key: "x",
+          title: "X mentions",
+          accent: "#f6bd4a",
+          ready: Boolean(xEngagementLive.ok),
+          available: Boolean(xEngagementLive.ok),
+          countAvailable: Boolean(xEngagementLive.ok),
+          status: xEngagementLive.ok ? "ready" : xEngagementLive.planGate ? "plan gated" : "gated",
+          detail: xEngagementLive.ok ? "Mentions returned for the connected X profile." : xEngagementLive.planGate || xEngagementLive.error || "X response access depends on its API plan and scopes.",
+          context: "The expanded list contains real X mentions and matched public authors. Social Cues exposes reply controls here; plan, quota, and credential limits remain provider gates.",
+          tags: [
+            xEngagement.account?.handle || "",
+            ...(xEngagement.workflows || []),
+            ...(xEngagement.futureScopes || []),
+            ...(xEngagementLive.errors || []),
+            "reply"
+          ],
+          route: "/api/x/engagement",
+          itemLabel: "X mentions"
+        },
+        {
+          key: "linkedin",
+          title: "LinkedIn comments",
+          accent: "#0a66c2",
+          ready: Boolean(linkedinComments.ok),
+          available: Boolean(linkedinComments.ok),
+          countAvailable: Boolean(linkedinComments.ok),
+          status: linkedinComments.ok && !linkedinComments.writeScopeGranted ? "read-only" : linkedinComments.ok ? "ready" : "gated",
+          detail: linkedinComments.ok ? "Comments on recent Company Page posts." : linkedinComments.error || "Community Management access is required.",
+          context: "LinkedIn Company comments include the returned actor identity and organization context. Review remains read-only unless the approved organization write scope is present.",
+          tags: [
+            linkedinComments.account?.displayName || linkedinComments.account?.handle || "",
+            linkedinComments.writeScopeGranted ? "reply scope granted" : "read-only triage",
+            ...(linkedinComments.missingScopes || []).map(scope => `missing ${scope}`),
+            "Company Page context"
+          ],
+          route: "/api/linkedin/comments",
+          itemLabel: "LinkedIn comments"
+        },
+        {
+          key: "reddit",
+          title: "Reddit thread comments",
+          accent: "#ff4500",
+          ready: redditCommandReady,
+          available: redditCommandReady,
+          countAvailable: false,
+          status: redditCommandReady ? "in Reddit" : "gated",
+          detail: redditCommandReady ? "Open the installed command thread for its live comment count and moderation context." : redditStatus.nextAction || "Install the Devvit community build.",
+          context: "Reddit keeps the live thread, comment count, authors, and moderator information inside the installed Devvit app. Social Cues opens that trusted Reddit-hosted view instead of copying private moderation data across origins.",
+          tags: [
+            redditStatus.playtestSubreddit ? `r/${redditStatus.playtestSubreddit}` : "",
+            "live thread count",
+            "author details",
+            "moderator context"
+          ],
+          route: "/api/reddit/readiness",
+          openUrl: redditPlaytestUrl,
+          openLabel: "View Reddit comments",
+          unavailableText: redditCommandReady ? "Open Reddit to read the live thread and its current comment count." : "The Reddit command thread is not ready yet."
+        },
+        {
+          key: "discord",
+          title: "Discord messages",
+          accent: "#5865f2",
+          ready: Boolean(discordMessages.ok),
+          available: Boolean(discordCommunity.ok),
+          countAvailable: Boolean(discordMessages.ok),
+          detail: discordMessages.ok ? "Member messages from the selected server channel." : discordMessages.error || "Choose a bot-accessible server channel.",
+          context: "Discord messages show the member identity and selected server/channel context returned to the installed bot. Reply and delete actions require the bot's matching channel permissions.",
+          tags: [
+            selectedDiscordGuild?.name || "",
+            selectedDiscordChannel?.name ? `#${selectedDiscordChannel.name}` : "",
+            discordCommunity.configuredTargets?.botReady ? "bot ready" : "bot installation needed",
+            discordCommunity.gates?.memberScopeReady ? "member context ready" : "member context gated",
+            discordMessages.messageContentIntentNote || "",
+            "reply",
+            "delete with permission"
+          ],
+          route: "/api/discord/messages?limit=12",
+          itemLabel: "Discord messages"
+        }
+      ];
+      const configuredGroupKeys = new Set(responseProviderGroups.map(group => group.key));
+      groupedItems.forEach((items, key) => {
+        if (configuredGroupKeys.has(key)) return;
+        responseProviderGroups.push({
+          key,
+          title: responseProviderLabel(key),
+          accent: customerSourceAccent(key),
+          ready: true,
+          available: true,
+          countAvailable: true,
+          status: "synced",
+          detail: "Responses returned through the connected provider feed.",
+          context: "These responses were synced into private, tenant-isolated workspace storage. Only actions supported by the provider and the connected account appear below.",
+          tags: ["secured response records", "provider permissions enforced"],
+          itemLabel: `${responseProviderLabel(key)} responses`
+        });
+        configuredGroupKeys.add(key);
+      });
+      const connectedResponseProviders = new Set(["tiktok", "pinterest", "google_business", "patreon", "twitch", "manychat"]);
+      mergedConnectedAccounts().forEach(account => {
+        const provider = canonicalProviderAssetPlatform(account.platform || account.provider || account.oauthProvider || "");
+        if (!connectedResponseProviders.has(provider) || !accountConnectionState(account).connected) return;
+        const key = responseProviderGroupKey(provider);
+        if (configuredGroupKeys.has(key)) return;
+        responseProviderGroups.push({
+          key,
+          title: responseProviderLabel(key),
+          accent: customerSourceAccent(key),
+          ready: false,
+          available: true,
+          countAvailable: false,
+          status: "connected",
+          detail: "Account connected; a supported response feed has not returned data yet.",
+          context: "Social Cues will show a real count and expandable conversations here when this provider returns a supported comment, message, review, or community feed. A connected account alone is not reported as zero responses.",
+          tags: ["connected account", "response feed unavailable"],
+          unavailableText: "No supported response feed is active for this connected account."
+        });
+        configuredGroupKeys.add(key);
+      });
+      const openResponseGroups = new Set(
+        [...document.querySelectorAll("#responseInbox [data-response-provider-group][open]")]
+          .map(element => element.dataset.responseProviderGroup)
+      );
+      $("#responseInbox").innerHTML = responseProviderGroups
+        .map(group => renderResponseProviderGroup(group, groupedItems.get(group.key) || [], openResponseGroups.has(group.key)))
+        .join("");
     }
 
     async function updateDurableResponse(button) {
