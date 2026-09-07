@@ -29,7 +29,10 @@ import { openLocalWorkspacePersistence } from "./local-workspace-persistence.mjs
 import { WorkspaceContentPersistenceError } from "./workspace-content-persistence.mjs";
 import { localRecoveryValidation } from "./local-recovery-validation.mjs";
 import { PRICING_CONFIGURATION } from "./pricing-packaging.mjs";
-import { resolveStripeBillingConfiguration } from "./stripe-billing-configuration.mjs";
+import {
+  resolveStripeBillingConfiguration,
+  STRIPE_BILLING_RELEASE_STAGE
+} from "./stripe-billing-configuration.mjs";
 import { createStripeBillingApplication } from "./stripe-billing-application.mjs";
 import {
   createVizardConnectionService,
@@ -230,6 +233,14 @@ const webPushConfigured = Boolean(vapidPublicKey && vapidPrivateKey && /^mailto:
 if (webPushConfigured) webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
 const mediaRenderWorkerConfigured = /^(1|true|yes|configured)$/i.test(process.env.MEDIA_RENDER_WORKER_CONFIGURED || "");
 const runtimeMode = process.env.VERCEL ? "vercel" : "local";
+const releaseReadinessSchemaVersion = "social-cues.release-readiness.v1";
+const vercelReleaseEnvironments = new Set(["production", "preview", "development"]);
+const releaseReadinessGates = Object.freeze({
+  hostedPersistence: Object.freeze({ review: "R4", status: "HOLD" }),
+  externalUserContent: "HOLD",
+  billingReleaseStage: STRIPE_BILLING_RELEASE_STAGE,
+  providers: "DEFERRED"
+});
 const corsOrigin = new URL(publicAppUrl).origin;
 const metaAppId = envValue("META_APP_ID");
 const metaAppSecret = envValue("META_APP_SECRET");
@@ -8100,6 +8111,31 @@ function responseHeaders(contentType, options = {}) {
   };
 }
 
+function normalizedVercelCommitSha(value) {
+  if (typeof value !== "string" || !/^[0-9a-f]{40}$/i.test(value)) return null;
+  return value.toLowerCase();
+}
+
+function allowlistedVercelEnvironment(value) {
+  return typeof value === "string" && vercelReleaseEnvironments.has(value) ? value : null;
+}
+
+function releaseReadinessResponse() {
+  const commitCandidate = normalizedVercelCommitSha(process.env.VERCEL_GIT_COMMIT_SHA);
+  const environmentCandidate = allowlistedVercelEnvironment(process.env.VERCEL_ENV);
+  const releaseIdentityReady = runtimeMode === "vercel" && Boolean(commitCandidate && environmentCandidate);
+  return {
+    ok: true,
+    schema: releaseReadinessSchemaVersion,
+    ready: false,
+    releaseIdentityReady,
+    commitSha: releaseIdentityReady ? commitCandidate : null,
+    environment: releaseIdentityReady ? environmentCandidate : null,
+    runtime: runtimeMode,
+    gates: releaseReadinessGates
+  };
+}
+
 function json(res, status, value) {
   const storageError = requestModelContext.getStore()?.persistenceError;
   if (storageError) {
@@ -8150,6 +8186,7 @@ const anonymousApiGetPaths = new Set([
   "/api/auth/smtp/readiness",
   "/api/billing/readiness",
   "/api/pricing",
+  "/api/release/readiness",
   "/api/cron/workers",
   "/api/linkedin/webhook",
   "/api/media/public-assets",
@@ -18711,6 +18748,10 @@ async function route(req, res) {
       app: "Social Cues",
       status: "healthy"
     });
+  }
+
+  if (url.pathname === "/api/release/readiness" && req.method === "GET") {
+    return json(res, 200, releaseReadinessResponse());
   }
 
   if (url.pathname === "/api/monitoring/status" && req.method === "GET") {

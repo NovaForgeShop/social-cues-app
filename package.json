@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node test.mjs",
+    "test:release-readiness": "node release-readiness.contract.test.mjs",
     "test:pricing": "node pricing-packaging.contract.test.mjs",
     "test:pricing-presentation": "node pricing-presentation.contract.test.mjs",
     "test:stripe-database": "node stripe-billing-database.contract.test.mjs",

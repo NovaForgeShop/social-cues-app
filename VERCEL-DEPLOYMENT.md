@@ -43,6 +43,51 @@ these JSON fields:
 The route does not return a `mode` field. A successful health response proves
 only that the function can answer a minimal request.
 
+## Release Identity And Hold Evidence
+
+Public `GET /api/release/readiness` is a read-only observability interlock. It
+identifies the serving Vercel Git commit only when all platform identity inputs
+are valid, and it always reports the current external-alpha holds. It is not a
+readiness or deployment-success claim.
+
+A complete Vercel identity response has this bounded schema:
+
+```json
+{
+  "ok": true,
+  "schema": "social-cues.release-readiness.v1",
+  "ready": false,
+  "releaseIdentityReady": true,
+  "commitSha": "<normalized 40-character lowercase Git SHA>",
+  "environment": "production",
+  "runtime": "vercel",
+  "gates": {
+    "hostedPersistence": {
+      "review": "R4",
+      "status": "HOLD"
+    },
+    "externalUserContent": "HOLD",
+    "billingReleaseStage": "readiness_only",
+    "providers": "DEFERRED"
+  }
+}
+```
+
+The identity uses only Vercel's system-provided `VERCEL_GIT_COMMIT_SHA` and
+`VERCEL_ENV`. A commit is accepted only as exactly 40 hexadecimal characters
+and is normalized to lowercase. The environment must be exactly `production`,
+`preview`, or `development`. Values are not trimmed or partially parsed.
+
+If the runtime is local, either value is missing, or either value is invalid,
+`releaseIdentityReady` is `false` and both `commitSha` and `environment`
+are `null`. Invalid input is never echoed. The response does not include
+deployment URLs, repository metadata, branches, hostnames, request headers,
+cookies, arbitrary environment values, or credentials.
+
+`ok: true` means only that this route answered. `ready` remains `false`
+until a later reviewed change explicitly closes every alpha gate. This endpoint
+does not weaken the P31 go/no-go table below.
+
 ## Current External Alpha Boundary
 
 The intended alpha is invite-only and limited to named testers. Until R4 passes,
