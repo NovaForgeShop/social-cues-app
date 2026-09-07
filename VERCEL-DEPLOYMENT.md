@@ -88,6 +88,43 @@ cookies, arbitrary environment values, or credentials.
 until a later reviewed change explicitly closes every alpha gate. This endpoint
 does not weaken the P31 go/no-go table below.
 
+## Credential-Free Public Alpha Smoke
+
+Run the read-only public smoke command with the exact reviewed deployment SHA:
+
+```powershell
+npm.cmd run alpha:smoke -- --expected-commit b7af387a7f368656e385c0263fd5c460b8a373f7
+```
+
+`https://socialcuesapp.com` is the default origin. A different origin and a
+bounded request timeout may be supplied explicitly:
+
+```powershell
+npm.cmd run alpha:smoke -- --base-url https://socialcuesapp.com --expected-commit b7af387a7f368656e385c0263fd5c460b8a373f7 --timeout-ms 5000
+```
+
+The command issues nine anonymous `GET` requests. It sends no cookie,
+authorization value, query string, or request body; reads no credential from
+the environment; and does not follow redirects. Its single bounded JSON report
+records only the expected and observed release SHA, allowlisted public
+readiness observations, fixed result codes, request correlation IDs, and the
+remaining non-public gates. A zero exit proves that:
+
+- `/health` and `/api/release/readiness` match their exact public contracts;
+- the production release identity matches the requested commit;
+- hosted authentication and SMTP expose the required readiness signals;
+- billing, checkout, and provider activation remain held;
+- pricing is visible while checkout remains unavailable; and
+- anonymous model, operator-monitoring, and worker execution requests fail
+  closed.
+
+This smoke is release evidence, not an external-alpha GO. It does not prove
+end-to-end email delivery, authenticated sessions, durable persistence,
+workspace or account deletion and recovery, authorized worker execution, alert
+delivery, rollback, billing operation, or any provider operation. Those gates
+remain subject to their separately authorized reviews. After a new deployment,
+replace the example SHA with that deployment's exact reviewed commit.
+
 ## Current External Alpha Boundary
 
 The intended alpha is invite-only and limited to named testers. Until R4 passes,
