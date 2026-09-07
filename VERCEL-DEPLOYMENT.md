@@ -1,168 +1,196 @@
-# Social Cues Vercel Deployment
+# Social Cues Vercel Deployment And External Alpha Gate
 
-## Current Target
+## Recorded Deployment Artifact
 
-Deploy this folder as the Vercel project:
+Management records the following successful Vercel production deployment:
 
-```text
-social-cues-app
+- Git commit: `6d000048a77fdc0494b3824168e0bf832d6c30cd`
+- GitHub combined status: `success`
+- Status context: `Vercel`
+- Vercel deployment ID: `6314634319`
+- Created: `2026-09-07T18:59:03Z`
+- Production deployment URL:
+  `https://social-cues-cvr4wgqr6-socialcuesapp.vercel.app`
+- Canonical public site: `https://socialcuesapp.com/`
+
+This establishes that the reviewed artifact was built and deployed. It does not
+establish hosted authentication, durable workspace persistence, tenant isolation,
+data deletion, alerting, worker execution, or rollback readiness. P31 does not
+redeploy or mutate that external system.
+
+## Source Deployment Contract
+
+The current repository contract is:
+
+- `package.json` starts the application with `node server.mjs`.
+- `vercel.json` declares root `server.mjs` as the sole Vercel function.
+- `api/server.mjs` is absent and must not be recreated.
+- `vercel.json` schedules `/api/cron/workers` every minute.
+- The worker route requires `WORKER_SECRET`, or `CRON_SECRET` as its fallback.
+  In Vercel mode, an absent or invalid bearer secret is denied.
+
+The minimal public `GET /health` source contract is HTTP `200` with exactly
+these JSON fields:
+
+```json
+{
+  "ok": true,
+  "app": "Social Cues",
+  "status": "healthy"
+}
 ```
 
-Production domain:
+The route does not return a `mode` field. A successful health response proves
+only that the function can answer a minimal request.
 
-```text
-socialcuesapp.com
-www.socialcuesapp.com
-```
+## Current External Alpha Boundary
 
-Vercel team:
+The intended alpha is invite-only and limited to named testers. Until R4 passes,
+the public deployment may be used only as a non-data-bearing demonstration. It
+must not accept or retain tester workspace content, media, credentials, provider
+accounts, or other user data.
 
-```text
-socialcuesapp
-```
+The following stay outside the minimum alpha:
 
-## Required Vercel Project Settings
+- Stripe checkout, Customer Portal, webhook processing, charges, and paid
+  entitlement mutation.
+- Live provider OAuth, account connection, automated publishing, and provider
+  acceptance claims.
+- Shared `app_state` as storage for external tester content.
+- Any hosted filesystem fallback represented as a durable commit.
 
-- Framework preset: Other
-- Project name: social-cues
-- Build command: leave empty
-- Output directory: leave empty
-- Install command: leave empty
-- Root directory: this folder
+## Go/No-Go Summary
 
-The project includes:
+| Gate | Current state | Go condition |
+| --- | --- | --- |
+| Deployment artifact | RECORDED | Exact commit, tree, deployment ID, domain, and build status are retained as evidence. |
+| Hosted authentication | HOLD | The complete invite, verification, login, recovery, session, and denial flow passes on the deployed candidate. |
+| Workspace persistence | R4 HOLD | Durable per-workspace CAS and tenant isolation pass across multiple application instances. |
+| Retention and deletion | HOLD | Approved retention, export, workspace/account deletion, backup expiry, and recovery procedures are tested. |
+| Monitoring and worker operations | HOLD | Alerts, correlated logs, secured worker execution, and incident ownership are verified. |
+| Rollback | HOLD | A known-good target and a rehearsed, data-compatible rollback procedure are recorded. |
+| Billing | REQUIRED HOLD | `readiness_only` and all three unavailable capability flags remain intact. |
+| Providers | DEFERRED | Each provider is enabled only after a separately authorized live acceptance review. |
 
-- `api/server.mjs` as the Vercel serverless entry point
-- `vercel.json` routing every path into the Social Cues backend
-- `.vercelignore` to keep local secrets, logs, and local JSON state out of deployments
+No external tester invite is a GO while any HOLD row remains unresolved.
 
-## Production Environment Variables
+## Hosted Authentication Gate
 
-Set these in Vercel Project Settings > Environment Variables for Production, Preview, and Development unless noted otherwise.
+Before the first invite, verify the exact deployed release with a dedicated
+synthetic alpha account:
 
-```text
-BRAND_DOMAIN=socialcuesapp.com
-BRAND_HOME_URL=https://socialcuesapp.com
-SUPPORT_EMAIL=mr.barton@socialcuesapp.com
-PUBLIC_APP_URL=https://socialcuesapp.com
-META_PUBLIC_APP_URL=https://socialcuesapp.com
-X_PUBLIC_APP_URL=https://socialcuesapp.com
-SUPABASE_URL=<current Supabase project URL>
-SUPABASE_SERVICE_ROLE_KEY=<current Supabase service role key>
-SUPABASE_SECRET_KEY=<same value or leave unset if service role key is set>
-SUPABASE_ENABLED=true
-META_APP_ID=<Meta app id>
-META_APP_SECRET=<Meta app secret>
-META_API_VERSION=v23.0
-OAUTH_TOKEN_ENCRYPTION_KEY=<current encryption key>
-WEBHOOK_VERIFY_TOKEN=<current webhook verify token, if set>
-WEBHOOK_SIGNING_SECRET=<current webhook signing secret, if set>
-THREADS_APP_ID=<Threads app id, when ready>
-THREADS_APP_SECRET=<Threads app secret, when ready>
-X_CLIENT_ID=<X client id>
-X_CLIENT_SECRET=<X client secret>
-OPENAI_API_KEY=<OpenAI key, when production AI features are enabled>
-STRIPE_SECRET_KEY=<Stripe key, when billing is enabled>
-STRIPE_WEBHOOK_SECRET=<Stripe webhook secret, when billing is enabled>
-PUBLISHING_QUEUE_MODE=social-cues
-```
+1. `GET /api/auth/readiness` reports `ready: true`, hosted authentication rather
+   than local-password fallback, required email verification, password recovery,
+   login alerting, rate limiting, and the intended invite-only signup policy.
+2. `GET /api/auth/smtp/readiness` reports `ready: true`.
+3. An authorized invite can create an account and sends a verification email.
+4. An unverified account cannot receive an authenticated application session.
+5. The verification link enables login to the intended account and workspace.
+6. Resend and password-recovery messages complete without account enumeration.
+7. Expired, malformed, revoked, and foreign sessions fail closed.
+8. Logout and remembered-device behavior match the authentication contract.
+9. No token, credential, password, or private account identifier appears in
+   responses, logs, URLs, or retained evidence.
 
-Do not upload the local `.env` file. Copy values into Vercel's encrypted environment variable UI.
+Readiness endpoints are necessary signals, not substitutes for the end-to-end
+flow.
 
-## OAuth URLs After Deployment
+## Persistence And Tenant-Isolation Gate
 
-Update provider dashboards to use:
+R4 remains **HOLD**. Follow the complete matrix in `SUPABASE-SETUP.md`. At
+minimum, independent deployed instances must prove:
 
-```text
-https://socialcuesapp.com/privacy
-https://socialcuesapp.com/terms
-https://socialcuesapp.com/api/meta/data-deletion
-https://socialcuesapp.com/api/oauth/meta/callback
-https://socialcuesapp.com/api/oauth/x/callback
-```
+- authenticated session to active workspace to workspace-owned row binding;
+- owner/member/viewer/outsider and cross-workspace authorization;
+- atomic compare-and-swap with explicit stale conflict;
+- exact retry after a lost or ambiguous response;
+- restart and instance-switch durability;
+- no successful fallback to ephemeral filesystem storage;
+- production schema, RLS, grants, JWT gateway, and advisor review;
+- secret-free responses, logs, audit records, and receipts.
 
-Meta App Domains:
+Do not revive the rejected P15 integration. Review any future adapter wiring as a
+new security and data-integrity change.
 
-```text
-socialcuesapp.com
-```
+## Retention, Deletion, And Recovery Gate
 
-Keep the Supabase bridge domain in Meta temporarily only until the deployed Social Cues domain has passed live verification.
+Before retaining tester content, publish and rehearse an operator procedure that
+records:
 
-## Verification URLs
+- retention periods for workspace content, media, audit records, provider
+  metadata, and backups;
+- data export and authenticated workspace/account deletion;
+- deletion completion evidence and backup-expiry behavior;
+- backup ownership, frequency, recovery point, and recovery time;
+- a synthetic restore into the correct workspace without cross-tenant data;
+- support ownership and response expectations for access, correction, export,
+  deletion, and incident requests.
 
-After deploy, open:
+The Meta deletion callback is not a substitute for general Social Cues account
+and workspace deletion.
 
-```text
-https://socialcuesapp.com/health
-https://socialcuesapp.com/app
-https://socialcuesapp.com/privacy
-https://socialcuesapp.com/terms
-https://socialcuesapp.com/api/meta/review-pack
-https://socialcuesapp.com/api/oauth/x/status
-https://socialcuesapp.com/api/oauth/meta/status
-```
+## Monitoring And Worker Gate
 
-Expected:
+Before inviting testers:
 
-- `/health` returns JSON with `app: "Social Cues"` and `mode: "vercel"`
-- `/app` shows the Social Cues app
-- `/privacy` and `/terms` show the Social Cues domain and support email
-- Meta and X status routes show configured credentials after env vars are set
+1. Confirm the public `/health` response matches the exact minimal contract.
+2. Confirm every response carries an `X-Request-ID` and that the same identifier
+   is available in sanitized runtime and exception records.
+3. Verify the operator-protected `/api/monitoring/status` route and error
+   collection without exposing content or secrets.
+4. Configure actionable alerts for server errors, authentication failures,
+   persistence conflicts/unavailability, and failed worker runs.
+5. Prove an unauthenticated or incorrectly authenticated
+   `/api/cron/workers` request returns `401`.
+6. Prove one authorized worker invocation records a bounded result and cannot
+   cross workspace boundaries.
+7. Record who acknowledges alerts, where incident evidence is kept, and when the
+   alpha is paused.
 
-## Vercel Pro Surfaces To Turn On After First Deploy
+A source-level Sentry hook or cron declaration alone is not operational proof.
 
-Use these in the Social Cues Vercel project after the first deployment exists.
+## Rollback Gate
 
-### Domains
+Before the alpha opens, record a known-good deployment commit, deployment ID, and
+alias target. Rehearse the rollback in an authorized non-production or controlled
+environment and prove:
 
-- Add `socialcuesapp.com`
-- Add `www.socialcuesapp.com`
-- Make `socialcuesapp.com` canonical
-- Keep Google Workspace MX records at Squarespace
-- Use Vercel DNS instructions only for web records, not email records
+- the alias moves to the intended artifact;
+- the health and authentication smoke checks recover;
+- the rollback does not require weakening authentication or tenant isolation;
+- the prior artifact remains compatible with the current schema and retained
+  data;
+- worker execution and new writes can be paused during the decision;
+- one named operator owns the rollback and documents start, result, and recovery.
 
-### Environment Variables
+Do not execute a production rollback based solely on this document.
 
-- Add every Production runtime variable listed above
-- Copy the same values to Preview only if preview deployments are allowed to touch the same Supabase project
-- Prefer a separate Preview Supabase project later, once users beyond the founder are testing
-- Never expose provider secrets as `NEXT_PUBLIC_*`
+## Billing And Provider Invariants
 
-### Logs
+`stripe-billing-configuration.mjs` defines
+`STRIPE_BILLING_RELEASE_STAGE = "readiness_only"`.
+`stripe-billing-application.mjs` reports checkout, portal, and webhook
+capabilities as unavailable. Those invariants must pass immediately before an
+alpha invite. Do not add billing credentials, activate routes, issue payment
+URLs, charge a customer, or grant a paid entitlement.
 
-- Use Logs for OAuth callback errors, provider API errors, and serverless exceptions
-- First production scans:
-  - `/api/oauth/meta/status`
-  - `/api/oauth/x/status`
-  - `/api/meta/review-pack`
-  - `/api/accounts`
+Keep provider OAuth and publishing disabled for the minimum alpha. Synthetic
+readiness tests, guarded provider mocks, and manual receipts do not prove live
+provider approval, ownership, scopes, quota, or delivery. Any provider activation
+requires its own authorized acceptance plan and rollback.
 
-### Observability
+## Operator Decision Record
 
-- Turn on project Observability after first deploy
-- Watch serverless error rate, function duration, and 4xx/5xx spikes
-- Add alerts for repeated OAuth callback failures and 500 responses
+A GO decision must preserve one reviewable record containing:
 
-### Speed Insights And Analytics
+- release commit and tree;
+- deployment ID, URL, timestamp, and status;
+- result and evidence path for every gate above;
+- named alpha testers and data they are allowed to enter;
+- billing and provider disablement confirmation;
+- known-good rollback target and operator;
+- retention, deletion, recovery, support, and incident contacts;
+- reviewer, decision timestamp, unresolved risks, and expiration or next review.
 
-- Enable Speed Insights for app shell load performance
-- Enable Web Analytics once public traffic starts
-- Track `/app`, `/privacy`, `/terms`, and provider callback routes separately
-
-### Firewall
-
-- Start in observe/logging posture
-- Add rate limits later for OAuth callback, publish, and media generation endpoints
-- Do not block Meta, X, Supabase, Google, or Vercel verification traffic during review
-
-### CDN
-
-- Keep app HTML uncached or short cached while the prototype is changing
-- Static icons and manifest can be cached longer
-- Purge CDN after replacing app icons, policy copy, or callback behavior
-
-### Rollback
-
-- Keep the first known-good production deployment as a rollback point
-- Do not update Meta/X callback URLs until the production deployment passes all verification URLs above
+Keep `RELEASE-READINESS.md` and `PILOT-HANDOFF.md` as the authoritative
+evidence limits. Deployment success must never be used to override their holds.
