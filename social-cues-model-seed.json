@@ -47,15 +47,9 @@
   ],
   "billing": {
     "status": "Not configured",
-    "selectedPlan": "Founder Audit - $99",
-    "paymentLink": "",
-    "checkoutMode": "payment-link-first",
-    "offers": [
-      { "name": "Founder Audit", "price": "$99", "description": "Diagnose one underperforming page and deliver a first campaign plan." },
-      { "name": "Campaign Build", "price": "$299", "description": "Build a 30-day platform-native launch campaign." },
-      { "name": "Managed Proof Sprint", "price": "$499", "description": "Run a proof sprint with content, metrics, and next moves." },
-      { "name": "Social Cues Pro", "price": "$49/mo", "description": "Self-serve workspace for campaigns, approvals, media, and analytics." }
-    ]
+    "selectedPlanId": "business",
+    "checkoutMode": "unavailable",
+    "offers": []
   },
   "proof": [
     {

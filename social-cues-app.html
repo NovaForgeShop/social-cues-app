@@ -339,6 +339,57 @@
       justify-content: flex-end;
       margin-top: 13px;
     }
+    .posting-pack-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 0;
+      margin: 14px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .posting-pack-toolbar > div:first-child { flex: 1 1 220px; min-width: 0; }
+    .posting-pack-toolbar p { overflow-wrap: anywhere; margin: 4px 0 0; }
+    .posting-pack-toolbar .actions { margin: 0; justify-content: flex-start; }
+    .posting-pack-toolbar button { min-height: 44px; white-space: normal; }
+    .proof-section { padding: 20px 0; }
+    .proof-section h2, .proof-section h3 { overflow-wrap: anywhere; }
+    .proof-form { max-width: 920px; padding: 20px 0; border-bottom: 1px solid var(--line); margin-bottom: 24px; }
+    .proof-form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+    .proof-form legend { font-weight: 750; padding: 12px 0; }
+    .proof-form .form-grid > label { min-width: 0; }
+    .proof-form .full { grid-column: 1 / -1; }
+    .proof-form input, .proof-form select { min-width: 0; min-height: 44px; }
+    .proof-form button { min-height: 44px; }
+    .proof-form .primary { background: var(--signal-deep); }
+    .proof-observation { margin: 20px 0; border-block: 1px solid var(--line); }
+    .proof-observation summary { min-height: 44px; padding: 12px 0; cursor: pointer; font-weight: 750; overflow-wrap: anywhere; }
+    .proof-observation[open] { padding-bottom: 12px; }
+    .proof-form :is(input, select, textarea, button, summary):focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+    .proof-form #proofUrlInput { min-height: 70px; overflow-wrap: anywhere; }
+    .proof-form [aria-invalid="true"] { border-color: #bc2449; }
+    .proof-feedback { min-height: 24px; margin-top: 12px; overflow-wrap: anywhere; }
+    .proof-feedback[data-state="error"] { color: #bc2449; }
+    .proof-feedback[data-state="success"] { color: #267044; }
+    .proof-entry { border-top: 1px solid var(--line); padding: 18px 0; overflow-wrap: anywhere; }
+    .proof-entry p { white-space: pre-wrap; }
+    .proof-entry button, .proof-section > .row button { min-height: 44px; }
+    .evidence-select { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
+    .evidence-select input { flex: 0 0 20px; width: 20px; height: 20px; min-height: 20px; }
+    .self-launch-draft { border-block: 1px solid var(--line); padding: 20px 0; margin-top: 20px; }
+    .self-launch-draft button { min-height: 44px; white-space: normal; }
+    .self-launch-draft .primary { background: var(--signal-deep); }
+    .self-launch-draft pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
+    .saved-evidence { border-block: 1px solid var(--line); margin: 14px 0; padding: 4px 0; min-width: 0; }
+    .saved-evidence summary { cursor: pointer; min-height: 44px; padding: 10px 0; font-weight: 700; }
+    .saved-evidence pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
+    .saved-evidence :is(summary, pre):focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+    #proof :is(.evidence-select input, .self-launch-draft button, .self-launch-draft pre):focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+    @media (max-width: 700px) {
+      .proof-form .form-grid { grid-template-columns: minmax(0, 1fr); }
+      .proof-section > .row { align-items: flex-start; flex-wrap: wrap; }
+    }
     .approval-attention {
       display: flex;
       align-items: center;
@@ -1014,6 +1065,27 @@
       .provider-state-chips { display: grid; grid-template-columns: 1fr 1fr; }
       .provider-state-chips .pill { text-align: center; }
     }
+    #losingCampaignDialog{width:min(960px,calc(100% - 24px));height:min(800px,calc(100dvh - 24px));max-height:calc(100dvh - 24px);box-sizing:border-box;padding:0;border:1px solid #777;border-radius:8px;color:#172024;background:#fff}
+    #losingCampaignDialog[open]{display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+    .losing-header,.losing-footer{padding:16px;border-bottom:1px solid #d6dadd}
+    .losing-header h2{font-size:20px;margin:0 0 12px}
+    .losing-header select{max-width:100%;width:100%;min-height:44px}
+    .losing-body{overflow:auto;min-height:0;padding:16px}
+    .losing-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+    .losing-columns h3{font-size:16px;margin:0 0 8px}
+    .losing-columns pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.5 system-ui;margin:0}
+    .losing-footer{border-top:1px solid #d6dadd;border-bottom:0;display:flex;flex-wrap:wrap;gap:8px;background:#f5f7f8}
+    .losing-footer button{min-height:44px;font-size:14px;white-space:normal;max-width:100%;border-radius:4px}
+    @media(max-width:600px){.losing-columns{grid-template-columns:minmax(0,1fr)}.losing-header,.losing-footer,.losing-body{padding:12px}.losing-footer button{flex:1 1 140px}}
+    #manualCsvDialog,#manualCsvExportDialog{width:min(960px,calc(100% - 24px));height:min(800px,calc(100dvh - 24px));max-height:calc(100dvh - 24px);box-sizing:border-box;padding:0;border:1px solid #777;border-radius:8px;background:#fff;color:#172024}
+    #manualCsvDialog[open],#manualCsvExportDialog[open]{display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+    .manual-csv-body{overflow:auto;min-height:0;padding:16px}
+    .manual-csv-row{border-bottom:1px solid #d6dadd;padding:12px 0}
+    .manual-csv-row pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.5 system-ui}
+    .manual-csv-row label{display:flex;align-items:center;gap:10px;min-height:44px;font-weight:700}
+    .manual-csv-row input[type=checkbox]{width:20px;height:20px;flex:0 0 20px;margin:0}
+    #manualCsvAssociation{display:block;overflow-wrap:anywhere;margin:8px 0;font-size:13px}
+    #manualCsvTemplate,#importManualCsv,#resumeManualCsv,#exportManualCsv{min-height:44px}
   </style>
 </head>
 <body>
@@ -1077,6 +1149,7 @@
         <button data-view="studio"><span class="dot"></span><span>Create</span></button>
         <button data-view="approvals"><span class="dot"></span><span>Approvals</span><span class="nav-badge hidden" id="approvalNavBadge">0</span></button>
         <button data-view="calendar"><span class="dot"></span><span>Plan</span></button>
+        <button data-view="proof"><span class="dot"></span><span>Results</span></button>
         <button data-view="growth"><span class="dot"></span><span>Audience</span></button>
         <button data-view="responses"><span class="dot"></span><span>Responses</span></button>
         <button data-view="accounts"><span class="dot"></span><span>Accounts</span></button>
@@ -1108,6 +1181,7 @@
           <option value="library">Library</option>
           <option value="approvals">Approvals</option>
           <option value="calendar">Calendar</option>
+          <option value="proof">Manual results</option>
           <option value="automation">Automation</option>
           <option value="growth">Growth</option>
           <option value="commerce">Commerce</option>
@@ -1515,6 +1589,13 @@
               <span class="small-label">Brief</span>
               <textarea id="briefInput" placeholder="What are we trying to communicate?"></textarea>
             </label>
+            <p id="recoveryHistory" class="notice" hidden></p>
+            <details class="saved-evidence" id="savedEvidenceDisclosure">
+              <summary>Saved evidence snapshot</summary>
+              <p id="savedEvidenceStatus"></p>
+              <p id="savedEvidenceCapturedAt" hidden></p>
+              <pre id="savedEvidenceText" tabindex="0" aria-label="Captured manual evidence" hidden></pre>
+            </details>
             <div class="form-grid">
               <label>
                 <span class="small-label">Goal</span>
@@ -1808,14 +1889,115 @@
             </div>
             <div class="actions">
               <button class="secondary" data-jump="approvals">Review approvals</button>
+              <button class="secondary" id="openManualResults" data-jump="proof">Results</button>
               <button class="primary" data-jump="studio">Create next</button>
             </div>
           </div>
           <div style="height:14px"></div>
+          <div class="posting-pack-toolbar" aria-label="Manual posting pack">
+            <div>
+              <h3>Manual posting pack</h3>
+              <p id="postingPackSummary" aria-live="polite">No active campaign.</p>
+            </div>
+            <div class="actions">
+              <button class="secondary" id="exportPostingMarkdown" title="Download the active campaign posting pack as Markdown"><span aria-hidden="true">&#8595;</span> Export Markdown</button>
+              <button class="secondary" id="exportPostingCsv" title="Download the active campaign posting calendar as CSV"><span aria-hidden="true">&#8595;</span> Export CSV calendar</button>
+            </div>
+          </div>
           <div class="tags" id="calendarSummary"><span class="tag">No delivery records yet</span></div>
           <div style="height:14px"></div>
           <div class="stack" id="calendarList"></div>
         </div>
+      </section>
+
+      <section id="proof" class="section proof-section">
+        <div class="row">
+          <div><h2>Manual results</h2><p>Operator-recorded receipts and observations. Not provider-verified.</p></div>
+          <button class="secondary" data-jump="calendar">Back to Plan</button>
+        </div>
+        <div class="actions" style="justify-content:flex-start">
+          <button class="secondary" id="manualCsvTemplate" type="button">&#8595; CSV template</button>
+          <button class="secondary" id="importManualCsv" type="button">&#8593; Review CSV</button>
+          <button class="secondary" id="exportManualCsv" type="button">&#8595; Export receipts CSV</button>
+          <button class="secondary" id="resumeManualCsv" type="button" hidden>Resume CSV review</button>
+        </div>
+        <output id="manualCsvAssociation" aria-label="Selected campaign and variant identifiers"></output>
+        <input class="file-input" id="manualCsvInput" type="file" accept=".csv,text/csv">
+        <dialog id="manualCsvDialog" aria-labelledby="manualCsvTitle">
+          <header class="losing-header"><h2 id="manualCsvTitle">Review manual receipts</h2>
+            <p>Operator-supplied, not provider-verified</p>
+            <p id="manualCsvStatus" role="status" aria-live="polite"></p>
+          </header>
+          <div class="manual-csv-body" id="manualCsvRows"></div>
+          <footer class="losing-footer">
+            <button class="secondary" id="refreshManualCsv" type="button">Review latest saved</button>
+            <button class="primary" id="confirmManualCsv" type="button" disabled>Import selected</button>
+            <button class="secondary" id="cancelManualCsv" type="button">Cancel</button>
+          </footer>
+        </dialog>
+        <dialog id="manualCsvExportDialog" aria-labelledby="manualCsvExportTitle">
+          <header class="losing-header"><h2 id="manualCsvExportTitle">Review manual evidence export</h2>
+            <p>Current saved manual records, not provider-verified</p>
+            <p id="manualCsvExportStatus" role="status" aria-live="polite"></p>
+          </header>
+          <div class="manual-csv-body" id="manualCsvExportRows"></div>
+          <footer class="losing-footer">
+            <button class="secondary" id="refreshManualCsvExport" type="button">Review latest saved</button>
+            <button class="primary" id="downloadManualCsvExport" type="button" disabled>Download reviewed snapshot</button>
+            <button class="secondary" id="cancelManualCsvExport" type="button">Cancel</button>
+          </footer>
+        </dialog>
+        <form id="manualProofForm" class="proof-form" novalidate>
+          <fieldset id="manualProofFields">
+            <legend id="proofFormTitle">New manual receipt</legend>
+            <div class="form-grid">
+              <label>Campaign<select id="proofCampaignInput" required></select></label>
+              <label>Variant<select id="proofVariantInput" required></select></label>
+              <label>Platform<input id="proofPlatformInput" readonly></label>
+              <label>Actual post URL<textarea id="proofUrlInput" rows="2" maxlength="2000" required placeholder="https://..."></textarea></label>
+              <label>Actual posting time<input id="proofPostedInput" type="datetime-local" step="1" required></label>
+              <label>Posting UTC offset<select id="proofPostedZoneInput" required></select></label>
+            </div>
+            <details id="proofObservation" class="proof-observation">
+              <summary id="proofObservationToggle">Observed result (optional)</summary>
+              <div class="form-grid">
+              <label>Metric and unit<input id="proofMetricInput" maxlength="120" placeholder="Views, clicks, revenue in USD"></label>
+              <label>Observed value<input id="proofValueInput" inputmode="decimal" maxlength="80" placeholder="Leave unknown results blank"></label>
+              <label>Measurement time<input id="proofObservedInput" type="datetime-local" step="1"></label>
+              <label>Measurement UTC offset<select id="proofObservedZoneInput"></select></label>
+              </div>
+              <div class="actions" style="justify-content:flex-start">
+                <button class="secondary" id="clearProofObservation" type="button">Clear observation</button>
+              </div>
+            </details>
+            <div class="form-grid">
+              <label class="full">Operator note (optional)<textarea id="proofNoteInput" maxlength="2000"></textarea></label>
+            </div>
+            <div class="actions" style="justify-content:flex-start">
+              <button class="primary" id="saveManualProof" type="submit">Save receipt</button>
+              <button class="secondary" id="newManualProof" type="button">New receipt</button>
+            </div>
+          </fieldset>
+          <p id="proofFeedback" class="proof-feedback" role="status" aria-live="polite"></p>
+        </form>
+        <h3>Recorded evidence</h3>
+        <div id="manualProofList"></div>
+        <div class="self-launch-draft" aria-labelledby="selfLaunchTitle">
+          <h3 id="selfLaunchTitle">Self-launch draft</h3>
+          <p id="selfLaunchSelectionCount" role="status">0 saved manual records selected</p>
+          <button class="secondary" id="previewSelfLaunch" type="button">Preview selected evidence</button>
+          <div id="selfLaunchPreview" hidden>
+            <p id="selfLaunchSnapshotMeta"></p>
+            <pre id="selfLaunchPreviewText" tabindex="0" aria-label="Selected evidence and draft text"></pre>
+          </div>
+          <div class="actions" style="justify-content:flex-start">
+            <button class="primary" id="createSelfLaunch" type="button" disabled>Create editable draft</button>
+            <button class="secondary" id="openSelfLaunchDraft" type="button" hidden>Edit created draft</button>
+          </div>
+          <p id="selfLaunchFeedback" class="proof-feedback" role="status" aria-live="polite"></p>
+        </div>
+        <h3 style="margin-top:24px">Legacy evidence</h3>
+        <div id="legacyProofList"></div>
       </section>
 
       <section id="automation" class="section">
@@ -2346,10 +2528,8 @@
               <label>
                 <span class="small-label">Stripe</span>
                 <select id="stripeStatusInput">
+                  <option>Unavailable</option>
                   <option>Needed</option>
-                  <option>Payment Link ready</option>
-                  <option>Stripe Checkout ready</option>
-                  <option>Live subscriptions</option>
                 </select>
               </label>
               <label>
@@ -2458,18 +2638,15 @@
             <div class="row">
               <div>
                 <h2>Billing</h2>
-                <p>Choose a plan or manage the subscription attached to this account.</p>
+                <p>Review the current monthly plans. Plan selection is informational while billing activation remains unavailable.</p>
               </div>
-              <button class="primary" id="createCheckout">Continue to checkout</button>
+              <button class="primary" id="createCheckout" disabled>Checkout unavailable</button>
             </div>
             <div style="height:14px"></div>
             <label>
               <span class="small-label">Plan</span>
-              <select id="selectedPlanInput">
-                <option>Founder Audit - $99</option>
-                <option>Campaign Build - $299</option>
-                <option>Managed Proof Sprint - $499</option>
-                <option>Social Cues Pro - $49/mo</option>
+              <select id="selectedPlanInput" disabled>
+                <option value="">Loading current plans...</option>
               </select>
             </label>
             <div style="height:14px"></div>
@@ -2486,10 +2663,10 @@
             <div style="height:14px"></div>
             <div class="stack" id="billingAccountStatus"><div class="empty">Billing status is loading.</div></div>
             <div class="actions">
-              <button class="secondary" id="manageSubscription">Manage subscription</button>
+              <button class="secondary" id="manageSubscription" disabled>Billing portal unavailable</button>
             </div>
             <div style="height:14px"></div>
-            <div class="notice">Payment details are handled by Stripe. Social Cues does not place card details or secret keys in the browser.</div>
+            <div class="notice">Checkout, billing activation, and the billing portal are unavailable. No payment details or secret keys are placed in the browser.</div>
           </div>
         </div>
       </section>
@@ -2562,18 +2739,54 @@
           </div>
           <div class="panel">
             <h2>Workspace data</h2>
-            <p>Export a private backup or bring an existing Social Cues workspace file into this account.</p>
+            <p>Recover supported campaign content. Account access, provider connections, publishing jobs and media files are not restored.</p>
             <div class="actions" style="justify-content:flex-start">
-              <button class="primary" id="exportModel">Export full model</button>
-              <button class="secondary" id="importModelButton">Import model</button>
-              <button class="secondary" id="exportContent">Export content bundle</button>
+              <button class="primary" id="exportRecovery">Export recovery content</button>
+              <button class="secondary" id="importModelButton">Review recovery file</button>
+              <button class="secondary" id="importLosingCampaignButton">Review losing-campaign file</button>
+              <button class="secondary" id="exportModel">Export private full model</button>
+              <button class="secondary" id="exportContent">Export content bundle (JSON)</button>
               <button class="secondary" id="saveDisk" data-admin-only>Save server copy</button>
               <button class="secondary" id="loadDisk" data-admin-only>Load server copy</button>
               <button class="danger" id="resetAll" data-admin-only>Reset developer copy</button>
             </div>
             <input class="file-input" id="importModelInput" type="file" accept="application/json">
+            <input class="file-input" id="importLosingCampaignInput" type="file" accept="application/json">
+            <dialog id="losingCampaignDialog" aria-labelledby="losingCampaignHeading">
+              <header class="losing-header">
+                <h2 id="losingCampaignHeading">Copy losing campaign as a new draft</h2>
+                <label for="losingCampaignSelect">Retained campaign</label>
+                <select id="losingCampaignSelect"></select>
+              </header>
+              <div class="losing-body">
+                <p id="losingCampaignStatus" role="status" aria-live="polite"></p>
+                <p>Only campaign text and variant platform/copy text are included. Unsaved form inputs, evidence, frozen snapshots, media, approvals, schedules and delivery history are excluded. The saved campaign stays unchanged.</p>
+                <div class="losing-columns">
+                  <section><h3>Retained text</h3><pre id="losingCampaignText" tabindex="0"></pre></section>
+                  <section><h3>Current saved text</h3><pre id="currentCampaignText" tabindex="0"></pre></section>
+                </div>
+              </div>
+              <footer class="losing-footer">
+                <button class="secondary" id="downloadLosingCampaign" type="button">Download campaign text</button>
+                <button class="secondary" id="refreshLosingCampaign" type="button">Review latest saved</button>
+                <button class="primary" id="createLosingCampaign" type="button">Create new draft</button>
+                <button class="secondary" id="cancelLosingCampaign" type="button">Cancel</button>
+              </footer>
+            </dialog>
             <div style="height:14px"></div>
-            <div class="notice">Hosted workspaces are isolated by signed-in account. Treat exports as private business data and store them securely.</div>
+            <div class="notice">All exports are private business data. Full-model files also contain account and operational information; do not share them publicly. The active-campaign bundle is not a workspace recovery file.</div>
+            <p id="recoveryExportStatus" role="status"></p>
+            <dialog id="recoveryDialog" aria-labelledby="recoveryHeading" style="width:min(640px,calc(100% - 32px));max-height:85dvh;overflow:auto;box-sizing:border-box;border:1px solid #777;border-radius:8px;padding:20px">
+              <h2 id="recoveryHeading">Review content recovery</h2>
+              <p id="recoverySummary" tabindex="0" style="white-space:pre-wrap;overflow-wrap:anywhere"></p>
+              <p>Only supported campaigns, variants, evidence and active selection are replaced. Account, workspace ownership, membership, billing, security, provider state, quick posts and live queues stay unchanged. Media attachments and provider delivery receipts are excluded.</p>
+              <p>Recorded approval and publication statuses are file history, not renewed approval or verified delivery. Scheduled or in-flight publishing cannot be restored.</p>
+              <p id="recoveryFeedback" role="status" aria-live="polite"></p>
+              <div class="actions" style="justify-content:flex-start;flex-wrap:wrap">
+                <button class="danger" id="applyRecovery" type="button">Replace supported content</button>
+                <button class="secondary" id="cancelRecovery" type="button">Cancel</button>
+              </div>
+            </dialog>
           </div>
           <div class="panel">
             <h2>Security posture</h2>
@@ -2844,15 +3057,9 @@
       quickPosts: [],
       billing: {
         status: "Not configured",
-        selectedPlan: "Founder Audit - $99",
-        paymentLink: "",
-        checkoutMode: "payment-link-first",
-        offers: [
-          { name: "Founder Audit", price: "$99", description: "Diagnose one underperforming page and deliver a first campaign plan." },
-          { name: "Campaign Build", price: "$299", description: "Build a 30-day platform-native launch campaign." },
-          { name: "Managed Proof Sprint", price: "$499", description: "Run a proof sprint with content, metrics, and next moves." },
-          { name: "Social Cues Pro", price: "$49/mo", description: "Self-serve workspace for campaigns, approvals, media, and analytics." }
-        ]
+        selectedPlanId: "business",
+        checkoutMode: "unavailable",
+        offers: []
       },
       proof: [],
       handoff: {
@@ -2901,10 +3108,10 @@
         id: "stripe",
         name: "Stripe",
         accent: "#a88cff",
-        role: "Payment Links first, then Checkout, subscriptions, invoices, and paid workspace gates.",
+        role: "Future billing integration; checkout, subscriptions, invoices, and billing activation are unavailable in this presentation phase.",
         backend: "STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, Stripe price IDs",
         endpoint: "/api/billing/readiness",
-        firstUse: "Sell founder audits and Pro subscriptions without putting secrets in the browser."
+        firstUse: "Keep plan presentation server-controlled while checkout and billing activation remain unavailable."
       },
       {
         id: "discord",
@@ -3377,11 +3584,11 @@
       ["Inquiry", "Medium", "Ask 5 creators what breaks in their posting workflow", "Collect exact pain language for landing page and onboarding."],
       ["Investigation", "High", "Identify the first paid beta niche", "Pick the highest-urgency buyer: creators, local businesses, agencies, or ecommerce operators."],
       ["Build task", "High", "Connect OpenAI generation endpoint", "Replace local content generation with server-side model output."],
-      ["Sales task", "Medium", "Draft $99 founder audit offer", "Create a simple service offer that can sell before full SaaS launch."]
+      ["Pricing task", "Medium", "Review monthly plan presentation", "Confirm the server-controlled catalog and unavailable checkout state before public billing opens."]
     ];
 
     let model = loadModel();
-    let metaState = { loading: SERVER_MODE, error: "", capabilities: [], accounts: [], providerAccounts: null, metaConnection: null, diagnostic: null, xAccount: null, tiktokAccount: null, youtubeAccount: null, twitchAccount: null, pinterestStatus: null, canvaStatus: null, shopifyStatus: null, etsyStatus: null, linkedinStatus: null, linkedinPosts: null, linkedinComments: null, linkedinAnalytics: null, linkedinWebhook: null, patreonStatus: null, patreonIdentity: null, patreonCampaigns: null, patreonMembers: null, patreonPosts: null, patreonWebhook: null, manychatStatus: null, elevenlabsStatus: null, redditStatus: null, adsFundingStatus: null, threadsStatus: null, googleSuite: null, googleBusinessStatus: null, discordStatus: null, discordBotStatus: null, discordCommandsStatus: null, discordCommands: null, discordPreflight: null, services: [], integrationsStatus: null, providerTruth: null, acceptanceLedger: null, connectionLog: null, ownershipQueue: null, providerState: null, publishQueue: null, analyticsSnapshots: null, automationStatus: null, securityAudit: null, capabilityDepth: null, setupFields: null, testPanel: null };
+    let metaState = { loading: SERVER_MODE, error: "", capabilities: [], accounts: [], providerAccounts: null, metaConnection: null, diagnostic: null, xAccount: null, tiktokAccount: null, youtubeAccount: null, twitchAccount: null, pinterestStatus: null, canvaStatus: null, shopifyStatus: null, etsyStatus: null, linkedinStatus: null, linkedinPosts: null, linkedinComments: null, linkedinAnalytics: null, linkedinWebhook: null, patreonStatus: null, patreonIdentity: null, patreonCampaigns: null, patreonMembers: null, patreonPosts: null, patreonWebhook: null, manychatStatus: null, elevenlabsStatus: null, vizardStatus: null, redditStatus: null, adsFundingStatus: null, threadsStatus: null, googleSuite: null, googleBusinessStatus: null, discordStatus: null, discordBotStatus: null, discordCommandsStatus: null, discordCommands: null, discordPreflight: null, services: [], integrationsStatus: null, providerTruth: null, acceptanceLedger: null, connectionLog: null, ownershipQueue: null, providerState: null, publishQueue: null, analyticsSnapshots: null, automationStatus: null, securityAudit: null, capabilityDepth: null, setupFields: null, testPanel: null };
     let onboardingEditMode = false;
     let onboardingFormHydrated = false;
     let onboardingRequirementsSignature = "";
@@ -3409,6 +3616,8 @@
       accountAlerts: [],
       notificationOutbox: [],
       billingStatus: null,
+      pricingCatalog: null,
+      pricingError: "",
       entitlement: null,
       adDrafts: []
     };
@@ -3765,12 +3974,13 @@
 
     async function syncModelFromServer(reason = "Synced server model.") {
       if (!SERVER_MODE) return false;
+      if (workspaceSaveState.blocked) return false;
       const revisionAtStart = localModelRevision;
       try {
         const response = await authedFetch("/api/model");
         if (!response.ok) return false;
         const serverModel = normalizeModel(await response.json());
-        if (revisionAtStart !== localModelRevision) return false;
+        if (revisionAtStart !== localModelRevision || workspaceSaveState.blocked) return false;
         model = serverModel;
         hostedModelHydrated = true;
         persistModelSnapshot(model);
@@ -3879,10 +4089,149 @@
       applyLocale();
     }
 
+    const workspaceSaveState = { blocked: "", pending: null, current: null, draft: null, inputs: null, generation: 0 };
+    const workspaceSaveContexts = new WeakMap();
+    const ownSaveRevisions = new Map();
+    let workspaceSaveDispatchChain = Promise.resolve();
+    const sameWorkspaceSaveOperation = (left, right) => Boolean(left && right && left.operationId === right.operationId && JSON.stringify(left) === JSON.stringify(right));
+    const differentUnresolvedWorkspaceSave = operation => ["unknown", "unavailable"].includes(workspaceSaveState.blocked)
+      && (!workspaceSaveState.pending || !sameWorkspaceSaveOperation(workspaceSaveState.pending, operation));
+    function afterWorkspaceSaves(action) {
+      const queued = hostedModelSaveChain.catch(() => {}).then(async () => {
+        let dispatch;
+        do { dispatch = workspaceSaveDispatchChain; await dispatch; } while (dispatch !== workspaceSaveDispatchChain);
+        return action();
+      });
+      hostedModelSaveChain = queued;
+      return queued;
+    }
+    const saveRevisionKey = (workspaceId, revision) => JSON.stringify([workspaceId, revision.epoch, revision.revision]);
+    function workspaceSaveNotice(message) {
+      let notice = document.getElementById("workspaceSaveNotice");
+      if (!notice) {
+        notice = document.createElement("aside"); notice.id = "workspaceSaveNotice";
+        notice.setAttribute("role", "alert");
+        notice.style.cssText = "position:sticky;top:0;z-index:10000;padding:12px;background:#fff1c2;color:#332a00;border-bottom:2px solid #9b6800;font:14px/1.4 system-ui;align-items:center;flex-wrap:wrap;gap:8px";
+        notice.innerHTML = '<span></span> <button type="button" id="reviewWorkspaceSave">Review current</button> <button type="button" id="exportUnsavedWorkspace">Review losing campaign</button> <button type="button" id="retryWorkspaceSave">Retry original save</button>';
+        document.body.prepend(notice);
+        notice.querySelector("span").style.cssText = "flex:1 1 300px";
+        notice.querySelectorAll("button").forEach(button => { button.style.cssText = "font:inherit;min-height:40px;padding:8px 12px;border:1px solid #9b6800;border-radius:4px;background:white;color:#332a00;cursor:pointer"; });
+        notice.querySelector("#reviewWorkspaceSave").onclick = reviewWorkspaceSave;
+        notice.querySelector("#exportUnsavedWorkspace").onclick = () => openLosingCampaign();
+        notice.querySelector("#retryWorkspaceSave").onclick = async () => {
+          const pending = workspaceSaveState.pending;
+          if (!pending || !["unknown", "unavailable"].includes(workspaceSaveState.blocked)) return;
+          try { await sendWorkspaceSave(pending); } catch {}
+        };
+      }
+      notice.hidden = !message;
+      notice.style.display = message ? "flex" : "none";
+      notice.querySelector("span").textContent = message;
+      notice.querySelector("#retryWorkspaceSave").hidden = !["unknown", "unavailable"].includes(workspaceSaveState.blocked);
+      notice.querySelector("#reviewWorkspaceSave").disabled = workspaceSaveState.blocked === "unknown";
+    }
+    async function captureSaveFailure(code, envelope) {
+      const state = workspaceSaveState;
+      if (differentUnresolvedWorkspaceSave(envelope)) throw new Error("workspace_save_pending");
+      const firstFailure = !state.blocked;
+      state.blocked = code === "workspace_commit_unknown" ? "unknown" : code === "workspace_storage_unavailable" ? "unavailable" : "conflict";
+      state.pending = envelope;
+      if (firstFailure) {
+        state.draft = sanitizedModelSnapshot(model);
+        state.inputs = Object.fromEntries([...document.querySelectorAll("input[id],textarea[id],select[id]")]
+          .filter(element => element.type !== "password" && element.type !== "file" && !/password|secret|token|credential|api.?key/i.test(element.id + " " + element.name))
+          .map(element => [element.id, element.type === "checkbox" ? element.checked : element.value]));
+      }
+      state.generation += 1;
+      ownSaveRevisions.clear();
+      try {
+        const response = await authedFetch("/api/model");
+        if (response.ok) state.current = await response.json();
+      } catch {}
+      workspaceSaveNotice(state.blocked === "unknown"
+        ? "Save outcome unknown. Your draft is retained; retry only the original save."
+        : state.blocked === "unavailable" ? "Storage unavailable; this save was not committed. Your draft is retained for an explicit retry."
+        : "Save paused. Your draft is retained. Review current saved content before editing again.");
+    }
+    async function reviewWorkspaceSave() {
+      return afterWorkspaceSaves(async () => {
+      const context = JSON.stringify([model.currentUser?.id, model.workspace?.id]);
+      const generation = workspaceSaveState.generation;
+      const canReview = () => !differentUnresolvedWorkspaceSave(null) && generation === workspaceSaveState.generation
+        && context === JSON.stringify([model.currentUser?.id, model.workspace?.id]);
+      if (!canReview()) return false;
+      const response = await authedFetch("/api/model");
+      if (!canReview() || !response.ok) return false;
+      const current = await response.json();
+      if (!canReview() || current.workspace?.id !== model.workspace?.id || current.currentUser?.id !== model.currentUser?.id) return false;
+      workspaceSaveState.current = current;
+      model = normalizeModel(current);
+      workspaceSaveState.blocked = "";
+      workspaceSaveState.generation += 1;
+      ownSaveRevisions.clear();
+      render(); persistModelSnapshot(model);
+      workspaceSaveNotice("Current saved content loaded. The losing campaign remains available for review.");
+      return true;
+      });
+    }
+    async function sendWorkspaceSave(envelope) {
+      let response, body;
+      const workspaceId = model.workspace?.id, userId = model.currentUser?.id;
+      const context = JSON.stringify([userId, workspaceId]);
+      if (workspaceSaveContexts.has(envelope) && workspaceSaveContexts.get(envelope) !== context) throw new Error("workspace_changed");
+      workspaceSaveContexts.set(envelope, context);
+      const sameContext = () => workspaceId === model.workspace?.id && userId === model.currentUser?.id;
+      const previous = workspaceSaveDispatchChain;
+      let release;
+      workspaceSaveDispatchChain = new Promise(resolve => { release = resolve; });
+      await previous;
+      try {
+      if (!sameContext()) throw new Error("workspace_changed");
+      if (differentUnresolvedWorkspaceSave(envelope)) throw new Error("workspace_save_pending");
+      try {
+        response = await authedFetch("/api/model", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(envelope) });
+        body = await response.clone().json();
+      } catch {
+        if (!sameContext()) throw new Error("workspace_changed");
+        await captureSaveFailure("workspace_commit_unknown", envelope);
+        throw new Error("workspace_commit_unknown");
+      }
+      if (!sameContext()) throw new Error("workspace_changed");
+      if (differentUnresolvedWorkspaceSave(envelope)) throw new Error("workspace_save_pending");
+      if (!response.ok || body.receipt?.superseded) {
+        const code = body.receipt?.superseded ? "workspace_receipt_superseded" : body.code || "workspace_storage_unavailable";
+        await captureSaveFailure(code, envelope);
+        throw new Error(code);
+      }
+      if (body.receipt?.operationId !== envelope.operationId || !body.persistence?.conditionalSave || !body.persistence?.revision) {
+        await captureSaveFailure("workspace_commit_unknown", envelope);
+        throw new Error("workspace_commit_unknown");
+      }
+      if (envelope.kind === "model-save") ownSaveRevisions.set(saveRevisionKey(workspaceId, envelope.expectedRevision), clone(body.persistence.revision));
+      model.persistence = body.persistence;
+      if (sameWorkspaceSaveOperation(workspaceSaveState.pending, envelope)) {
+        workspaceSaveState.pending = null;
+        if (["unknown", "unavailable"].includes(workspaceSaveState.blocked)) {
+          workspaceSaveState.blocked = "conflict";
+          workspaceSaveNotice("Original save confirmed. Review current content before continuing.");
+        }
+      }
+      return response;
+      } finally { release(); }
+    }
     function enqueueHostedModelSave(snapshot) {
+      const generation = workspaceSaveState.generation, workspaceId = model.workspace?.id;
+      const capturedRevision = model.persistence?.conditionalSave ? clone(model.persistence.revision) : null;
       hostedModelSaveChain = hostedModelSaveChain
         .catch(() => {})
         .then(async () => {
+          if (workspaceSaveState.blocked || generation !== workspaceSaveState.generation || workspaceId !== model.workspace?.id) throw new Error("workspace_save_paused");
+          if (capturedRevision) {
+            let expectedRevision = capturedRevision;
+            while (ownSaveRevisions.has(saveRevisionKey(workspaceId, expectedRevision))) expectedRevision = ownSaveRevisions.get(saveRevisionKey(workspaceId, expectedRevision));
+            const envelope = { kind: "model-save", operationId: crypto.randomUUID(), expectedRevision, request: snapshot };
+            return sendWorkspaceSave(envelope);
+          }
           const response = await authedFetch("/api/model", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -4121,13 +4470,7 @@
         alert("Cloud save is available when Social Cues is opened from the hosted app.");
         return;
       }
-      const response = await authedFetch("/api/model", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sanitizedModelSnapshot(model))
-      });
-      if (!response.ok) throw new Error("Disk save failed");
-      saveModel("Saved model to disk.");
+      await saveModel("Saved model to disk.");
     }
 
     async function loadFromDisk() {
@@ -4139,7 +4482,7 @@
       if (!response.ok) throw new Error("Disk load failed");
       model = { ...clone(defaultModel), ...(await response.json()) };
       persistModelSnapshot(model);
-      saveModel("Loaded model from disk.");
+      render();
     }
 
     function activeCampaign() {
@@ -4332,7 +4675,8 @@
       const latest = functionCheckFor("facebook") || {};
       const publishProbe = latest.publishProbe || ledger.publishProbe || null;
       const integrationsText = `${model.integrations?.facebook || ""} ${truth.status || ""} ${ledger.status || ""}`;
-      const proof = (model.proof || []).some(item => /Facebook publish dry-run proven|Facebook Pages provider banked/i.test(`${item.metric || ""} ${item.note || ""}`));
+      const proof = (model.proof || []).some(item => !isManualProof(item)
+        && /Facebook publish dry-run proven|Facebook Pages provider banked/i.test((item.metric || "") + " " + (item.note || "")));
       const pageCount = Math.max(
         account && isRealConnectedAccount(account) ? 1 : 0,
         Number(liveMetaAssetCount("facebook", source) || 0),
@@ -4643,9 +4987,9 @@
       jump("studio");
     }
 
-    function createCampaignFromIdea(title, brief, goal = "Build demand") {
+    function buildCampaignFromIdea(title, brief, goal = "Build demand") {
       const id = uid("camp");
-      const campaign = {
+      return {
         id,
         title,
         brief,
@@ -4659,8 +5003,12 @@
         updatedAt: new Date().toISOString(),
         variants: []
       };
+    }
+
+    function createCampaignFromIdea(title, brief, goal = "Build demand") {
+      const campaign = buildCampaignFromIdea(title, brief, goal);
       model.campaigns.unshift(campaign);
-      model.activeCampaignId = id;
+      model.activeCampaignId = campaign.id;
       saveModel(`Created campaign: ${title}.`);
       return campaign;
     }
@@ -4987,6 +5335,586 @@
       showAppResult("Final confirmation complete", `${count - redditHandoffs} approved post${count - redditHandoffs === 1 ? " is" : "s are"} now in the publishing queue.${handoffNote}`, "success");
     }
 
+    // Manual proof: pure validation and factual summaries.
+    function isManualProof(item) {
+      return item?.source === "manual" || item?.schemaVersion === "social-cues.manual-proof.v1";
+    }
+
+    function manualProofPostUrl(value) {
+      try {
+        const url = new URL(value);
+        if (url.protocol !== "https:" || url.username || url.password || !url.hostname.includes(".")
+          || url.hostname.includes(":") || /^[\d.]+$/.test(url.hostname)
+          || [...url.searchParams.keys()].some(key => /token|secret|password|signature|credential|authorization/i.test(key))) return "";
+        return url.href;
+      } catch { return ""; }
+    }
+
+    function manualProofInstant(local, zone) {
+      if (!/^[+-]\d{2}:\d{2}$/.test(zone)) return "";
+      const minutes = Number(zone.slice(1, 3)) * 60 + Number(zone.slice(4));
+      if (minutes > 840 || Number(zone.slice(4)) > 59) return "";
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/.test(local)) return "";
+      if (postingPackSchedule(local).date === "Not scheduled") return "";
+      const instant = local + zone;
+      return Number.isFinite(Date.parse(instant)) ? instant : "";
+    }
+
+    function validateManualProof(input, campaigns, existing = null, now = Date.now()) {
+      const value = key => typeof input[key] === "string" ? input[key].trim() : "";
+      const errors = {};
+      const campaign = (campaigns || []).find(item => item.id === value("campaignId"));
+      const variant = (campaign?.variants || []).find(item => item.id === value("variantId")
+        && (!item.campaignId || item.campaignId === campaign.id));
+      if (!campaign) errors.campaignId = "Select a current campaign.";
+      if (!variant?.platform) errors.variantId = "Select a variant from that campaign.";
+      const postedUrl = manualProofPostUrl(value("postedUrl"));
+      if (!postedUrl || value("postedUrl").length > 2000) errors.postedUrl = "Enter a public HTTPS post URL without embedded credentials.";
+      const postedAt = manualProofInstant(value("postedLocal"), value("postedTimezone"));
+      if (!postedAt) errors.postedLocal = "Enter a valid posting date, time and explicit UTC offset.";
+      else if (Date.parse(postedAt) > now) errors.postedLocal = "Actual posting time cannot be in the future.";
+      if (!value("postedTimezone")) errors.postedTimezone = "Choose the UTC offset at posting.";
+      const metric = value("metric"), metricValue = value("metricValue");
+      const hasResultInput = [metric, metricValue, value("observedLocal"), value("observedTimezone")].some(Boolean);
+      const observedAt = hasResultInput ? manualProofInstant(value("observedLocal"), value("observedTimezone")) : "";
+      if (hasResultInput) {
+        if (!metric || metric.length > 120) errors.metric = "Name the observed metric and its unit (up to 120 characters).";
+        if (!/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(metricValue) || metricValue.length > 80 || !Number.isFinite(Number(metricValue))) {
+          errors.metricValue = "Enter a finite numeric observation, including 0 when measured.";
+        }
+        if (!observedAt) errors.observedLocal = "Enter a valid measurement date, time and explicit UTC offset.";
+        else if (Date.parse(observedAt) > now || (postedAt && Date.parse(observedAt) < Date.parse(postedAt))) {
+          errors.observedLocal = "Measurement must be after posting and not in the future.";
+        }
+        if (!value("observedTimezone")) errors.observedTimezone = "Choose the UTC offset at measurement.";
+      }
+      if (value("note").length > 2000) errors.note = "Keep the note within 2000 characters.";
+      if (Object.keys(errors).length) return { errors, entry: null };
+      return { errors, entry: {
+        ...(existing || {}),
+        schemaVersion: "social-cues.manual-proof.v1", source: "manual",
+        type: hasResultInput ? "observed-result" : "posting-receipt",
+        campaignId: campaign.id, campaignTitle: campaign.title || "", variantId: variant.id,
+        platform: variant.platform, postedUrl, postedAt, postedTimezone: value("postedTimezone"),
+        metric, metricValue, observedAt, observedTimezone: hasResultInput ? value("observedTimezone") : "",
+        note: value("note"), createdAt: existing?.createdAt || new Date(now).toISOString(),
+        updatedAt: new Date(now).toISOString()
+      } };
+    }
+
+    function manualProofSummary(item) {
+      const result = item.type === "observed-result" && item.metric && String(item.metricValue ?? "").trim() && item.observedAt;
+      return (result ? "Manually recorded observed result: " : "Manually recorded posting receipt: ")
+        + (item.platform || "Platform not recorded") + "; " + (item.postedUrl || "URL not recorded")
+        + "; posted " + (item.postedAt || "time not recorded") + ". "
+        + (result ? item.metric + ": " + item.metricValue + "; observed " + item.observedAt + "." : "Results not recorded.")
+        + (item.note ? " Operator note (unverified): " + item.note : "");
+    }
+    // End manual proof pure helpers.
+
+    // Manual receipt CSV: strict bounded parsing and append-only fact projection.
+    const manualCsvColumns = ["campaignId", "variantId", "postedUrl", "postedLocal", "postedTimezone", "metric", "metricValue", "observedLocal", "observedTimezone", "note"];
+    const manualCsvExportMarker = "social-cues-manual-receipts-export.v1";
+    const manualCsvExportMarkerFamily = "social-cues-manual-receipts-export.";
+    const manualCsvLiteralPrefix = "'social-cues-literal.v1:";
+    const manualCsvLiteralFamily = "'social-cues-literal.";
+    function parseManualReceiptCsvRows(text) {
+      if (typeof text !== "string" || new TextEncoder().encode(text).length > 1024 * 1024) throw new Error("CSV exceeds 1 MB.");
+      const source = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+      if (source.includes("\0")) throw new Error("CSV contains an unsupported null character.");
+      const rows = []; let row = [], cell = "", mode = "start";
+      const finishCell = () => { row.push(cell); cell = ""; mode = "start"; if (row.length > 20) throw new Error("CSV row exceeds the twenty-cell parsing limit."); };
+      const finishRow = () => {
+        finishCell();
+        if (!(row.length === 1 && row[0] === "")) rows.push(row);
+        row = [];
+        if (rows.length > 202) throw new Error("CSV exceeds 200 data rows.");
+      };
+      for (let index = 0; index < source.length; index++) {
+        const char = source[index];
+        if (mode === "quoted") {
+          if (char === '"') {
+            if (source[index + 1] === '"') { cell += '"'; index++; } else mode = "closed";
+          } else cell += char;
+        } else if (char === ",") finishCell();
+        else if (char === "\n") finishRow();
+        else if (char === '"' && mode === "start") mode = "quoted";
+        else {
+          if (char === '"' || mode === "closed") throw new Error("Malformed CSV quoting.");
+          cell += char; mode = "plain";
+        }
+        if (cell.length > 4000) throw new Error("CSV cell exceeds 4000 characters.");
+      }
+      if (mode === "quoted") throw new Error("Unclosed CSV quote.");
+      if (cell || row.length || mode === "closed") finishRow();
+      return rows;
+    }
+    function manualCsvCellNeedsEscape(value) {
+      const text = String(value ?? "");
+      return /^[\t\n\r ]*[=+\-@]/.test(text) || text.startsWith(manualCsvLiteralFamily);
+    }
+    function manualCsvEncodeExportCell(value) {
+      const text = String(value ?? "");
+      return manualCsvCellNeedsEscape(text) ? manualCsvLiteralPrefix + text : text;
+    }
+    function manualCsvDecodeExportCell(value) {
+      const text = String(value ?? "");
+      if (text.startsWith(manualCsvLiteralPrefix)) {
+        const decoded = text.slice(manualCsvLiteralPrefix.length);
+        if (!manualCsvCellNeedsEscape(decoded)) throw new Error("Marked CSV contains a malformed literal escape.");
+        return decoded;
+      }
+      if (text.startsWith(manualCsvLiteralFamily)) throw new Error("Marked CSV contains an unsupported literal escape.");
+      if (manualCsvCellNeedsEscape(text)) throw new Error("Marked CSV contains an unescaped formula-leading cell.");
+      return text;
+    }
+    function parseManualReceiptCsv(text) {
+      const rows = parseManualReceiptCsvRows(text);
+      const markerLike = rows[0]?.some(value => value.startsWith(manualCsvExportMarkerFamily));
+      const marked = rows[0]?.length === 1 && rows[0][0] === manualCsvExportMarker;
+      if (markerLike && !marked) throw new Error("CSV export marker is malformed or unsupported.");
+      const headerIndex = marked ? 1 : 0, header = rows[headerIndex];
+      if (!header || header.length !== manualCsvColumns.length || header.some((value, index) => value !== manualCsvColumns[index])) throw new Error("Use the exact ten-column CSV template header.");
+      const data = rows.slice(headerIndex + 1);
+      if (data.length > 200) throw new Error("CSV exceeds 200 data rows.");
+      return marked ? data.map(row => row.map(manualCsvDecodeExportCell)) : data;
+    }
+    function manualReceiptFactKey(entry) {
+      const keys = ["type", "campaignId", "variantId", "platform", "postedUrl", "postedAt", "postedTimezone", "metric", "metricValue", "observedAt", "observedTimezone", "note"];
+      return JSON.stringify(keys.map(key => String(entry?.[key] ?? "").replace(/\r\n?/g, "\n").trim()));
+    }
+    function reviewManualReceiptRows(rows, campaigns, proof, now = Date.now()) {
+      const existing = new Set((proof || []).filter(isManualProof).map(manualReceiptFactKey)), seen = new Map();
+      return rows.map((cells, index) => {
+        const input = Object.fromEntries(manualCsvColumns.map((name, column) => [name, cells[column] ?? ""]));
+        const result = cells.length === manualCsvColumns.length ? validateManualProof(input, campaigns, null, now)
+          : { errors: { columns: "Row must contain exactly ten columns." }, entry: null };
+        const key = result.entry ? manualReceiptFactKey(result.entry) : "";
+        const duplicate = !key ? "" : existing.has(key) ? "Exact existing manual record"
+          : seen.has(key) ? "Exact duplicate of CSV row " + seen.get(key) : "";
+        if (key && !seen.has(key)) seen.set(key, index + 2);
+        return { index, rowNumber: index + 2, cells: [...cells], input, ...result, duplicate, eligible: Boolean(result.entry && !duplicate) };
+      });
+    }
+    function manualReceiptExportInput(item) {
+      const local = (instant, zone) => typeof instant === "string" && typeof zone === "string" && zone && instant.endsWith(zone)
+        ? instant.slice(0, -zone.length) : "";
+      return {
+        campaignId: String(item?.campaignId ?? ""), variantId: String(item?.variantId ?? ""),
+        postedUrl: String(item?.postedUrl ?? ""), postedLocal: local(item?.postedAt, item?.postedTimezone),
+        postedTimezone: String(item?.postedTimezone ?? ""), metric: String(item?.metric ?? ""),
+        metricValue: String(item?.metricValue ?? ""), observedLocal: local(item?.observedAt, item?.observedTimezone),
+        observedTimezone: String(item?.observedTimezone ?? ""), note: String(item?.note ?? "")
+      };
+    }
+    function projectManualReceiptExport(proof, campaigns, now = Date.now()) {
+      const eligible = [], excluded = [];
+      for (const [index, item] of (proof || []).entries()) {
+        if (!item || typeof item !== "object" || !isManualProof(item)) {
+          const providerDerived = item?.source && item.source !== "manual" || /^Provider\b/.test(String(item?.type || ""));
+          excluded.push({ index, reason: providerDerived
+            ? "Provider-derived evidence is excluded; export includes operator-supplied manual records only."
+            : "Legacy evidence is excluded because it is not a current manual receipt." });
+          continue;
+        }
+        const input = manualReceiptExportInput(item), result = validateManualProof(input, campaigns, null, now);
+        if (!result.entry) {
+          excluded.push({ index, reason: result.errors.campaignId || result.errors.variantId
+            ? "Manual evidence without a current-workspace campaign and variant association is excluded."
+            : "Manual evidence with invalid or unsupported receipt facts is excluded." });
+          continue;
+        }
+        if (manualReceiptFactKey(result.entry) !== manualReceiptFactKey(item)
+          || manualCsvColumns.some(name => manualCsvEncodeExportCell(input[name]).length > 4000)) {
+          excluded.push({ index, reason: "Manual evidence that cannot round-trip exactly through the current CSV contract is excluded." });
+          continue;
+        }
+        const id = String(item.id ?? "");
+        eligible.push({ index, id, key: id ? "id:" + id : "fact:" + manualReceiptFactKey(result.entry), input, entry: result.entry });
+      }
+      return { eligible, excluded };
+    }
+    function manualReceiptExportCsv(records) {
+      if (!Array.isArray(records) || !records.length || records.length > 200) throw new Error("Select between 1 and 200 reviewed manual records.");
+      const quote = value => '"' + String(value).replaceAll('"', '""') + '"';
+      const rows = [[manualCsvExportMarker], manualCsvColumns,
+        ...records.map(record => manualCsvColumns.map(name => manualCsvEncodeExportCell(record.input[name])))];
+      const output = "\uFEFF" + rows.map(row => row.map(quote).join(",")).join("\r\n") + "\r\n";
+      if (new TextEncoder().encode(output).length > 1024 * 1024) throw new Error("Selected export exceeds 1 MB.");
+      return output;
+    }
+    // End manual receipt CSV pure helpers.
+
+    const manualCsvState = { rows: null, reviewed: [], selected: new Set(), ids: [], context: "", current: null, phase: "empty", busy: false, operation: null, feedback: "" };
+    const manualCsvContext = () => JSON.stringify([model.currentUser?.id, model.workspace?.id]);
+    function assertManualCsvContext(operation = null) {
+      if (!SERVER_MODE || !hostedModelHydrated || !model.currentUser?.id || !model.workspace?.id || !model.persistence?.conditionalSave) throw new Error("CSV import requires a loaded signed-in workspace with conditional saves.");
+      if (manualCsvState.context !== manualCsvContext()) throw new Error("Workspace changed. Return to the original workspace to review these rows.");
+      if (differentUnresolvedWorkspaceSave(operation)) throw new Error("workspace_save_pending");
+    }
+    function renderManualCsv() {
+      const state = manualCsvState, same = state.context === manualCsvContext();
+      const focusedRow = document.activeElement?.dataset?.csvSelect, scrollTop = $("#manualCsvRows").scrollTop;
+      $("#resumeManualCsv").hidden = !state.rows || state.phase === "complete";
+      $("#manualCsvStatus").textContent = same ? state.feedback : "This CSV review belongs to another workspace context.";
+      $("#manualCsvStatus").dataset.state = state.phase;
+      $("#manualCsvRows").replaceChildren();
+      if (same) for (const row of state.reviewed) {
+        const element = document.createElement("article"); element.className = "manual-csv-row"; element.dataset.csvRow = String(row.index);
+        const label = document.createElement("label"), checkbox = document.createElement("input"); checkbox.type = "checkbox";
+        checkbox.dataset.csvSelect = String(row.index); checkbox.checked = state.selected.has(row.index);
+        checkbox.disabled = state.busy || state.phase !== "review" || !row.eligible;
+        checkbox.addEventListener("change", () => { if (checkbox.checked) state.selected.add(row.index); else state.selected.delete(row.index); renderManualCsv(); });
+        label.append(checkbox, document.createTextNode("Row " + row.rowNumber + ": " + (row.duplicate || (row.eligible ? "Valid manual record" : "Invalid / unmapped"))));
+        const association = document.createElement("p");
+        association.textContent = row.entry ? row.entry.campaignTitle + " / " + row.entry.campaignId + " / " + row.entry.variantId + " / " + row.entry.platform : "Association is not valid in the reviewed workspace.";
+        const fields = document.createElement("pre"); fields.tabIndex = 0;
+        fields.textContent = row.cells.map((value, index) => (manualCsvColumns[index] || "Extra column " + (index + 1)) + ": " + value).join("\n");
+        const errors = document.createElement("p"); errors.textContent = Object.values(row.errors).join(" ");
+        element.append(label, association, fields, errors); $("#manualCsvRows").append(element);
+      }
+      $("#refreshManualCsv").disabled = state.busy || !same || !state.rows || state.phase === "unknown" || differentUnresolvedWorkspaceSave(null);
+      $("#confirmManualCsv").disabled = state.busy || !same || !model.persistence?.conditionalSave
+        || differentUnresolvedWorkspaceSave(state.phase === "unknown" ? state.operation : null)
+        || !(state.phase === "unknown" || (state.phase === "review" && state.selected.size));
+      $("#confirmManualCsv").textContent = state.phase === "unknown" ? "Retry original import" : "Import selected (" + state.selected.size + ")";
+      $("#cancelManualCsv").disabled = state.busy;
+      $("#cancelManualCsv").textContent = state.phase === "unknown" ? "Close review" : "Cancel";
+      $("#manualCsvRows").scrollTop = scrollTop;
+      if (same && focusedRow !== undefined) $("#manualCsvRows").querySelector('[data-csv-select="' + focusedRow + '"]')?.focus({ preventScroll: true });
+    }
+    async function reviewManualCsv() {
+      const state = manualCsvState;
+      if (state.busy || state.phase === "unknown" || !state.rows) return;
+      state.busy = true; state.feedback = "Loading current workspace and checking rows..."; renderManualCsv();
+      try {
+        await afterWorkspaceSaves(async () => {
+          assertManualCsvContext();
+          const response = await authedFetch("/api/model"); assertManualCsvContext();
+          if (!response.ok) throw new Error("Current workspace could not be loaded.");
+          const current = await response.json(); assertManualCsvContext();
+          if (JSON.stringify([current.currentUser?.id, current.workspace?.id]) !== state.context || !current.persistence?.conditionalSave) throw new Error("Conditional workspace review is unavailable.");
+          state.current = current; state.operation = null;
+          state.reviewed = reviewManualReceiptRows(state.rows, current.campaigns, current.proof);
+          state.selected = new Set([...state.selected].filter(index => state.reviewed[index]?.eligible));
+          state.generation = workspaceSaveState.generation; state.saveRevision = JSON.stringify(model.persistence.revision);
+          state.phase = "review"; state.feedback = state.reviewed.length + " CSV rows reviewed. Select valid nonduplicate rows to append. Existing evidence stays unchanged.";
+        });
+      } catch (error) {
+        state.phase = "error"; state.feedback = error.message === "workspace_save_pending" ? "Reconcile the original save before reviewing this CSV." : error.message;
+      } finally { state.busy = false; renderManualCsv(); }
+    }
+    async function openManualCsv(file = null) {
+      const state = manualCsvState, dialog = $("#manualCsvDialog");
+      if (state.busy) return;
+      if (!dialog.open) dialog.showModal();
+      if (!file || state.phase === "unknown") { renderManualCsv(); return; }
+      state.context = manualCsvContext(); state.rows = null; state.reviewed = []; state.selected = new Set(); state.operation = null;
+      state.busy = true; state.phase = "reading"; state.feedback = "Reading CSV..."; renderManualCsv();
+      try {
+        if (file.size > 1024 * 1024) throw new Error("CSV exceeds 1 MB.");
+        const rows = parseManualReceiptCsv(await file.text());
+        if (state.context !== manualCsvContext()) throw new Error("Workspace changed while reading CSV.");
+        state.rows = rows; state.ids = rows.map(() => "manual-proof-import-" + crypto.randomUUID());
+      } catch (error) { state.phase = "error"; state.feedback = error.message; }
+      finally { state.busy = false; renderManualCsv(); }
+      if (state.rows) await reviewManualCsv();
+    }
+    async function importManualCsvRows() {
+      const state = manualCsvState, retry = state.phase === "unknown";
+      if (state.busy || (!retry && (state.phase !== "review" || !state.selected.size))) return;
+      let completed = false;
+      state.busy = true; state.feedback = "Saving selected manual records..."; renderManualCsv();
+      try {
+        await afterWorkspaceSaves(async () => {
+          assertManualCsvContext(retry ? state.operation : null);
+          if (!retry) {
+            if (state.generation !== workspaceSaveState.generation || state.saveRevision !== JSON.stringify(model.persistence.revision)) throw new Error("workspace_revision_conflict");
+            const selected = state.reviewed.filter(row => state.selected.has(row.index));
+            if (!selected.length || selected.some(row => !row.eligible)) throw new Error("Review valid nonduplicate rows before importing.");
+            const snapshot = sanitizedModelSnapshot(state.current);
+            const records = selected.map(row => ({ ...row.entry, id: state.ids[row.index] }));
+            if (records.some(record => snapshot.proof.some(entry => entry.id === record.id))) throw new Error("Record identity collision; import was not sent.");
+            snapshot.proof.push(...records);
+            state.operation = { kind: "model-save", operationId: crypto.randomUUID(), expectedRevision: clone(state.current.persistence.revision), request: snapshot };
+            state.records = records;
+          }
+          const response = await sendWorkspaceSave(state.operation), current = await response.json();
+          assertManualCsvContext(state.operation);
+          if (state.records.some(record => !current.proof?.some(entry => entry.id === record.id && manualReceiptFactKey(entry) === manualReceiptFactKey(record)))) throw new Error("Manual import was not completely confirmed.");
+          model = normalizeModel(current);
+          if (sameWorkspaceSaveOperation(workspaceSaveState.pending, state.operation)) workspaceSaveState.pending = null;
+          workspaceSaveState.blocked = ""; workspaceSaveState.generation++; ownSaveRevisions.clear(); workspaceSaveNotice("");
+          persistModelSnapshot(model); state.phase = "complete"; state.operation = null; completed = true;
+          state.feedback = state.records.length + " manual records imported. Not provider-verified.";
+        });
+      } catch (error) {
+        if (state.context !== manualCsvContext()) { state.phase = "error"; state.feedback = "Workspace changed. Inspect the original workspace before retrying."; }
+        else if (error.message === "workspace_save_pending") { state.phase = retry ? "unknown" : "pending"; state.feedback = "Another original save is unresolved. Close this review, reconcile it, then review these rows again."; }
+        else if (["workspace_revision_conflict", "workspace_receipt_superseded"].includes(error.message)) { state.phase = "conflict"; state.feedback = "Saved content changed. CSV rows are retained; review latest saved content before confirming again."; }
+        else if (error.message.startsWith("workspace_") && error.message !== "workspace_commit_unknown") { state.phase = "error"; state.feedback = "Import rejected. Review latest saved content before trying again."; }
+        else if (state.operation) {
+          if (workspaceSaveState.blocked !== "unknown") await captureSaveFailure("workspace_commit_unknown", state.operation);
+          state.phase = "unknown"; state.feedback = "Import is unconfirmed. Retry only the identical original import; do not start another.";
+        } else { state.phase = "error"; state.feedback = error.message; }
+      } finally { state.busy = false; renderManualCsv(); }
+      if (completed) { $("#manualCsvDialog").close(); render(); jump("proof"); $("#importManualCsv").focus(); manualProofFeedback(state.feedback, "success"); }
+    }
+
+    const manualCsvExportState = { reviewed: [], excluded: [], selected: new Set(), context: "", current: null,
+      phase: "empty", busy: false, feedback: "", reviewGeneration: -1, pageRevision: "", reviewedRevision: "", reviewedAt: "" };
+    function assertManualCsvExportContext() {
+      if (!SERVER_MODE || !hostedModelHydrated || !model.currentUser?.id || !model.workspace?.id) throw new Error("CSV export requires a loaded signed-in workspace.");
+      if (manualCsvExportState.context !== manualCsvContext()) throw new Error("Workspace changed. Return to the reviewed workspace before exporting.");
+      if (differentUnresolvedWorkspaceSave(null)) throw new Error("workspace_save_pending");
+    }
+    function renderManualCsvExport() {
+      const state = manualCsvExportState, same = state.context === manualCsvContext();
+      const stale = state.reviewGeneration !== workspaceSaveState.generation || state.pageRevision !== JSON.stringify(model.persistence?.revision);
+      const focused = document.activeElement?.dataset?.csvExportSelect, body = $("#manualCsvExportRows"), scrollTop = body.scrollTop;
+      $("#manualCsvExportStatus").textContent = !same ? "This export review belongs to another workspace context."
+        : stale && state.phase === "review" ? "Saved page state changed after this review. Review latest saved content before downloading."
+        : state.feedback;
+      $("#manualCsvExportStatus").dataset.state = !same ? "context" : stale && state.phase === "review" ? "conflict" : state.phase;
+      body.replaceChildren();
+      if (same) {
+        for (const row of state.reviewed) {
+          const element = document.createElement("article"); element.className = "manual-csv-row"; element.dataset.csvExportRow = String(row.index);
+          const label = document.createElement("label"), checkbox = document.createElement("input"); checkbox.type = "checkbox";
+          checkbox.dataset.csvExportSelect = String(row.index); checkbox.checked = state.selected.has(row.key);
+          checkbox.disabled = state.busy || state.phase !== "review" || stale;
+          checkbox.addEventListener("change", () => { if (checkbox.checked) state.selected.add(row.key); else state.selected.delete(row.key); renderManualCsvExport(); });
+          label.append(checkbox, document.createTextNode("Manual record: " + (row.entry.campaignTitle || row.entry.campaignId)));
+          const association = document.createElement("p");
+          association.textContent = row.entry.campaignId + " / " + row.entry.variantId + " / " + row.entry.platform;
+          const fields = document.createElement("pre"); fields.tabIndex = 0;
+          fields.textContent = manualCsvColumns.map(name => name + ": " + row.input[name]).join("\n");
+          const provenance = document.createElement("small"); provenance.textContent = "Operator-supplied manual evidence; not provider-verified.";
+          element.append(label, association, fields, provenance); body.append(element);
+        }
+        if (!state.reviewed.length && state.phase !== "loading") {
+          const empty = document.createElement("p"); empty.className = "empty"; empty.textContent = "No current saved manual records are eligible for compatible CSV export."; body.append(empty);
+        }
+        if (state.excluded.length) {
+          const section = document.createElement("section"), title = document.createElement("h3"); title.textContent = "Excluded evidence";
+          section.dataset.csvExportExcluded = ""; section.append(title);
+          const counts = new Map();
+          for (const item of state.excluded) counts.set(item.reason, (counts.get(item.reason) || 0) + 1);
+          for (const [reason, count] of counts) { const line = document.createElement("p"); line.textContent = count + " record" + (count === 1 ? "" : "s") + ": " + reason; section.append(line); }
+          body.append(section);
+        }
+      }
+      const unresolved = differentUnresolvedWorkspaceSave(null), count = state.selected.size;
+      $("#refreshManualCsvExport").disabled = state.busy || !same || unresolved;
+      $("#downloadManualCsvExport").disabled = state.busy || !same || unresolved || stale || state.phase !== "review" || !count || count > 200;
+      $("#downloadManualCsvExport").textContent = "Download reviewed snapshot (" + count + ")";
+      $("#cancelManualCsvExport").disabled = state.busy;
+      body.scrollTop = scrollTop;
+      if (same && focused !== undefined) body.querySelector('[data-csv-export-select="' + focused + '"]')?.focus({ preventScroll: true });
+    }
+    async function reviewManualCsvExport(resetSelection = false) {
+      const state = manualCsvExportState;
+      if (state.busy) return;
+      state.busy = true; state.phase = "loading"; state.feedback = "Loading current saved workspace evidence..."; renderManualCsvExport();
+      try {
+        await afterWorkspaceSaves(async () => {
+          assertManualCsvExportContext();
+          const response = await authedFetch("/api/model"); assertManualCsvExportContext();
+          if (!response.ok) throw new Error("Current saved workspace evidence could not be confirmed.");
+          const current = await response.json(); assertManualCsvExportContext();
+          if (JSON.stringify([current.currentUser?.id, current.workspace?.id]) !== state.context) throw new Error("Authenticated workspace context changed during export review.");
+          const projection = projectManualReceiptExport(current.proof, current.campaigns);
+          const keys = new Set(projection.eligible.map(row => row.key));
+          state.current = current; state.reviewed = projection.eligible; state.excluded = projection.excluded;
+          state.selected = resetSelection ? new Set() : new Set([...state.selected].filter(key => keys.has(key)));
+          state.reviewGeneration = workspaceSaveState.generation; state.pageRevision = JSON.stringify(model.persistence?.revision);
+          state.reviewedRevision = String(current.persistence?.revision?.revision ?? "unknown"); state.reviewedAt = new Date().toISOString();
+          state.phase = "review";
+          state.feedback = state.reviewed.length + " saved manual record" + (state.reviewed.length === 1 ? "" : "s") + " eligible; "
+            + state.excluded.length + " excluded. Reviewed saved revision " + state.reviewedRevision + " at " + state.reviewedAt
+            + ". Download uses this reviewed snapshot; refresh to check for newer saves.";
+        });
+      } catch (error) {
+        state.current = null; state.reviewed = []; state.excluded = []; state.selected = new Set(); state.phase = "error";
+        state.feedback = error.message === "workspace_save_pending" ? "Reconcile the original unresolved save before reviewing an export." : error.message;
+      } finally { state.busy = false; renderManualCsvExport(); }
+    }
+    async function openManualCsvExport() {
+      const state = manualCsvExportState, dialog = $("#manualCsvExportDialog");
+      if (state.busy) return;
+      state.context = manualCsvContext(); state.selected = new Set(); state.reviewed = []; state.excluded = []; state.current = null;
+      state.reviewGeneration = -1; state.pageRevision = ""; state.phase = "empty";
+      if (!dialog.open) dialog.showModal();
+      await reviewManualCsvExport(true);
+    }
+    function downloadManualCsvExport() {
+      const state = manualCsvExportState;
+      try {
+        assertManualCsvExportContext();
+        if (state.phase !== "review" || state.reviewGeneration !== workspaceSaveState.generation
+          || state.pageRevision !== JSON.stringify(model.persistence?.revision)) throw new Error("Review latest saved content before downloading.");
+        const records = state.reviewed.filter(row => state.selected.has(row.key));
+        const output = manualReceiptExportCsv(records), blob = new Blob([output], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob), link = document.createElement("a");
+        link.href = url; link.download = "Social-Cues-reviewed-manual-receipts.csv"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+        state.feedback = records.length + " manual record" + (records.length === 1 ? "" : "s") + " downloaded from reviewed saved revision "
+          + state.reviewedRevision + ". Operator-supplied and not provider-verified.";
+      } catch (error) {
+        state.phase = error.message === "workspace_save_pending" ? "pending" : "error";
+        state.feedback = error.message === "workspace_save_pending" ? "Reconcile the original unresolved save before downloading." : error.message;
+      }
+      renderManualCsvExport();
+    }
+
+    const manualProofState = { editingId: "", draftId: "", dirty: false, busy: false, workspaceKey: null };
+    const manualProofInputIds = {
+      campaignId: "proofCampaignInput", variantId: "proofVariantInput", postedUrl: "proofUrlInput",
+      postedLocal: "proofPostedInput", postedTimezone: "proofPostedZoneInput", metric: "proofMetricInput",
+      metricValue: "proofValueInput", observedLocal: "proofObservedInput",
+      observedTimezone: "proofObservedZoneInput", note: "proofNoteInput"
+    };
+    const manualObservationKeys = ["metric", "metricValue", "observedLocal", "observedTimezone"];
+
+    function manualProofFeedback(message, state = "") {
+      $("#proofFeedback").textContent = message;
+      $("#proofFeedback").dataset.state = state;
+    }
+
+    function renderProofChoices() {
+      const campaigns = Array.isArray(model.campaigns) ? model.campaigns : [];
+      const campaignSelect = $("#proofCampaignInput"), variantSelect = $("#proofVariantInput");
+      const campaignId = campaignSelect.value, variantId = variantSelect.value;
+      campaignSelect.innerHTML = '<option value="">Choose campaign</option>' + campaigns.map(item =>
+        '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.title || item.id) + '</option>').join("");
+      campaignSelect.value = campaignId;
+      const campaign = campaigns.find(item => item.id === campaignSelect.value);
+      const variants = (campaign?.variants || []).filter(item => !item.campaignId || item.campaignId === campaign.id);
+      variantSelect.innerHTML = '<option value="">Choose variant</option>' + variants.map(item =>
+        '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(platformName(item.platform) + " - " + item.id + " (" + item.status + ")") + '</option>').join("");
+      variantSelect.value = variantId;
+      const variant = variants.find(item => item.id === variantSelect.value);
+      $("#proofPlatformInput").value = variant ? platformName(variant.platform) : "";
+      $("#manualCsvAssociation").textContent = campaign && variant ? "campaignId: " + campaign.id + " | variantId: " + variant.id : "Campaign and variant IDs appear after selecting a receipt association.";
+      for (const id of ["proofPostedZoneInput", "proofObservedZoneInput"]) {
+        const select = $("#" + id);
+        if (select.options.length) continue;
+        select.innerHTML = '<option value="">Choose UTC offset</option>';
+        for (let minutes = -720; minutes <= 840; minutes += 15) {
+          const offset = (minutes < 0 ? "-" : "+") + String(Math.floor(Math.abs(minutes) / 60)).padStart(2, "0")
+            + ":" + String(Math.abs(minutes) % 60).padStart(2, "0");
+          select.add(new Option("UTC" + offset, offset));
+        }
+      }
+    }
+
+    function resetManualProof() {
+      if (manualProofState.busy) return;
+      manualProofState.editingId = "";
+      manualProofState.draftId = "";
+      manualProofState.dirty = false;
+      $("#manualProofForm").reset();
+      $("#proofObservation").open = false;
+      Object.values(manualProofInputIds).forEach(id => $("#" + id).removeAttribute("aria-invalid"));
+      manualProofFeedback("");
+      renderProofChoices();
+      $("#proofFormTitle").textContent = "New manual receipt";
+      $("#saveManualProof").textContent = "Save receipt";
+    }
+
+    function prepareManualProofFromPlan() {
+      renderProof();
+      if (manualProofState.busy || manualProofState.editingId || manualProofState.draftId || manualProofState.dirty) return;
+      const campaign = activeCampaign();
+      $("#proofCampaignInput").value = campaign?.id || "";
+      $("#proofVariantInput").value = "";
+      renderProofChoices();
+    }
+
+    function clearManualObservation() {
+      if (manualProofState.busy) return;
+      manualObservationKeys.forEach(key => {
+        const field = $("#" + manualProofInputIds[key]);
+        field.value = "";
+        field.removeAttribute("aria-invalid");
+      });
+      manualProofState.dirty = true;
+      $("#proofObservation").open = false;
+      $("#proofObservationToggle").focus();
+      manualProofFeedback("Observation cleared from this form. Save to update recorded evidence.");
+    }
+
+    function editManualProof(id) {
+      if (manualProofState.busy) return;
+      const item = (model.proof || []).find(entry => entry.id === id && isManualProof(entry));
+      if (!item) return;
+      resetManualProof();
+      manualProofState.editingId = item.id;
+      $("#proofCampaignInput").value = item.campaignId || "";
+      renderProofChoices();
+      $("#proofVariantInput").value = item.variantId || "";
+      renderProofChoices();
+      const input = { postedUrl: item.postedUrl, postedLocal: (item.postedAt || "").replace(/(?:Z|[+-]\d{2}:\d{2})$/, ""),
+        postedTimezone: item.postedTimezone, metric: item.metric, metricValue: item.metricValue,
+        observedLocal: (item.observedAt || "").replace(/(?:Z|[+-]\d{2}:\d{2})$/, ""),
+        observedTimezone: item.observedTimezone, note: item.note };
+      Object.entries(input).forEach(([key, value]) => { $("#" + manualProofInputIds[key]).value = value ?? ""; });
+      $("#proofObservation").open = item.type === "observed-result"
+        || manualObservationKeys.some(key => $("#" + manualProofInputIds[key]).value.trim() !== "");
+      $("#proofFormTitle").textContent = "Correct manual receipt";
+      $("#saveManualProof").textContent = "Save correction";
+      $("#manualProofForm").scrollIntoView({ block: "start" });
+      $("#proofUrlInput").focus({ preventScroll: true });
+    }
+
+    async function saveManualProof(event) {
+      event.preventDefault();
+      if (manualProofState.busy) return;
+      Object.values(manualProofInputIds).forEach(id => $("#" + id).removeAttribute("aria-invalid"));
+      if (SERVER_MODE && (!hostedModelHydrated || !model.currentUser?.id)) {
+        manualProofFeedback("The signed-in workspace must finish loading before saving. Your entries are retained.", "error");
+        return;
+      }
+      const input = Object.fromEntries(Object.entries(manualProofInputIds).map(([key, id]) => [key, $("#" + id).value]));
+      const previous = Array.isArray(model.proof) ? model.proof : [];
+      const existing = previous.find(item => item.id === manualProofState.editingId && isManualProof(item));
+      if (manualProofState.editingId && !existing) {
+        manualProofFeedback("This receipt is no longer available. Review the recorded evidence before starting a new receipt.", "error");
+        return;
+      }
+      const result = validateManualProof(input, model.campaigns, existing);
+      if (!result.entry) {
+        if (manualObservationKeys.some(key => Object.hasOwn(result.errors, key))) $("#proofObservation").open = true;
+        Object.keys(result.errors).forEach(key => $("#" + manualProofInputIds[key]).setAttribute("aria-invalid", "true"));
+        manualProofFeedback(Object.values(result.errors).join(" "), "error");
+        $("#" + manualProofInputIds[Object.keys(result.errors)[0]]).focus();
+        return;
+      }
+      const targetModel = model, entry = { ...result.entry, id: existing?.id || manualProofState.draftId || uid("manual-proof") };
+      manualProofState.draftId = entry.id;
+      const next = existing ? previous.map(item => item === existing ? entry : item) : [entry, ...previous];
+      manualProofState.busy = true;
+      $("#manualProofFields").disabled = true;
+      manualProofFeedback("Saving manual evidence...");
+      try {
+        targetModel.proof = next;
+        await saveModel();
+        if (model !== targetModel) return;
+        manualProofState.editingId = entry.id;
+        $("#proofFormTitle").textContent = "Correct manual receipt";
+        $("#saveManualProof").textContent = "Save correction";
+        manualProofFeedback(existing ? "Manual evidence correction saved." : "Manual posting receipt saved.", "success");
+      } catch {
+        if (model !== targetModel) return;
+        if (targetModel.proof === next) targetModel.proof = previous;
+        try { persistModelSnapshot(targetModel); } catch {}
+        manualProofFeedback("Save was not confirmed. Your entries are retained; retry or reload to check saved evidence.", "error");
+      } finally {
+        manualProofState.busy = false;
+        $("#manualProofFields").disabled = false;
+        renderProof();
+      }
+    }
+
     function addProof() {
       const type = $("#proofTypeInput").value;
       const metric = clean($("#proofMetricInput").value) || "Unlabeled result";
@@ -5004,17 +5932,141 @@
       saveModel(`Captured proof point: ${metric}.`);
     }
 
-    function createSelfLaunchCampaign() {
-      const evidence = (model.proof || []).slice(0, 4).map(item => `${item.type}: ${item.metric} (${item.note})`).join(" ");
-      const brief = `Launch Social Cues using this customer-ready command center as the first success story. Show how the tool helps a customer log in, connect accounts, generate platform-native variants, maintain approval control, attach media, analyze metrics, and turn honest signals into a repeatable growth system. Evidence so far: ${evidence || "evidence is still being built."}`;
-      const campaign = createCampaignFromIdea("Social Cues Self-Launch From Customer Evidence", brief, "Launch product");
-      const flags = claimFlags(campaign.brief);
-      campaign.variants = visibleCreationPlatforms().map(platform => ({
+    // Self-launch evidence: pure selected-record projection, never a success claim.
+    function isSelfLaunchEvidence(item) {
+      return isManualProof(item) && typeof item.id === "string" && item.id
+        && ["posting-receipt", "observed-result"].includes(item.type);
+    }
+
+    function buildSelfLaunchEvidence(proof, selectedIds, capturedAt) {
+      const ids = [...new Set(selectedIds)];
+      if (!ids.length) throw new Error("Select at least one saved manual receipt or result.");
+      const text = value => typeof value === "string" ? value : typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+      const records = ids.map(id => {
+        const matches = (proof || []).filter(item => item?.id === id && isSelfLaunchEvidence(item));
+        if (matches.length !== 1) throw new Error("Selected evidence is unavailable or ambiguous. Review the saved records.");
+        const item = matches[0];
+        return { sourceRecordId: id, source: "manual", recordType: item.type,
+          campaignId: text(item.campaignId), variantId: text(item.variantId), platform: text(item.platform),
+          postedUrl: manualProofPostUrl(item.postedUrl) || "", postedAt: text(item.postedAt),
+          postedTimezone: text(item.postedTimezone), metric: text(item.metric), metricValue: text(item.metricValue),
+          observedAt: text(item.observedAt), observedTimezone: text(item.observedTimezone),
+          note: text(item.note), sourceUpdatedAt: text(item.updatedAt) };
+      });
+      return { schemaVersion: "social-cues.self-launch-evidence.v1", source: "manual",
+        capturedAt, sourceRecordIds: ids, records };
+    }
+
+    function selfLaunchEvidenceText(snapshot) {
+      const heading = "Social Cues self-launch working draft\nSelected manual records; not provider-verified.\nNo product impact or causal attribution is established.";
+      return heading + "\n\n" + snapshot.records.map((item, index) => {
+        const measured = item.recordType === "observed-result" && item.metric.trim()
+          && /^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(item.metricValue) && Number.isFinite(Number(item.metricValue))
+          && item.observedAt && item.observedTimezone;
+        return (index + 1) + ". Manual " + (item.recordType === "observed-result" ? "observed-result record" : "posting receipt")
+          + "\nSource record: " + item.sourceRecordId
+          + "\nPlatform: " + (item.platform || "Not recorded")
+          + "\nRecorded post URL: " + (item.postedUrl || "Not recorded")
+          + "\nRecorded posting time: " + (item.postedAt || "Not recorded")
+          + "\nRecorded posting UTC offset: " + (item.postedTimezone || "Not recorded")
+          + (measured ? "\nManual observation: " + item.metric + ": " + item.metricValue
+            + "\nRecorded measurement time: " + item.observedAt + "\nRecorded measurement UTC offset: " + item.observedTimezone
+            : "\nPerformance: unreported.")
+          + (item.note ? "\nOperator note (unverified; quoted): " + JSON.stringify(item.note) : "");
+      }).join("\n\n");
+    }
+    function savedEvidenceView(snapshot) {
+      if (snapshot == null) return { state: "none", message: "No saved evidence snapshot for this campaign.", capturedAt: "", text: "" };
+      const unavailable = { state: "unavailable", message: "Saved evidence snapshot is unavailable: its stored format is unsupported or invalid.", capturedAt: "", text: "" };
+      try {
+        const object = value => value && typeof value === "object" && !Array.isArray(value);
+        const instant = value => typeof value === "string" && postingPackSchedule(value).timezone === "UTC";
+        const fields = ["campaignId", "variantId", "platform", "postedUrl", "postedAt", "postedTimezone",
+          "metric", "metricValue", "observedAt", "observedTimezone", "note", "sourceUpdatedAt"];
+        if (!object(snapshot) || snapshot.schemaVersion !== "social-cues.self-launch-evidence.v1"
+          || snapshot.source !== "manual" || !instant(snapshot.capturedAt)
+          || !Array.isArray(snapshot.sourceRecordIds) || !snapshot.sourceRecordIds.length
+          || !snapshot.sourceRecordIds.every(id => typeof id === "string" && id.trim())
+          || new Set(snapshot.sourceRecordIds).size !== snapshot.sourceRecordIds.length
+          || !Array.isArray(snapshot.records) || snapshot.records.length !== snapshot.sourceRecordIds.length) return unavailable;
+        const valid = snapshot.records.every((item, index) => object(item) && item.source === "manual"
+          && item.sourceRecordId === snapshot.sourceRecordIds[index]
+          && ["posting-receipt", "observed-result"].includes(item.recordType)
+          && fields.every(key => typeof item[key] === "string")
+          && ["postedAt", "observedAt", "sourceUpdatedAt"].every(key => !item[key] || instant(item[key]))
+          && ["postedTimezone", "observedTimezone"].every(key => !item[key] || manualProofInstant("2000-01-01T00:00", item[key]))
+          && (!item.postedUrl || manualProofPostUrl(item.postedUrl))
+          && (!item.metricValue || (/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(item.metricValue) && Number.isFinite(Number(item.metricValue)))));
+        if (!valid) return unavailable;
+        return { state: "ready",
+          message: "Facts captured when this draft was created. Later receipt corrections do not update this saved snapshot.",
+          capturedAt: snapshot.capturedAt, text: selfLaunchEvidenceText(snapshot) };
+      } catch { return unavailable; }
+    }
+    // End self-launch evidence pure helpers.
+
+    function renderSavedEvidence(campaign) {
+      const disclosure = $("#savedEvidenceDisclosure");
+      const key = JSON.stringify([model.currentUser?.id || "", model.workspace?.id || "", campaign?.id || ""]);
+      if (disclosure.dataset.campaignKey !== key) disclosure.open = false;
+      disclosure.dataset.campaignKey = key;
+      const view = savedEvidenceView(campaign?.evidenceSnapshot);
+      $("#savedEvidenceStatus").textContent = view.message;
+      $("#savedEvidenceStatus").dataset.state = view.state;
+      $("#savedEvidenceCapturedAt").hidden = view.state !== "ready";
+      $("#savedEvidenceCapturedAt").textContent = view.capturedAt ? "Captured at: " + view.capturedAt : "";
+      $("#savedEvidenceText").hidden = view.state !== "ready";
+      $("#savedEvidenceText").textContent = view.text;
+    }
+
+    const selfLaunchState = { workspaceKey: null, selectedIds: [], preview: null, pending: null, createdId: "", busy: false };
+
+    function selfLaunchFeedback(message, state = "") {
+      $("#selfLaunchFeedback").textContent = message;
+      $("#selfLaunchFeedback").dataset.state = state;
+    }
+
+    function renderSelfLaunchEvidence() {
+      const state = selfLaunchState;
+      $("#selfLaunchSelectionCount").textContent = state.selectedIds.length + " saved manual records selected";
+      $("#previewSelfLaunch").disabled = state.busy || Boolean(state.pending) || Boolean(state.createdId) || manualProofState.busy;
+      $("#createSelfLaunch").disabled = state.busy || manualProofState.busy || !state.preview || Boolean(state.createdId);
+      $("#createSelfLaunch").textContent = state.pending && !state.busy ? "Retry saving draft" : "Create editable draft";
+      $("#selfLaunchPreview").hidden = !state.preview;
+      $("#selfLaunchPreviewText").textContent = state.preview?.text || "";
+      $("#selfLaunchSnapshotMeta").textContent = state.preview
+        ? "Snapshot: " + state.preview.snapshot.capturedAt + ". Draft platforms: " + state.preview.platforms.map(item => item.name || item.id).join(", ") : "";
+      $("#openSelfLaunchDraft").hidden = !state.createdId;
+      $$("#manualProofList [data-evidence-proof]").forEach(input => {
+        input.checked = state.selectedIds.includes(input.dataset.evidenceProof);
+        input.disabled = state.busy || Boolean(state.pending) || manualProofState.busy;
+      });
+      $("#manualProofFields").disabled = manualProofState.busy || state.busy;
+    }
+
+    function previewSelfLaunchEvidence() {
+      if (selfLaunchState.busy || selfLaunchState.pending || selfLaunchState.createdId || manualProofState.busy) return;
+      try {
+        const snapshot = buildSelfLaunchEvidence(model.proof, selfLaunchState.selectedIds, new Date().toISOString());
+        selfLaunchState.preview = { snapshot, text: selfLaunchEvidenceText(snapshot), platforms: clone(visibleCreationPlatforms()) };
+        selfLaunchState.createdId = "";
+        selfLaunchFeedback("Review the selected manual snapshot before creating a draft.");
+        renderSelfLaunchEvidence();
+        $("#selfLaunchPreviewText").focus();
+      } catch (error) {
+        selfLaunchFeedback(error.message, "error");
+      }
+    }
+
+    function buildSelfLaunchDraft(preview) {
+      const campaign = buildCampaignFromIdea("Social Cues self-launch: selected manual evidence", preview.text, "Launch product");
+      campaign.evidenceSnapshot = clone(preview.snapshot);
+      campaign.variants = preview.platforms.map(platform => ({
         id: uid(platform.id),
         platform: platform.id,
         status: "draft",
-        copy: platformCopy(platform, campaign),
-        tags: platform.tags,
+        copy: preview.text,
+        tags: clone(platform.tags || []),
         videoSpec: platformVideoSpec(platform.id),
         videoHashtags: videoHashtags(platform.id, campaign),
         contentApproach: platformVideoSpec(platform.id).approach,
@@ -5022,11 +6074,50 @@
         fit: platform.fit,
         connector: platform.connector,
         disclosure: campaign.disclosure,
-        flags,
+        flags: claimFlags(preview.text),
         updatedAt: new Date().toISOString()
       }));
-      saveModel("Created Social Cues self-launch campaign from evidence trail.");
-      jump("studio");
+      return campaign;
+    }
+
+    async function createSelfLaunchCampaign() {
+      const state = selfLaunchState;
+      if (state.busy || state.createdId || manualProofState.busy) return;
+      if (SERVER_MODE && (!hostedModelHydrated || !model.currentUser?.id)) {
+        selfLaunchFeedback("The signed-in workspace must finish loading before saving.", "error");
+        return;
+      }
+      if (!state.preview) { selfLaunchFeedback("Select saved manual records and preview their evidence first.", "error"); return; }
+      if (!state.pending) {
+        try { buildSelfLaunchEvidence(model.proof, state.preview.snapshot.sourceRecordIds, state.preview.snapshot.capturedAt); }
+        catch (error) { selfLaunchFeedback(error.message, "error"); return; }
+        state.pending = buildSelfLaunchDraft(state.preview);
+      }
+      const targetModel = model, previous = model.campaigns, previousActive = model.activeCampaignId;
+      const campaign = state.pending, next = [campaign, ...previous.filter(item => item.id !== campaign.id)];
+      state.busy = true;
+      selfLaunchFeedback("Saving editable draft...");
+      try {
+        targetModel.campaigns = next;
+        targetModel.activeCampaignId = campaign.id;
+        await saveModel();
+        if (model !== targetModel) return;
+        state.createdId = campaign.id;
+        state.pending = null;
+        selfLaunchFeedback("Editable draft saved. No content was approved or queued.", "success");
+      } catch {
+        if (model !== targetModel) return;
+        if (targetModel.campaigns === next) targetModel.campaigns = previous;
+        if (targetModel.activeCampaignId === campaign.id) targetModel.activeCampaignId = previousActive;
+        try { persistModelSnapshot(targetModel); } catch {}
+        selfLaunchFeedback("Save was not confirmed. Selection and snapshot retained. Retry this same draft, or reload to inspect saved campaigns.", "error");
+      } finally {
+        if (model === targetModel && (state.pending === campaign || state.createdId === campaign.id)) {
+          state.busy = false;
+          render();
+          $(state.createdId ? "#openSelfLaunchDraft" : "#createSelfLaunch").focus();
+        }
+      }
     }
 
     function comingSoonCopy(platform, campaign) {
@@ -5381,6 +6472,123 @@
       return "draft";
     }
 
+    // Posting pack: pure projection and text serialization.
+    function postingPackMedia(variant) {
+      const media = variant.media || {};
+      const references = [];
+      if (typeof media.name === "string" && /^[a-z0-9][a-z0-9 ._-]{0,159}$/i.test(media.name)
+        && !/token|secret|credential|signature/i.test(media.name)) references.push("File: " + media.name);
+      for (const value of [media.publicUrl, media.hostedUrl, media.url, variant.videoUrl, variant.imageUrl]) {
+        if (typeof value !== "string") continue;
+        try {
+          const url = new URL(value);
+          // Access links are omitted whole, never stripped into a misleading URL.
+          if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash
+            || /(?:^|[/.])(?:localhost|local|internal|private|sign(?:ed)?|auth|authenticated|token|api)(?:[/.]|$)/i.test(decodeURIComponent(url.hostname + url.pathname))
+            || !url.hostname.includes(".") || url.hostname.includes(":") || /^[\d.]+$/.test(url.hostname)) continue;
+          references.push(url.href);
+        } catch {}
+      }
+      return [...new Set(references)];
+    }
+
+    function postingPackSchedule(value) {
+      const missing = { date: "Not scheduled", time: "Not scheduled", timezone: "Not recorded" };
+      if (typeof value !== "string") return missing;
+      const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::(\d{2})(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})?$/.exec(value);
+      if (!match || !Number.isFinite(Date.parse(match[1] + "T00:00:00Z"))
+        || new Date(match[1] + "T00:00:00Z").toISOString().slice(0, 10) !== match[1]
+        || Number(match[2].slice(0, 2)) > 23 || Number(match[2].slice(3)) > 59
+        || Number(match[3] || 0) > 59) return missing;
+      if (!match[5]) return { date: match[1], time: match[2] + (match[3] ? ":" + match[3] + (match[4] || "") : ""), timezone: "Not recorded" };
+      const instant = new Date(value);
+      if (!Number.isFinite(instant.getTime())) return missing;
+      const iso = instant.toISOString();
+      return { date: iso.slice(0, 10), time: iso.slice(11, -1), timezone: "UTC" };
+    }
+
+    function postingPackCsvCell(value) {
+      const text = String(value ?? "");
+      const safe = /^[\s\u0000-\u001f]*[=+\-@]/.test(text) || /^[\t\r\n]/.test(text) ? "'" + text : text;
+      return '"' + safe.replace(/"/g, '""') + '"';
+    }
+
+    function postingPackLiteral(value) {
+      const text = String(value ?? "");
+      const tick = String.fromCharCode(96);
+      const runs = text.match(new RegExp(tick + "+", "g")) || [];
+      const fence = tick.repeat(Math.max(3, ...runs.map(run => run.length + 1)));
+      return fence + "\n" + text + "\n" + fence;
+    }
+
+    function buildPostingPack(campaign) {
+      const text = value => typeof value === "string" ? value : "";
+      const campaignId = text(campaign?.id);
+      const title = text(campaign?.title) || "No active campaign";
+      const posts = (Array.isArray(campaign?.variants) ? campaign.variants : [])
+        .filter(variant => variant && ["approved", "queued"].includes(variant.status)
+          && (!variant.campaignId || variant.campaignId === campaignId))
+        .map(variant => ({
+          campaignId, campaignTitle: title, variantId: text(variant.id),
+          platform: text(variant.platform) || "Not recorded",
+          copy: text(variant.copy), ...postingPackSchedule(variant.scheduledFor),
+          media: postingPackMedia(variant), status: variant.status
+        }));
+      const columns = ["campaign_id", "campaign_title", "variant_id", "platform", "approved_copy",
+        "scheduled_date", "scheduled_time", "timezone", "media_references", "status",
+        "posted_url", "actual_posted_at", "performance_observed_at", "actual_performance"];
+      const rows = posts.map(post => [post.campaignId, post.campaignTitle, post.variantId, post.platform,
+        post.copy, post.date, post.time, post.timezone, post.media.join("\n") || "No exportable media reference",
+        post.status, "", "", "", ""]);
+      const csv = [columns, ...rows].map(row => row.map(postingPackCsvCell).join(",")).join("\r\n") + "\r\n";
+      const checklist = [
+        "## Operator checklist",
+        "- [ ] Confirm the campaign, platform/account, exact approved copy, media rights and schedule before posting.",
+        "- [ ] Check the existing queue first to avoid duplicate delivery. Coordinate any live queue separately.",
+        "- [ ] Post manually in the intended platform. This export does not post or change approval/queue status.",
+        "- [ ] Record the real post URL and actual posting time in posted_url and actual_posted_at in the CSV.",
+        "- [ ] After observing results, record the measurement time and actual metrics in performance_observed_at and actual_performance. Leave unknown results blank.",
+        "- [ ] Open Results from Plan and delivery. Save the campaign/variant, actual post URL, posting time and explicit UTC offset as a manual receipt.",
+        "- [ ] Use Edit receipt to add the observed metric, value, measurement time and UTC offset later. Leave unknown results blank.",
+        "",
+        "Schedules with a recorded offset are shown in UTC. Unzoned times remain unzoned; confirm their timezone before posting.",
+        "Only approved and queued variants in this campaign are included. Drafts and other campaigns are excluded.",
+        "Media references omit local previews, private/signed access links and URLs containing query strings or fragments. Reattach media manually where needed.",
+        "Markdown copy blocks preserve the source text. CSV uses quoted multiline cells and prefixes formula-like cells with an apostrophe for spreadsheet safety.",
+        "Results are labelled manually recorded, not provider-verified. The form saves to the existing proof ledger; CSV receipts are not imported automatically."
+      ].join("\n");
+      const markdown = [
+        "# Social Cues manual posting pack", "", "Campaign:", postingPackLiteral(title), "",
+        posts.length + " approved/queued posts.", "",
+        ...posts.flatMap((post, index) => [
+          "## Post " + (index + 1), "",
+          postingPackLiteral("Variant: " + post.variantId + "\nPlatform: " + post.platform + "\nStatus: " + post.status
+            + "\nDate: " + post.date + "\nTime: " + post.time + "\nTimezone: " + post.timezone),
+          "", "### Exact approved copy", postingPackLiteral(post.copy), "",
+          "### Media references", postingPackLiteral(post.media.join("\n") || "No exportable media reference"), ""
+        ]),
+        ...(posts.length ? [] : ["No approved or queued posts in the active campaign.", ""]),
+        checklist, ""
+      ].join("\n");
+      const filename = "Social-Cues-posting-pack-" + (campaignId.replace(/[^a-z0-9_-]/gi, "-").slice(0, 70) || "empty");
+      return { posts, markdown, csv, filename };
+    }
+    // End posting pack pure helpers.
+
+    function exportPostingPack(format) {
+      const pack = buildPostingPack(activeCampaign());
+      const csv = format === "csv";
+      const blob = new Blob([csv ? "\ufeff" + pack.csv : pack.markdown], { type: csv ? "text/csv;charset=utf-8" : "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = pack.filename + (csv ? ".csv" : ".md");
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
     function exportJson(filename, data) {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -5407,19 +6615,462 @@
       });
     }
 
-    function importModel(file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          const imported = JSON.parse(reader.result);
-          if (!Array.isArray(imported.campaigns)) throw new Error("Missing campaigns");
-          model = { ...clone(defaultModel), ...imported };
-          saveModel("Imported model file.");
-        } catch (error) {
-          alert("That file does not look like a Social Cues model.");
+    // Content recovery: strict projection; no identity or operational fields.
+    const recoverySchema = "social-cues.campaign-content.v1";
+    const recoveryStatuses = ["draft", "needs revision", "approved", "published", "failed", "blocked"];
+    function recoveryContent(raw) {
+      const object = value => value && typeof value === "object" && !Array.isArray(value);
+      const fail = message => { throw new Error(message); };
+      const list = (value, label) => Array.isArray(value) && value.length <= 2000 ? value : fail("Invalid " + label + " collection.");
+      const text = (value, label) => typeof value === "string" && value.length <= 100000 ? value : fail("Invalid " + label + " text.");
+      const id = (value, label) => typeof value === "string" && /^[a-z0-9][a-z0-9._:-]{0,159}$/i.test(value) ? value : fail("Invalid " + label + " ID.");
+      const fields = (value, keys) => {
+        if (!object(value)) fail("Invalid content record.");
+        const out = {};
+        for (const key of keys) if (Object.hasOwn(value, key)) out[key] = text(value[key], key);
+        return out;
+      };
+      const dates = value => {
+        for (const key of ["createdAt", "updatedAt", "approvedAt", "publishedAt", "scheduledFor", "recoveryRecordedAt"]) {
+          if (value[key] && postingPackSchedule(value[key]).timezone !== "UTC") fail("Invalid content timestamp.");
         }
       };
-      reader.readAsText(file);
+      const unique = (items, label) => {
+        if (new Set(items).size !== items.length) fail("Duplicate " + label + " IDs.");
+      };
+      if (!object(raw)) fail("Invalid recovery file.");
+      let source;
+      if (Object.hasOwn(raw, "schemaVersion")) {
+        if (raw.schemaVersion !== recoverySchema || !object(raw.content)) fail("Unsupported recovery version.");
+        source = raw.content;
+      } else {
+        if (raw.campaign && !raw.campaigns) fail("Active-campaign bundles are not workspace recovery files.");
+        if (!["0.2.0-local", "0.3.0-client-workspace"].includes(raw.version)) fail("Unsupported legacy model version.");
+        source = raw;
+      }
+      const campaigns = list(source.campaigns, "campaigns").map(item => {
+        const campaign = fields(item, ["id", "title", "brief", "goal", "tone", "disclosure", "riskPosture",
+          "destinationUrl", "destinationCta", "createdAt", "updatedAt", "recoveryRecordedAt"]);
+        id(campaign.id, "campaign");
+        text(campaign.title, "campaign title");
+        if (campaign.destinationUrl && !manualProofPostUrl(campaign.destinationUrl)) fail("Invalid destination URL.");
+        dates(campaign);
+        campaign.variants = list(item.variants, "variants").map(record => {
+          const variant = fields(record, ["id", "campaignId", "platform", "status", "copy", "bestTime", "fit",
+            "language", "locale", "disclosure", "contentApproach", "connector", "rationale", "mediaDirection",
+            "generatedBy", "createdAt", "updatedAt", "approvedAt", "publishedAt", "scheduledFor"]);
+          id(variant.id, "variant"); id(variant.platform, "platform"); text(variant.copy, "variant copy");
+          if (variant.campaignId && variant.campaignId !== campaign.id) fail("Variant belongs to a different campaign.");
+          if (!recoveryStatuses.includes(variant.status)) fail("In-flight or unsupported variant status; publishing cannot be recovered.");
+          if (record.queuedAt || record.nextRetryAt || record.approvalConfirmedAt || record.handoffReadyAt) {
+            fail("Dispatch confirmations or retry state cannot be recovered.");
+          }
+          for (const key of ["tags", "flags", "videoHashtags"]) {
+            variant[key] = list(record[key] ?? [], key).map(value => text(value, key));
+          }
+          if (record.videoSpec != null) variant.videoSpec = fields(record.videoSpec, ["format", "resolution", "duration", "outputName", "safeArea", "approach"]);
+          if (record.destination != null) {
+            variant.destination = fields(record.destination, ["url", "cta", "placement"]);
+            if (variant.destination.url && !manualProofPostUrl(variant.destination.url)) fail("Invalid variant destination URL.");
+          }
+          dates(variant);
+          return variant;
+        });
+        if (item.evidenceSnapshot != null) {
+          if (savedEvidenceView(item.evidenceSnapshot).state !== "ready") fail("Invalid or unsupported frozen evidence.");
+          const snapshot = item.evidenceSnapshot;
+          campaign.evidenceSnapshot = {
+            schemaVersion: snapshot.schemaVersion, source: snapshot.source, capturedAt: snapshot.capturedAt,
+            sourceRecordIds: [...snapshot.sourceRecordIds],
+            records: snapshot.records.map(record => fields(record, ["sourceRecordId", "source", "recordType",
+              "campaignId", "variantId", "platform", "postedUrl", "postedAt", "postedTimezone", "metric",
+              "metricValue", "observedAt", "observedTimezone", "note", "sourceUpdatedAt"]))
+          };
+        }
+        return campaign;
+      });
+      unique(campaigns.map(item => item.id), "campaign");
+      unique(campaigns.flatMap(item => item.variants.map(value => value.id)), "variant");
+      const association = (record, required = false) => {
+        const campaign = campaigns.find(item => item.id === record.campaignId);
+        const variant = campaign?.variants.find(item => item.id === record.variantId);
+        if ((required || record.campaignId) && !campaign) fail("Evidence refers to a missing campaign.");
+        if ((required || record.variantId) && !variant) fail("Evidence refers to a missing variant.");
+        if (record.platform && variant && record.platform !== variant.platform) fail("Evidence platform conflicts with its variant.");
+      };
+      const proof = list(source.proof, "proof").map(item => {
+        const record = fields(item, ["id", "source", "schemaVersion", "type", "campaignId", "campaignTitle",
+          "variantId", "platform", "postedUrl", "postedAt", "postedTimezone", "metric", "observedAt",
+          "observedTimezone", "note", "createdAt", "updatedAt"]);
+        id(record.id, "proof"); text(record.type, "proof type");
+        if (Object.hasOwn(item, "metricValue")) {
+          if (typeof item.metricValue !== "string" && !(typeof item.metricValue === "number" && Number.isFinite(item.metricValue))) fail("Invalid metric value.");
+          record.metricValue = item.metricValue;
+        }
+        if (isManualProof(record)) {
+          if (record.source !== "manual" || (record.schemaVersion && record.schemaVersion !== "social-cues.manual-proof.v1")) fail("Unsupported manual evidence version.");
+          association(record, true);
+          const time = value => String(value || "").replace(/(?:Z|[+-]\d{2}:\d{2})$/, "");
+          const validation = validateManualProof({
+            ...record, metricValue: String(record.metricValue ?? ""),
+            postedLocal: time(record.postedAt), observedLocal: time(record.observedAt)
+          }, campaigns);
+          if (Object.keys(validation.errors).length || validation.entry.type !== record.type
+            || validation.entry.postedAt !== record.postedAt
+            || validation.entry.observedAt !== (record.observedAt || "")) fail("Invalid manual evidence facts.");
+        } else {
+          if (record.source || record.schemaVersion) fail("Unsupported evidence source.");
+          association(record);
+        }
+        dates(record);
+        return record;
+      });
+      unique(proof.map(item => item.id), "proof");
+      for (const campaign of campaigns) for (const record of campaign.evidenceSnapshot?.records || []) {
+        if (!proof.some(item => item.id === record.sourceRecordId && isManualProof(item))) fail("Frozen evidence refers to a missing manual record.");
+        association(record, true);
+      }
+      const activeCampaignId = text(source.activeCampaignId, "active campaign");
+      if ((campaigns.length && !campaigns.some(item => item.id === activeCampaignId)) || (!campaigns.length && activeCampaignId)) fail("Invalid active campaign reference.");
+      return { campaigns, proof, activeCampaignId };
+    }
+
+    function recoveryConflict(current, content, queueRows = []) {
+      const batches = current.campaigns || [];
+      if (batches.some(item => (item.variants || []).some(value =>
+        !recoveryStatuses.includes(value.status) || value.queuedAt || value.nextRetryAt || value.approvalConfirmedAt || value.handoffReadyAt))) {
+        return "Current campaigns contain dispatch state. Resolve it before content recovery.";
+      }
+      const campaignIds = new Set([...batches, ...content.campaigns].map(item => item.id));
+      const variantIds = new Set([...batches, ...content.campaigns].flatMap(item => (item.variants || []).map(value => value.id)));
+      const related = item => campaignIds.has(item.campaignId) || variantIds.has(item.variantId);
+      const operationalRows = queueRows.filter(item => item.source !== "campaign-variant"
+        || item.live || item.lastAttempt || !recoveryStatuses.includes(item.status));
+      if ([...(current.publishQueue || []), ...(current.actions || []), ...(current.mediaAssets || []),
+        ...(current.mediaRenderJobs || []), ...operationalRows].some(related)) {
+        return "Existing queue, action or media references conflict with the content replacement.";
+      }
+      if ((current.quickPosts || []).some(item => campaignIds.has(item.id) || (item.variants || []).some(value => variantIds.has(value.id)))) {
+        return "A recovered ID conflicts with an existing quick post.";
+      }
+      return "";
+    }
+    // End content recovery pure helpers.
+
+    // Losing campaign: content-only projection and deterministic copy identity.
+    const losingCampaignSchema = "social-cues.losing-campaign.v1";
+    const losingCampaignFields = ["title", "brief", "goal", "tone", "disclosure", "riskPosture", "destinationUrl", "destinationCta"];
+    function losingCampaignProjection(value, strict = false) {
+      const object = item => item && typeof item === "object" && !Array.isArray(item);
+      const text = item => { if (typeof item !== "string" || item.length > 100000) throw new Error("Invalid campaign text."); return item; };
+      if (!object(value) || (strict && Object.keys(value).some(key => ![...losingCampaignFields, "variants"].includes(key)))) throw new Error("Unsupported campaign fields.");
+      const result = Object.fromEntries(losingCampaignFields.map(key => [key, text(value[key] ?? "")]));
+      if (result.destinationUrl) {
+        let url; try { url = new URL(result.destinationUrl); } catch { throw new Error("Invalid campaign destination."); }
+        if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("Invalid campaign destination.");
+      }
+      if (!Array.isArray(value.variants) || value.variants.length > 200) throw new Error("Invalid campaign variants.");
+      result.variants = value.variants.map(variant => {
+        if (!object(variant) || (strict && Object.keys(variant).some(key => !["platform", "copy"].includes(key)))
+          || typeof variant.platform !== "string" || !/^[a-z][a-z0-9_-]{0,63}$/i.test(variant.platform)) throw new Error("Invalid variant platform.");
+        return { platform: variant.platform, copy: text(variant.copy) };
+      });
+      return result;
+    }
+    function readLosingCampaignFile(raw, scope) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)
+        || Object.keys(raw).sort().join(",") !== "campaign,copyId,schemaVersion,sourceCampaignId,workspaceScope"
+        || raw.schemaVersion !== losingCampaignSchema) throw new Error("Unsupported losing-campaign file. Raw model exports are not accepted.");
+      if (typeof scope !== "string" || !/^[a-f0-9]{64}$/.test(scope) || raw.workspaceScope !== scope) throw new Error("This file belongs to a different workspace context.");
+      if (typeof raw.copyId !== "string" || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(raw.copyId)
+        || typeof raw.sourceCampaignId !== "string" || !/^[a-z0-9][a-z0-9._:-]{0,159}$/i.test(raw.sourceCampaignId)) throw new Error("Invalid campaign copy identity.");
+      const file = { schemaVersion: losingCampaignSchema, workspaceScope: scope, copyId: raw.copyId.toLowerCase(), sourceCampaignId: raw.sourceCampaignId,
+        campaign: losingCampaignProjection(raw.campaign, true) };
+      if (new TextEncoder().encode(JSON.stringify(file, null, 2)).length > 2 * 1024 * 1024) throw new Error("Campaign file exceeds 2 MB.");
+      return file;
+    }
+    function losingCampaignDraft(file, now) {
+      const content = losingCampaignProjection(file.campaign, true), id = "camp-copy-" + file.copyId;
+      return { ...content, id, title: (content.title || "Untitled campaign") + " (recovered draft)", createdAt: now, updatedAt: now,
+        variants: content.variants.map((variant, index) => ({ ...variant, id: "var-copy-" + file.copyId + "-" + (index + 1), campaignId: id, status: "draft", tags: [], flags: [], createdAt: now, updatedAt: now })) };
+    }
+    // End losing campaign pure helpers.
+
+    const losingCampaignFiles = new Map();
+    const losingCampaignState = { files: [], selected: 0, current: null, context: "", phase: "empty", busy: false, operation: null, created: null, feedback: "" };
+    const losingContext = () => JSON.stringify([model.currentUser?.id, model.workspace?.id]);
+    async function losingWorkspaceScope() {
+      if (!SERVER_MODE || !hostedModelHydrated || !model.currentUser?.id || !model.workspace?.id || !model.persistence?.conditionalSave) throw new Error("A signed-in workspace with conditional saves is required.");
+      const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(losingCampaignSchema + losingContext()));
+      return [...new Uint8Array(bytes)].map(value => value.toString(16).padStart(2, "0")).join("");
+    }
+    function losingCampaignText(campaign) {
+      if (!campaign) return "No saved counterpart exists in this workspace.";
+      const projected = losingCampaignProjection(campaign);
+      return losingCampaignFields.map(key => key + ":\n" + projected[key]).join("\n\n")
+        + projected.variants.map((variant, index) => "\n\nVariant " + (index + 1) + " (" + variant.platform + "):\n" + variant.copy).join("");
+    }
+    function renderLosingCampaign() {
+      const state = losingCampaignState, sameContext = state.context === losingContext(), file = sameContext ? state.files[state.selected] : null;
+      $("#losingCampaignStatus").textContent = sameContext ? state.feedback : "Return to the original authenticated workspace to inspect this retained campaign.";
+      $("#losingCampaignStatus").dataset.state = state.phase;
+      $("#losingCampaignText").textContent = file ? losingCampaignText(file.campaign) : "No supported retained campaign selected.";
+      const current = state.current?.campaigns.find(item => item.id === file?.sourceCampaignId);
+      $("#currentCampaignText").textContent = losingCampaignText(current);
+      if (!sameContext) $("#losingCampaignSelect").replaceChildren();
+      $("#losingCampaignSelect").disabled = !sameContext || state.busy || state.phase === "unknown";
+      $("#downloadLosingCampaign").disabled = state.busy || !file;
+      $("#refreshLosingCampaign").disabled = state.busy || !file || state.phase === "unknown";
+      $("#createLosingCampaign").disabled = !sameContext || state.busy || differentUnresolvedWorkspaceSave(state.phase === "unknown" ? state.operation : null) || !["review", "unknown", "exists"].includes(state.phase);
+      $("#createLosingCampaign").textContent = state.phase === "unknown" ? "Retry original creation" : state.phase === "exists" ? "Open existing draft" : "Create new draft";
+      $("#cancelLosingCampaign").disabled = state.busy;
+      $("#cancelLosingCampaign").textContent = state.phase === "unknown" ? "Close review" : "Cancel";
+    }
+    function assertLosingCampaignSaveState(operation = null) {
+      if (losingCampaignState.context !== losingContext()) throw new Error("workspace_changed");
+      if (differentUnresolvedWorkspaceSave(operation)) throw new Error("workspace_save_pending");
+    }
+    function finishLosingCampaignSave(operation) {
+      assertLosingCampaignSaveState(operation);
+      if (sameWorkspaceSaveOperation(workspaceSaveState.pending, operation)) workspaceSaveState.pending = null;
+      workspaceSaveState.blocked = ""; workspaceSaveState.generation += 1; ownSaveRevisions.clear();
+      workspaceSaveNotice("");
+    }
+    async function reviewLosingCampaign() {
+      const state = losingCampaignState;
+      if (state.busy || state.phase === "unknown") return;
+      state.busy = true; state.phase = "loading"; state.feedback = "Loading current saved campaign..."; renderLosingCampaign();
+      try {
+        await afterWorkspaceSaves(async () => {
+        assertLosingCampaignSaveState();
+        const response = await authedFetch("/api/model");
+        assertLosingCampaignSaveState();
+        if (!response.ok) throw new Error("Current workspace could not be loaded.");
+        const current = await response.json();
+        assertLosingCampaignSaveState();
+        if (state.context !== losingContext() || JSON.stringify([current.currentUser?.id, current.workspace?.id]) !== state.context || !current.persistence?.conditionalSave) throw new Error("Current authenticated workspace does not match.");
+        state.current = current; state.operation = null;
+        state.reviewGeneration = workspaceSaveState.generation;
+        state.reviewSaveRevision = JSON.stringify(model.persistence?.revision);
+        const file = state.files[state.selected];
+        state.created = current.campaigns.find(item => item.id === "camp-copy-" + file.copyId) || null;
+        const variantIds = new Set(file.campaign.variants.map((_, index) => "var-copy-" + file.copyId + "-" + (index + 1)));
+        if (!state.created && current.campaigns.some(item => item.variants.some(variant => variantIds.has(variant.id)))) throw new Error("Copy identity conflicts with an existing variant. Nothing will be created.");
+        state.phase = state.created ? "exists" : "review";
+        state.feedback = state.created ? "This copy already exists. No additional campaign will be created."
+          : "Review both versions. Confirmation creates one new unapproved draft; it does not replace the saved campaign.";
+        });
+      } catch (error) { state.phase = "error"; state.feedback = error.message === "workspace_save_pending" ? "Reconcile the original save before reviewing another draft." : error.message; }
+      finally { state.busy = false; renderLosingCampaign(); }
+    }
+    async function openLosingCampaign(inputFile = null) {
+      const state = losingCampaignState;
+      if (state.busy) return;
+      const dialog = $("#losingCampaignDialog");
+      if (state.phase === "unknown") { if (!dialog.open) dialog.showModal(); renderLosingCampaign(); return; }
+      state.context = losingContext(); state.files = []; state.selected = 0; state.current = null; state.operation = null;
+      $("#losingCampaignSelect").replaceChildren();
+      state.phase = "loading"; state.feedback = "Preparing campaign text..."; state.busy = true;
+      if (!dialog.open) dialog.showModal(); renderLosingCampaign();
+      try {
+        await afterWorkspaceSaves(() => assertLosingCampaignSaveState());
+        const scope = await losingWorkspaceScope();
+        assertLosingCampaignSaveState();
+        if (inputFile) {
+          if (inputFile.size > 2 * 1024 * 1024) throw new Error("Campaign file exceeds 2 MB.");
+          state.files = [readLosingCampaignFile(JSON.parse(await inputFile.text()), scope)];
+          assertLosingCampaignSaveState();
+        } else {
+          const sources = [workspaceSaveState.draft, workspaceSaveState.pending?.kind === "model-save" ? workspaceSaveState.pending.request : null];
+          for (const source of sources) {
+            if (!source || JSON.stringify([source.currentUser?.id, source.workspace?.id]) !== state.context) continue;
+            for (const campaign of source.campaigns || []) {
+              const projected = losingCampaignProjection(campaign), key = JSON.stringify([scope, campaign.id, projected]);
+              if (!losingCampaignFiles.has(key)) losingCampaignFiles.set(key, readLosingCampaignFile({ schemaVersion: losingCampaignSchema, workspaceScope: scope,
+                sourceCampaignId: campaign.id, copyId: crypto.randomUUID(), campaign: projected }, scope));
+              const file = losingCampaignFiles.get(key);
+              if (!state.files.some(item => item.copyId === file.copyId)) state.files.push(file);
+            }
+          }
+        }
+        if (state.context !== losingContext()) throw new Error("Workspace changed while reading campaign text.");
+        if (!state.files.length) throw new Error("No supported losing campaign exists for this workspace. Unsaved form inputs are not restored.");
+        $("#losingCampaignSelect").replaceChildren(...state.files.map((file, index) => {
+          const option = document.createElement("option"); option.value = String(index); option.textContent = file.campaign.title || "Untitled campaign"; return option;
+        }));
+        state.phase = "ready";
+      } catch (error) { state.phase = "error"; state.feedback = error.message === "workspace_save_pending" ? "Reconcile the original save before reviewing another draft." : error.message; }
+      finally { state.busy = false; renderLosingCampaign(); }
+      if (state.phase === "ready") await reviewLosingCampaign();
+      $("#losingCampaignText").focus();
+    }
+    async function createLosingCampaign() {
+      const state = losingCampaignState;
+      if (state.busy || !["review", "unknown", "exists"].includes(state.phase)) return;
+      const phase = state.phase;
+      let opened = false;
+      state.busy = true; state.feedback = "Saving the new draft..."; renderLosingCampaign();
+      try {
+        await afterWorkspaceSaves(async () => {
+        assertLosingCampaignSaveState(phase === "unknown" ? state.operation : null);
+        if (phase !== "unknown" && (state.reviewGeneration !== workspaceSaveState.generation || state.reviewSaveRevision !== JSON.stringify(model.persistence?.revision))) throw new Error("workspace_revision_conflict");
+        if (phase === "exists") {
+          model = normalizeModel(state.current); model.activeCampaignId = state.created.id;
+          finishLosingCampaignSave(null); opened = true; return;
+        }
+        if (!state.operation) {
+          state.created = losingCampaignDraft(state.files[state.selected], new Date().toISOString());
+          const snapshot = sanitizedModelSnapshot(state.current);
+          snapshot.campaigns.unshift(state.created); snapshot.activeCampaignId = state.created.id;
+          state.operation = { kind: "model-save", operationId: crypto.randomUUID(), expectedRevision: clone(state.current.persistence.revision), request: snapshot };
+        }
+        const response = await sendWorkspaceSave(state.operation), current = await response.json();
+        assertLosingCampaignSaveState(state.operation);
+        const saved = current.campaigns?.find(item => item.id === state.created.id);
+        if (!saved || saved.variants.some(item => item.status !== "draft") || JSON.stringify(losingCampaignProjection(saved)) !== JSON.stringify(losingCampaignProjection(state.created))) throw new Error("Draft creation was not completely confirmed.");
+        model = normalizeModel(current);
+        finishLosingCampaignSave(state.operation); persistModelSnapshot(model);
+        state.phase = "complete"; state.operation = null;
+        opened = true;
+        });
+      } catch (error) {
+        if (state.context !== losingContext()) { state.phase = "error"; state.feedback = "Workspace changed; inspect the original workspace before retrying."; }
+        else if (error.message === "workspace_save_pending") {
+          state.phase = phase === "unknown" ? "unknown" : "pending";
+          state.feedback = "Another original save is unresolved. Close this review, reconcile that save, then explicitly review again. Its retry data is retained.";
+        }
+        else if (["workspace_revision_conflict", "workspace_receipt_superseded"].includes(error.message)) {
+          state.phase = "conflict"; state.feedback = "Saved content changed during review. Both versions are retained. Review latest saved content before confirming again.";
+        } else if (error.message.startsWith("workspace_") && error.message !== "workspace_commit_unknown") {
+          state.phase = "error"; state.feedback = "Creation was rejected. Review current saved content before trying again.";
+        } else {
+          if (workspaceSaveState.blocked !== "unknown") await captureSaveFailure("workspace_commit_unknown", state.operation);
+          state.phase = "unknown"; state.feedback = "Creation is unconfirmed. Retry only this original operation; do not create another copy.";
+        }
+      } finally { state.busy = false; renderLosingCampaign(); }
+      if (opened) { $("#losingCampaignDialog").close(); render(); jump("studio"); setStudioMode("campaign"); $("#campaignTitleInput").focus(); }
+    }
+
+    const recoveryState = { content: null, baseline: "", busy: false, reading: false, revision: null, operation: null, reviewRequired: false };
+    const recoveryModelKey = () => JSON.stringify(model);
+    function recoveryFeedback(message, state) {
+      $("#recoveryFeedback").textContent = message;
+      $("#recoveryFeedback").dataset.state = state;
+    }
+    function exportRecovery() {
+      try {
+        const content = recoveryContent({ schemaVersion: recoverySchema, content: model });
+        exportJson("Social-Cues-campaign-content.json", { schemaVersion: recoverySchema, exportedAt: new Date().toISOString(), content });
+        $("#recoveryExportStatus").textContent = "Private content file exported. Media attachments, account data and publishing operations are not included.";
+      } catch (error) {
+        $("#recoveryExportStatus").textContent = "Recovery export unavailable: " + error.message;
+      }
+    }
+    async function importModel(file) {
+      if (recoveryState.busy || recoveryState.reading) return;
+      recoveryState.reading = true;
+      recoveryState.content = null;
+      recoveryState.operation = null;
+      recoveryState.reviewRequired = false;
+      $("#applyRecovery").disabled = true;
+      $("#recoverySummary").textContent = "Reading selected file...";
+      recoveryFeedback("", "");
+      $("#cancelRecovery").textContent = "Cancel";
+      $("#recoveryDialog").showModal();
+      try {
+        if (file.size > 5 * 1024 * 1024) throw new Error("File exceeds the 5 MB recovery limit.");
+        const raw = JSON.parse(await file.text());
+        if (!$("#recoveryDialog").open) return;
+        const content = recoveryContent(raw);
+        if (!model.persistence?.conditionalSave) throw new Error("This storage runtime does not support conflict-protected recovery.");
+        if (workspaceSaveState.blocked) throw new Error("Review the paused save before importing recovery content.");
+        const conflict = recoveryConflict(model, content, metaState.publishQueue?.rows || []);
+        if (conflict) throw new Error(conflict);
+        recoveryState.content = content;
+        recoveryState.baseline = recoveryModelKey();
+        recoveryState.revision = clone(model.persistence.revision);
+        const variants = content.campaigns.flatMap(item => item.variants);
+        const statuses = recoveryStatuses.map(status => status + ": " + variants.filter(item => item.status === status).length).join("; ");
+        $("#recoverySummary").textContent = "Replace " + model.campaigns.length + " campaigns and " + (model.proof || []).length + " evidence records with:\n"
+          + content.campaigns.length + " campaigns; " + variants.length + " variants; " + content.proof.length + " evidence records.\n"
+          + statuses + "\n\n" + content.campaigns.map(item => item.title + " [" + item.id + "]").join("\n")
+          + "\n\nFrozen snapshots: " + content.campaigns.filter(item => item.evidenceSnapshot).length
+          + ". Other file fields are excluded. Make a private export of current content before replacing it.";
+        $("#applyRecovery").disabled = false;
+        $("#applyRecovery").textContent = "Replace supported content";
+        recoveryFeedback("Preview only. Current data has not changed.", "preview");
+      } catch (error) {
+        $("#recoverySummary").textContent = "No content will be restored.";
+        recoveryFeedback(error instanceof SyntaxError ? "Invalid JSON file." : error.message, "error");
+      } finally {
+        recoveryState.reading = false;
+        $("#importModelInput").value = "";
+        if ($("#recoveryDialog").open) $("#recoverySummary").focus();
+      }
+    }
+    async function applyRecovery() {
+      const state = recoveryState;
+      if (state.busy || !state.content) return;
+      if (state.reviewRequired) {
+        if (!await reviewWorkspaceSave()) return;
+        const content = clone(state.content);
+        await importModel(new File([JSON.stringify({ schemaVersion: recoverySchema, content })], "reviewed-recovery.json"));
+        return;
+      }
+      if (!SERVER_MODE || !hostedModelHydrated || !model.currentUser?.id || !model.workspace?.id) {
+        recoveryFeedback("A loaded signed-in workspace is required for confirmed recovery.", "error"); return;
+      }
+      if (!model.persistence?.conditionalSave) { recoveryFeedback("Conflict-protected recovery is unavailable on this storage runtime.", "error"); return; }
+      if (!state.operation && recoveryModelKey() !== state.baseline) {
+        recoveryFeedback("Workspace changed since preview. Cancel and review the file again.", "error"); return;
+      }
+      const conflict = recoveryConflict(model, state.content, metaState.publishQueue?.rows || []);
+      if (conflict) { recoveryFeedback(conflict, "error"); return; }
+      const target = model, previous = clone(model);
+      const sameWorkspace = () => model === target && model.currentUser?.id === previous.currentUser.id
+        && model.workspace?.id === previous.workspace?.id;
+      state.content.campaigns.forEach(item => { item.recoveryRecordedAt ||= new Date().toISOString(); });
+      const content = recoveryContent({ schemaVersion: recoverySchema, content: state.content });
+      state.operation ||= { kind: "content-recovery", operationId: crypto.randomUUID(), expectedRevision: clone(state.revision), request: { schemaVersion: recoverySchema, content } };
+      state.busy = true;
+      $("#applyRecovery").disabled = true;
+      $("#cancelRecovery").disabled = true;
+      recoveryFeedback("Saving supported content...", "saving");
+      try {
+        const response = await sendWorkspaceSave(state.operation);
+        const confirmed = response?.ok ? await response.json() : null;
+        if (!confirmed || JSON.stringify(recoveryContent(confirmed)) !== JSON.stringify(content)) throw new Error("Recovery response did not confirm the complete content.");
+        if (!sameWorkspace()) throw new Error("Workspace changed during recovery.");
+        Object.assign(target, content); persistModelSnapshot(target); render();
+        workspaceSaveState.blocked = ""; workspaceSaveState.pending = null; workspaceSaveNotice("");
+        state.content = null;
+        recoveryFeedback("Recovery confirmed. Recorded statuses are file history, not reverified delivery. No publishing was requested.", "success");
+        $("#applyRecovery").textContent = "Content restored";
+        $("#cancelRecovery").textContent = "Close";
+      } catch (error) {
+        if (sameWorkspace() && !workspaceSaveState.blocked) await captureSaveFailure("workspace_commit_unknown", state.operation);
+        if (sameWorkspace()) {
+          Object.assign(target, { campaigns: previous.campaigns, proof: previous.proof, activeCampaignId: previous.activeCampaignId, updatedAt: previous.updatedAt });
+          persistModelSnapshot(target);
+          render();
+          state.baseline = recoveryModelKey();
+        }
+        if (workspaceSaveState.blocked === "conflict") {
+          state.reviewRequired = true;
+          recoveryFeedback("Save conflict. The selected file is retained. Review current content, then preview this replacement again.", "conflict");
+          $("#applyRecovery").textContent = "Review current content";
+        } else {
+          recoveryFeedback(sameWorkspace()
+            ? "Save was not confirmed; the server may have saved it. Original local content is retained. Retry this same replacement, or close and reload to inspect saved content."
+            : "Workspace changed during recovery; the save was not confirmed. This workspace was not overwritten by the response. Close and inspect the original workspace before retrying.", "error");
+          $("#applyRecovery").textContent = "Retry same replacement";
+        }
+      } finally {
+        state.busy = false;
+        $("#applyRecovery").disabled = !state.content;
+        $("#cancelRecovery").disabled = false;
+        (state.content ? $("#applyRecovery") : $("#cancelRecovery")).focus();
+      }
     }
 
     function saveProfile() {
@@ -5838,11 +7489,7 @@
         model.activity.unshift({ at: model.updatedAt, message: "Configured the workspace from first-run onboarding." });
         model.activity = model.activity.slice(0, 20);
         if (SERVER_MODE) {
-          const response = await authedFetch("/api/model", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(sanitizedModelSnapshot(model))
-          });
+          const response = await enqueueHostedModelSave(sanitizedModelSnapshot(model));
           const saved = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(saved.error || "The workspace could not be saved.");
           model = normalizeModel(saved);
@@ -7179,7 +8826,7 @@
         const assets = healthResponse.ok
           ? await healthResponse.json()
           : await authedFetch("/api/meta/assets").then(response => response.json());
-        const [diagnosticResponse, metaOAuthResponse, instagramAssetsResponse, threadsResponse, xResponse, tiktokResponse, youtubeResponse, pinterestResponse, canvaResponse, shopifyResponse, etsyResponse, linkedinResponse, linkedinPostsResponse, linkedinCommentsResponse, linkedinAnalyticsResponse, linkedinWebhookResponse, patreonResponse, patreonIdentityResponse, patreonCampaignsResponse, patreonMembersResponse, patreonPostsResponse, patreonWebhookResponse, twitchResponse, discordResponse, discordBotResponse, discordCommandsStatusResponse, discordCommandsResponse, discordPreflightResponse, manychatResponse, elevenlabsResponse, redditResponse, googleSuiteResponse, googleBusinessResponse, providerTruthResponse, acceptanceLedgerResponse, providerAssetMapResponse, providerAccountsResponse, connectionLogResponse, oauthDebugLogResponse, ownershipQueueResponse, providerStateResponse, publishQueueResponse, analyticsSnapshotsResponse, automationResponse, integrationsResponse, securityResponse, capabilityDepthResponse, setupFieldsResponse, testPanelResponse, metaCommentsResponse, metaMessagesResponse, youtubeCommentsResponse, threadsReactionsResponse, threadsInsightsResponse, xEngagementResponse, xEngagementLiveResponse, discordCommunityResponse, discordMessagesResponse, renderJobsResponse, adsFundingResponse] = await Promise.all([
+        const [diagnosticResponse, metaOAuthResponse, instagramAssetsResponse, threadsResponse, xResponse, tiktokResponse, youtubeResponse, pinterestResponse, canvaResponse, shopifyResponse, etsyResponse, linkedinResponse, linkedinPostsResponse, linkedinCommentsResponse, linkedinAnalyticsResponse, linkedinWebhookResponse, patreonResponse, patreonIdentityResponse, patreonCampaignsResponse, patreonMembersResponse, patreonPostsResponse, patreonWebhookResponse, twitchResponse, discordResponse, discordBotResponse, discordCommandsStatusResponse, discordCommandsResponse, discordPreflightResponse, manychatResponse, elevenlabsResponse, vizardResponse, redditResponse, googleSuiteResponse, googleBusinessResponse, providerTruthResponse, acceptanceLedgerResponse, providerAssetMapResponse, providerAccountsResponse, connectionLogResponse, oauthDebugLogResponse, ownershipQueueResponse, providerStateResponse, publishQueueResponse, analyticsSnapshotsResponse, automationResponse, integrationsResponse, securityResponse, capabilityDepthResponse, setupFieldsResponse, testPanelResponse, metaCommentsResponse, metaMessagesResponse, youtubeCommentsResponse, threadsReactionsResponse, threadsInsightsResponse, xEngagementResponse, xEngagementLiveResponse, discordCommunityResponse, discordMessagesResponse, renderJobsResponse, adsFundingResponse] = await Promise.all([
           authedFetch("/api/meta/diagnostic-agent"),
           authedFetch("/api/oauth/meta/status"),
           authedFetch("/api/meta/instagram/accounts"),
@@ -7210,6 +8857,7 @@
           authedFetch("/api/discord/verification-preflight"),
           authedFetch("/api/manychat/readiness"),
           authedFetch("/api/elevenlabs/readiness"),
+          canAccessAdminPanel() ? authedFetch("/api/accounts/vizard/status") : Promise.resolve(null),
           authedFetch("/api/reddit/readiness"),
           authedFetch("/api/google/growth-suite"),
           authedFetch("/api/google/business/readiness"),
@@ -7277,6 +8925,7 @@
         const discordPreflight = await readRouteJson(discordPreflightResponse);
         const manychatStatus = await readRouteJson(manychatResponse);
         const elevenlabsStatus = await readRouteJson(elevenlabsResponse);
+        const vizardStatus = await readRouteJson(vizardResponse);
         const redditStatus = await readRouteJson(redditResponse);
         const googleSuite = await readRouteJson(googleSuiteResponse);
         const googleBusinessStatus = await readRouteJson(googleBusinessResponse);
@@ -7351,6 +9000,7 @@
           discordPreflight,
           manychatStatus,
           elevenlabsStatus,
+          vizardStatus,
           redditStatus,
           googleSuite,
           googleBusinessStatus,
@@ -7461,6 +9111,11 @@
         $("#campaignDestinationInput").value = campaign.destinationUrl || model.onboarding?.website || "";
         $("#campaignCtaInput").value = campaign.destinationCta || "learn_more";
       }
+      renderSavedEvidence(campaign);
+      $("#recoveryHistory").hidden = !campaign?.recoveryRecordedAt;
+      $("#recoveryHistory").textContent = campaign?.recoveryRecordedAt
+        ? "Recovered content. Statuses are recorded file history, not renewed approval or independently verified provider delivery. Media attachments were not restored."
+        : "";
       $("#operatorInput").value = model.profile.operator;
       $("#outcomeInput").value = model.profile.outcome;
       $("#displayInput").value = model.profile.display;
@@ -8028,7 +9683,9 @@
         ${videoTags}
         <div class="notice approval-step"><strong>${draftOnly
           ? `${escapeHtml(p?.name || platformName(v.platform))} campaign copy and media are prepared. This stays a draft until a verified delivery workflow is available.`
-          : escapeHtml(approvalStepCopy(String(v.status || "draft").toLowerCase(), v.platform, v.approvalConfirmedAt))}</strong></div>
+          : escapeHtml(campaign?.recoveryRecordedAt && v.status === "published"
+            ? "Imported history: recorded as published in the file; provider delivery has not been reverified."
+            : approvalStepCopy(String(v.status || "draft").toLowerCase(), v.platform, v.approvalConfirmedAt))}</strong></div>
         <div class="tags">
           ${v.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
           <span class="tag">${escapeHtml(disclosureNote(activeCampaign()))}</span>
@@ -8504,6 +10161,11 @@
     }
 
     function renderCalendar() {
+      const pack = buildPostingPack(activeCampaign());
+      const packSummary = $("#postingPackSummary");
+      if (packSummary) packSummary.textContent = activeCampaign()
+        ? activeCampaign().title + " - " + pack.posts.length + " approved/queued posts"
+        : "No active campaign.";
       const items = customerDeliveryLedgerRows();
       const counts = items.reduce((summary, item) => {
         const status = String(item.status || "queued").toLowerCase();
@@ -10684,38 +12346,54 @@
     }
 
     function renderProof() {
-      if (!$("#proofList") || !$("#selfLaunchList")) return;
-      const proof = model.proof || [];
-      $("#proofList").innerHTML = proof.length ? proof.map(item => `
-        <article class="variant" style="--accent:#ff2d78">
-          <div class="variant-head">
-            <div>
-              <h3>${escapeHtml(item.metric)}</h3>
-              <p>${escapeHtml(item.type)} - ${formatDateTime(item.createdAt)}</p>
-            </div>
-            <span class="pill approved">receipt</span>
-          </div>
-          <p>${escapeHtml(item.note)}</p>
-        </article>
-      `).join("") : `<div class="empty">Evidence is captured from wins, actions, and exports.</div>`;
-
-      const steps = [
-        ["Story one", "Use Social Cues to launch Social Cues and document the before/after."],
-        ["Proof capture", "Save metrics, screenshots, time saved, campaign wins, and customer signals."],
-        ["Story two", "Use those receipts to launch Social Cues as the tool that produced the result."],
-        ["Sales assets", "Turn the proof ledger into posts, landing copy, onboarding examples, and demo scripts."]
-      ];
-      $("#selfLaunchList").innerHTML = steps.map(([title, body], index) => `
-        <article class="variant" style="--accent:${index % 2 ? "#ff386b" : "#93dd55"}">
-          <div class="variant-head">
-            <div>
-              <h3>${title}</h3>
-              <p>${body}</p>
-            </div>
-            <span class="pill approved">loop ${index + 1}</span>
-          </div>
-        </article>
-      `).join("");
+      if (!$("#manualProofList")) return;
+      const workspaceKey = (model.currentUser?.id || "") + ":" + (model.workspace?.id || "");
+      if (selfLaunchState.workspaceKey !== workspaceKey) {
+        Object.assign(selfLaunchState, { workspaceKey, selectedIds: [], preview: null, pending: null, createdId: "", busy: false });
+        selfLaunchFeedback("");
+      }
+      if (manualProofState.workspaceKey !== workspaceKey) {
+        manualProofState.workspaceKey = workspaceKey;
+        manualProofState.editingId = "";
+        manualProofState.draftId = "";
+        manualProofState.dirty = false;
+        $("#manualProofForm").reset();
+        $("#proofObservation").open = false;
+        manualProofFeedback("");
+        $("#proofFormTitle").textContent = "New manual receipt";
+        $("#saveManualProof").textContent = "Save receipt";
+      }
+      renderProofChoices();
+      const proof = Array.isArray(model.proof) ? model.proof.filter(item => item && typeof item === "object") : [];
+      const manual = proof.filter(isManualProof), legacy = proof.filter(item => !isManualProof(item));
+      const association = item => {
+        if (!item.campaignId) return isManualProof(item) ? "Campaign not recorded" : "Unassociated legacy entry";
+        const campaign = (model.campaigns || []).find(value => value.id === item.campaignId);
+        return (campaign?.title || "Campaign unavailable: " + item.campaignId)
+          + (item.variantId ? " / " + item.variantId : " / Variant not recorded");
+      };
+      $("#manualProofList").innerHTML = manual.length ? manual.map(item => {
+        const url = manualProofPostUrl(item.postedUrl);
+        return '<article class="proof-entry" data-manual-proof="' + escapeHtml(item.id) + '">'
+          + '<h3>' + escapeHtml(association(item)) + '</h3>'
+          + (isSelfLaunchEvidence(item) ? '<label class="evidence-select"><input type="checkbox" data-evidence-proof="'
+            + escapeHtml(item.id) + '" aria-label="Select manual record ' + escapeHtml(item.id)
+            + ' for draft"><span>Use in self-launch draft</span></label>' : "")
+          + '<p>' + escapeHtml(manualProofSummary(item)) + '</p>'
+          + (url ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">Open recorded post</a>' : "")
+          + '<div class="actions" style="justify-content:flex-start"><button class="secondary" type="button" data-edit-proof="'
+          + escapeHtml(item.id) + '"' + (manualProofState.busy ? " disabled" : "") + '>Edit receipt</button></div>'
+          + '<small>' + escapeHtml(manualProofState.busy ? "Save in progress" : "Manually recorded; not provider-verified")
+          + '</small></article>';
+      }).join("") : '<div class="empty">No manual receipts yet. No posting or results have been recorded here.</div>';
+      $("#legacyProofList").innerHTML = legacy.length ? legacy.map(item =>
+        '<article class="proof-entry"><h3>' + escapeHtml(association(item)) + '</h3><p>'
+        + escapeHtml((item.type || "Legacy evidence") + ": " + (item.metric || "Metric not recorded"))
+        + '</p><p>' + escapeHtml(item.note || "") + '</p><small>Legacy entry; original data retained.</small></article>'
+      ).join("") : '<div class="empty">No legacy evidence.</div>';
+      renderSelfLaunchEvidence();
+      renderManualCsv();
+      renderManualCsvExport();
     }
 
     function pushApplicationServerKey(value = "") {
@@ -11485,11 +13163,7 @@
       model.updatedAt = new Date().toISOString();
       persistModelSnapshot(model);
       if (canWriteHostedWorkspace()) {
-        authedFetch("/api/model", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(sanitizedModelSnapshot(model))
-        }).catch(() => {});
+        enqueueHostedModelSave(sanitizedModelSnapshot(model)).catch(() => {});
       }
       renderFunctionChecks();
     }
@@ -11850,18 +13524,50 @@
 
     function renderBilling() {
       const billing = model.billing || defaultModel.billing;
-      $("#selectedPlanInput").value = billing.selectedPlan || "Founder Audit - $99";
-      $("#planList").innerHTML = (billing.offers || defaultModel.billing.offers).map((offer, index) => `
-        <article class="variant" style="--accent:${index % 2 ? "#ff386b" : "#ff2d78"}">
+      const pricing = customerSurfaceState.pricingCatalog;
+      const plans = pricing?.status === "available" && Array.isArray(pricing.plans) ? pricing.plans : [];
+      const planSelect = $("#selectedPlanInput");
+      const requestedPlanId = planSelect.value || billing.selectedPlanId || pricing?.defaultPlanId || "";
+      const selectedPlan = plans.find(plan => plan.id === requestedPlanId)
+        || plans.find(plan => plan.id === pricing?.defaultPlanId)
+        || plans[0]
+        || null;
+      planSelect.innerHTML = plans.length
+        ? plans.map(plan => `<option value="${escapeHtml(plan.id)}">${escapeHtml(plan.name)} - ${escapeHtml(plan.monthlyPriceDisplay)}</option>`).join("")
+        : `<option value="">${customerSurfaceState.pricingError ? "Pricing unavailable" : "Load current plans"}</option>`;
+      planSelect.disabled = !plans.length;
+      if (selectedPlan) planSelect.value = selectedPlan.id;
+      const checkoutButton = $("#createCheckout");
+      checkoutButton.disabled = true;
+      checkoutButton.textContent = "Checkout unavailable";
+      const portalButton = $("#manageSubscription");
+      portalButton.disabled = true;
+      portalButton.textContent = "Billing portal unavailable";
+      const classificationLabel = classification => pricing?.classificationLabels?.[classification]
+        || String(classification || "status pending").replaceAll("_", " ");
+      const planCards = plans.map((plan, index) => `
+        <article class="variant" data-pricing-plan="${escapeHtml(plan.id)}" style="--accent:${index % 2 ? "#ff386b" : "#ff2d78"}">
           <div class="variant-head">
             <div>
-              <h3>${escapeHtml(offer.name)} - ${escapeHtml(offer.price)}</h3>
-              <p>${escapeHtml(offer.description)}</p>
+              <h3>${escapeHtml(plan.name)} - ${escapeHtml(plan.monthlyPriceDisplay)}</h3>
+              <p>${escapeHtml(plan.intendedCustomer)} ${escapeHtml(plan.description)}</p>
             </div>
-            <span class="pill approved">offer</span>
+            <span class="pill draft">checkout unavailable</span>
           </div>
-        </article>
-      `).join("");
+          <div class="tags">
+            ${(plan.allowances || []).map(item => `<span class="tag">${escapeHtml(item.label)}: ${escapeHtml(item.display)} - ${escapeHtml(classificationLabel(item.classification))}</span>`).join("")}
+            ${(plan.capabilities || []).map(item => `<span class="tag">${escapeHtml(item.label)} - ${escapeHtml(classificationLabel(item.classification))}</span>`).join("")}
+            <span class="tag">${escapeHtml(plan.support?.label || "Support pending")} - ${escapeHtml(classificationLabel(plan.support?.classification))}</span>
+          </div>
+          <p>${escapeHtml(plan.support?.detail || "Support terms are pending.")}</p>
+        </article>`).join("");
+      const providerRows = (pricing?.providers || []).map(provider => `
+        <div class="notice"><strong>${escapeHtml(provider.name)}:</strong> ${escapeHtml(provider.disclosure)} <span class="tag">${escapeHtml(`${provider.status} / ${provider.availability}`)}</span></div>`).join("");
+      $("#planList").innerHTML = plans.length
+        ? `${planCards}<div class="notice"><strong>Third-party charges:</strong> ${escapeHtml(pricing.thirdPartyChargesDisclosure)}</div>${providerRows}<div class="notice"><strong>Agency data:</strong> ${escapeHtml(pricing.agencyDataPolicy)}</div>`
+        : customerSurfaceState.pricingError
+          ? `<div class="empty">Pricing unavailable. No fallback price is shown.</div>`
+          : `<div class="empty">Open Billing or refresh to load the server-controlled pricing catalog.</div>`;
       const statusElement = $("#billingAccountStatus");
       const entitlement = customerSurfaceState.entitlement?.entitlement || model.currentUser?.entitlement || null;
       const readiness = customerSurfaceState.billingStatus;
@@ -11871,7 +13577,7 @@
       statusElement.innerHTML = `
         <article class="variant" style="--accent:${active ? "#93dd55" : "#f6bd4a"}">
           <div class="variant-head">
-            <div><h3>${active ? "Full app access" : "Access needs a plan"}</h3><p>${escapeHtml(customerSurfaceState.entitlement?.accessMessage || (active ? "This account has active Social Cues access." : "Choose a plan to activate this account."))}</p></div>
+            <div><h3>${active ? "Full app access" : "Access inactive"}</h3><p>${escapeHtml(customerSurfaceState.entitlement?.accessMessage || (active ? "This account has active Social Cues access." : "Billing activation is unavailable."))}</p></div>
             <span class="pill ${active ? "published" : "draft"}">${active ? "active" : "inactive"}</span>
           </div>
           <div class="tags">
@@ -11884,69 +13590,48 @@
     }
 
     async function loadBillingStatus() {
-      try {
-        const [statusResponse, entitlementResponse] = await Promise.all([authedFetch("/api/billing/status"), authedFetch("/api/auth/entitlement")]);
-        const [status, entitlement] = await Promise.all([statusResponse.json().catch(() => ({})), entitlementResponse.json().catch(() => ({}))]);
+      customerSurfaceState.pricingError = "";
+      const [pricingResult, accountResult] = await Promise.allSettled([
+        fetch("/api/pricing", { cache: "no-store", credentials: "same-origin" }).then(async response => ({
+          response,
+          payload: await response.json().catch(() => ({}))
+        })),
+        Promise.all([authedFetch("/api/billing/status"), authedFetch("/api/auth/entitlement")]).then(async ([statusResponse, entitlementResponse]) => ({
+          statusResponse,
+          entitlementResponse,
+          status: await statusResponse.json().catch(() => ({})),
+          entitlement: await entitlementResponse.json().catch(() => ({}))
+        }))
+      ]);
+      if (pricingResult.status === "fulfilled" && pricingResult.value.response.ok && pricingResult.value.payload?.ok && pricingResult.value.payload?.pricing?.status === "available") {
+        customerSurfaceState.pricingCatalog = pricingResult.value.payload.pricing;
+      } else {
+        customerSurfaceState.pricingCatalog = null;
+        customerSurfaceState.pricingError = "Pricing is temporarily unavailable.";
+      }
+      if (accountResult.status === "fulfilled") {
+        const { statusResponse, entitlementResponse, status, entitlement } = accountResult.value;
         customerSurfaceState.billingStatus = statusResponse.ok ? status : null;
         customerSurfaceState.entitlement = entitlementResponse.ok ? entitlement : null;
-        renderBilling();
-      } catch (error) {
-        $("#billingAccountStatus").innerHTML = `<div class="notice">${escapeHtml(error.message)}</div>`;
+      } else {
+        customerSurfaceState.billingStatus = null;
+        customerSurfaceState.entitlement = null;
       }
+      renderBilling();
     }
 
-    async function createCheckout() {
-      const billing = model.billing || defaultModel.billing;
-      const selectedPlan = $("#selectedPlanInput").value || billing.selectedPlan;
+    function createCheckout() {
       const button = $("#createCheckout");
-      const originalText = button.textContent;
       button.disabled = true;
-      button.textContent = "Creating...";
-      try {
-        const response = await authedFetch("/api/billing/checkout", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ selectedPlan })
-        });
-        const result = await response.json();
-        if (!response.ok || !result.ok) throw new Error(result.message || result.error || "Checkout is not ready yet.");
-        model.billing = {
-          ...(model.billing || defaultModel.billing),
-          selectedPlan,
-          status: result.mode === "stripe-checkout" ? "Stripe Checkout ready" : result.mode === "payment-link" ? "Payment Link ready" : "Not configured",
-          paymentLink: result.mode === "payment-link" ? result.url || "" : ""
-        };
-        saveModel("Updated billing checkout status.");
-        renderBilling();
-        if (result.url) {
-          openPaymentUrl(result.url);
-        } else {
-          alert(result.message || "Stripe is not fully configured yet. Check backend Stripe keys and price IDs.");
-        }
-      } catch (error) {
-        alert(`Checkout could not be created yet: ${error.message}`);
-      } finally {
-        button.disabled = false;
-        button.textContent = originalText;
-      }
+      button.textContent = "Checkout unavailable";
+      showAppResult("Checkout unavailable", "Plan selection is informational. Checkout and billing activation are unavailable.", "error");
     }
 
-    async function manageSubscription() {
+    function manageSubscription() {
       const button = $("#manageSubscription");
-      const original = button.textContent;
       button.disabled = true;
-      button.textContent = "Opening...";
-      try {
-        const response = await authedFetch("/api/billing/portal", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || payload.ok === false || !payload.url) throw new Error(payload.error || "No Stripe customer portal is linked to this account yet.");
-        openPaymentUrl(payload.url);
-      } catch (error) {
-        showAppResult("Subscription portal unavailable", error.message, "error");
-      } finally {
-        button.disabled = false;
-        button.textContent = original;
-      }
+      button.textContent = "Billing portal unavailable";
+      showAppResult("Billing portal unavailable", "Billing management is not available from this presentation surface.", "error");
     }
 
     function providerTruthPill(row) {
@@ -12739,6 +14424,74 @@
       return `${identity} is connected. Additional provider access is still pending.`;
     }
 
+    function vizardPublicErrorMessage(data, fallback) {
+      const safeMessages = {
+        invalid_request: "Enter a valid Vizard API key.",
+        unsupported_media_type: "Send the Vizard API key as JSON.",
+        not_authenticated: "Sign in before managing the Vizard connection.",
+        not_authorized: "You do not have permission to manage this workspace connection.",
+        connection_service_unavailable: "The Vizard connection service is temporarily unavailable.",
+        connection_update_failed: "The connection could not be updated."
+      };
+      return safeMessages[String(data?.code || "")] || fallback;
+    }
+
+    function vizardApiKeyUtf8Bytes(value) {
+      return new TextEncoder().encode(String(value || "")).byteLength;
+    }
+
+    function renderVizardConnectionCard() {
+      if (!canAccessAdminPanel()) return "";
+      const status = metaState.vizardStatus || {};
+      const connection = status.connection || {};
+      const stored = Boolean(connection.credentialStored);
+      const storageAvailable = connection.credentialStorageAvailable !== false;
+      const advertisedLimit = Number(connection.apiKeyMaxUtf8Bytes);
+      const apiKeyMaxUtf8Bytes = Number.isInteger(advertisedLimit) && advertisedLimit > 0
+        ? advertisedLimit
+        : null;
+      const stateLabel = stored ? "credential stored" : storageAvailable ? "not connected" : "temporarily unavailable";
+      const statePill = stored ? "approved" : storageAvailable ? "draft" : "revision";
+      const detail = status.ok === false
+        ? "The Vizard connection service is temporarily unavailable."
+        : stored
+          ? "Credential stored. Verification pending."
+          : storageAvailable
+            ? "Only an active workspace owner or admin can store the workspace-owned key."
+            : "The Vizard connection service is temporarily unavailable.";
+      const action = stored ? "replace" : "connect";
+      return `<article class="variant account-card" data-account-lane="vizard" style="--accent:#6f7cff">
+        <div class="variant-head">
+          <div>
+            <h3>Vizard</h3>
+            <p>AI video clipping and editing through your own Vizard account.</p>
+            <p>${escapeHtml(detail)}</p>
+          </div>
+          <span class="pill ${statePill}">${escapeHtml(stateLabel)}</span>
+        </div>
+        <div class="tags provider-state-chips">
+          <span class="pill ${stored ? "approved" : "draft"}">workspace credential: ${stored ? "stored" : "not stored"}</span>
+          <span class="pill ${stored ? "revision" : "draft"}">verification: ${stored ? "pending" : "not started"}</span>
+          <span class="pill approved">secret never returned</span>
+        </div>
+        <p>Requires your own Vizard account.</p>
+        <p>Vizard processing charges are billed by Vizard.</p>
+        <p><a href="https://vizard.ai/pricing" target="_blank" rel="noopener noreferrer">Create a Vizard account</a></p>
+        ${storageAvailable ? `<form class="manychat-connect-form" data-vizard-credential-form data-action="${action}"${apiKeyMaxUtf8Bytes ? ` data-api-key-max-utf8-bytes="${apiKeyMaxUtf8Bytes}"` : ""}>
+          <label>
+            <span>${stored ? "Replacement Vizard API key" : "Vizard API key"}</span>
+            <input name="apiKey" type="password" autocomplete="new-password" spellcheck="false" required placeholder="Paste the workspace-owned Vizard API key">
+            ${apiKeyMaxUtf8Bytes ? `<small>Maximum: ${apiKeyMaxUtf8Bytes} UTF-8 bytes.</small>` : ""}
+          </label>
+          <button type="submit">${stored ? "Replace key" : "Connect Vizard"}</button>
+        </form>` : ""}
+        <div class="variant-tools">
+          <button data-vizard-refresh>Refresh status</button>
+          ${stored ? `<button data-vizard-disconnect>Disconnect</button>` : ""}
+        </div>
+      </article>`;
+    }
+
     function renderAccounts() {
       const accounts = mergedConnectedAccounts();
       const customerPlatforms = platforms.filter(platform => customerAccountPlatformIds.has(platform.id));
@@ -13004,6 +14757,7 @@
         </details>
       ` : "";
       $("#socialAccountList").innerHTML = `
+        ${renderVizardConnectionCard()}
         <div class="account-group-header">
           <strong>Accounts and posting identities</strong>
           <span class="tag">${escapeHtml(`${primaryPlatforms.length} selected or saved`)}</span>
@@ -13025,6 +14779,102 @@
       $$("#socialAccountList [data-elevenlabs-connect]").forEach(form => {
         form.addEventListener("submit", connectElevenlabsAccount);
       });
+      $$("#socialAccountList [data-vizard-credential-form]").forEach(form => {
+        form.addEventListener("submit", saveVizardCredential);
+      });
+      $$("#socialAccountList [data-vizard-refresh]").forEach(button => {
+        button.addEventListener("click", refreshVizardConnection);
+      });
+      $$("#socialAccountList [data-vizard-disconnect]").forEach(button => {
+        button.addEventListener("click", disconnectVizardConnection);
+      });
+    }
+
+    async function refreshVizardConnection() {
+      let failureMessage = "The Vizard connection service is temporarily unavailable.";
+      try {
+        const response = await authedFetch("/api/accounts/vizard/status");
+        const data = await response.json();
+        if (!response.ok || data.ok === false) {
+          failureMessage = vizardPublicErrorMessage(data, failureMessage);
+          throw new Error("Vizard status request failed.");
+        }
+        metaState = { ...metaState, vizardStatus: data };
+        renderAccounts();
+      } catch {
+        showAppResult("Vizard status unavailable", failureMessage, "error");
+      }
+    }
+
+    async function saveVizardCredential(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const action = form.dataset.action === "replace" ? "replace" : "connect";
+      const submit = form.querySelector('button[type="submit"]');
+      const field = form.elements.apiKey;
+      const advertisedLimit = Number(form.dataset.apiKeyMaxUtf8Bytes);
+      const apiKeyMaxUtf8Bytes = Number.isInteger(advertisedLimit) && advertisedLimit > 0
+        ? advertisedLimit
+        : null;
+      let apiKey = String(field?.value || "").trim();
+      if (field) field.value = "";
+      let failureMessage = "The connection could not be updated.";
+      submit.disabled = true;
+      submit.textContent = action === "replace" ? "Replacing..." : "Connecting...";
+      try {
+        if (!apiKey || (apiKeyMaxUtf8Bytes && vizardApiKeyUtf8Bytes(apiKey) > apiKeyMaxUtf8Bytes)) {
+          failureMessage = "Enter a valid Vizard API key.";
+          throw new Error("Vizard API key validation failed.");
+        }
+        const response = await authedFetch(`/api/accounts/vizard/${action}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ apiKey })
+        });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) {
+          failureMessage = vizardPublicErrorMessage(data, failureMessage);
+          throw new Error("Vizard connection request failed.");
+        }
+        metaState = { ...metaState, vizardStatus: data };
+        showAppResult(
+          action === "replace" ? "Vizard key replaced" : "Vizard key stored",
+          "The credential is encrypted for this workspace. Provider verification remains pending.",
+          "success"
+        );
+        renderAccounts();
+      } catch {
+        showAppResult("Vizard connection failed", failureMessage, "error");
+      } finally {
+        if (field) field.value = "";
+        apiKey = "";
+        submit.disabled = false;
+        submit.textContent = action === "replace" ? "Replace key" : "Connect Vizard";
+      }
+    }
+
+    async function disconnectVizardConnection(event) {
+      const button = event.currentTarget;
+      if (!window.confirm("Disconnect Vizard and delete the stored workspace credential?")) return;
+      let failureMessage = "The connection could not be updated.";
+      button.disabled = true;
+      button.textContent = "Disconnecting...";
+      try {
+        const response = await authedFetch("/api/accounts/vizard/disconnect", { method: "POST" });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) {
+          failureMessage = vizardPublicErrorMessage(data, failureMessage);
+          throw new Error("Vizard disconnect request failed.");
+        }
+        metaState = { ...metaState, vizardStatus: data };
+        showAppResult("Vizard disconnected", "The stored workspace credential was deleted.", "success");
+        renderAccounts();
+      } catch {
+        showAppResult("Vizard disconnect failed", failureMessage, "error");
+      } finally {
+        button.disabled = false;
+        button.textContent = "Disconnect";
+      }
     }
 
     async function connectManychatAccount(event) {
@@ -14030,10 +15880,6 @@
       }
     }
 
-    function openPaymentUrl(url) {
-      openSafeExternalUrl(url, ["checkout.stripe.com", "buy.stripe.com"]);
-    }
-
     async function copyTextValue(value, label = "Value") {
       const text = String(value || "");
       if (!text) return;
@@ -14281,7 +16127,7 @@
       if (view === "responses" && !customerSurfaceState.manychatCatalog) renderManychatCrm();
       if (view === "ads" && !customerSurfaceState.adDrafts.length) loadAdDrafts();
       if (view === "devices" && !customerSurfaceState.workspaceAccess) loadWorkspaceAccess();
-      if (view === "billing" && !customerSurfaceState.billingStatus) loadBillingStatus();
+      if (view === "billing" && (!customerSurfaceState.billingStatus || !customerSurfaceState.pricingCatalog)) loadBillingStatus();
     }
 
     function navigateTo(view) {
@@ -14464,21 +16310,99 @@
     if (addProofButton) addProofButton.addEventListener("click", addProof);
     const createSelfLaunchButton = $("#createSelfLaunch");
     if (createSelfLaunchButton) createSelfLaunchButton.addEventListener("click", createSelfLaunchCampaign);
+    $("#previewSelfLaunch").addEventListener("click", previewSelfLaunchEvidence);
+    $("#openSelfLaunchDraft").addEventListener("click", () => {
+      if (!(model.campaigns || []).some(item => item.id === selfLaunchState.createdId)) return;
+      model.activeCampaignId = selfLaunchState.createdId;
+      setStudioMode("campaign");
+      render();
+      navigateTo("studio");
+      $("#campaignTitleInput").focus();
+    });
+    $("#manualProofList").addEventListener("change", event => {
+      const input = event.target.closest("[data-evidence-proof]");
+      if (!input || selfLaunchState.busy || selfLaunchState.pending || manualProofState.busy) return;
+      const id = input.dataset.evidenceProof;
+      selfLaunchState.selectedIds = input.checked
+        ? [...new Set([...selfLaunchState.selectedIds, id])] : selfLaunchState.selectedIds.filter(value => value !== id);
+      selfLaunchState.preview = null;
+      selfLaunchState.createdId = "";
+      selfLaunchFeedback("");
+      renderSelfLaunchEvidence();
+    });
     $("#createCheckout").addEventListener("click", createCheckout);
+    $("#selectedPlanInput").addEventListener("change", event => {
+      model.billing = { ...(model.billing || defaultModel.billing), selectedPlanId: event.target.value };
+      renderBilling();
+    });
     $("#refreshBillingStatus").addEventListener("click", loadBillingStatus);
     $("#manageSubscription").addEventListener("click", manageSubscription);
     $("#createHandoff").addEventListener("click", createHandoff);
     $("#copyHandoff").addEventListener("click", copyHandoff);
     $("#exportHandoff").addEventListener("click", exportHandoff);
     $("#exportModel").addEventListener("click", exportModel);
+    $("#exportRecovery").addEventListener("click", exportRecovery);
     $("#exportModelDash")?.addEventListener("click", exportModel);
     $("#exportContent").addEventListener("click", exportContent);
+    $("#exportPostingMarkdown").addEventListener("click", () => exportPostingPack("markdown"));
+    $("#exportPostingCsv").addEventListener("click", () => exportPostingPack("csv"));
+    $("#manualProofForm").addEventListener("submit", saveManualProof);
+    document.body.append($("#manualCsvDialog"));
+    $("#manualCsvTemplate").addEventListener("click", () => {
+      const blob = new Blob(["\uFEFF" + manualCsvColumns.join(",") + "\r\n"], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob), link = document.createElement("a");
+      link.href = url; link.download = "Social-Cues-manual-receipts-template.csv"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+    $("#importManualCsv").addEventListener("click", () => {
+      if (manualCsvState.phase === "unknown") openManualCsv(); else $("#manualCsvInput").click();
+    });
+    $("#manualCsvInput").addEventListener("change", event => { const file = event.target.files[0]; event.target.value = ""; if (file) openManualCsv(file); });
+    $("#resumeManualCsv").addEventListener("click", () => openManualCsv());
+    $("#refreshManualCsv").addEventListener("click", reviewManualCsv);
+    $("#confirmManualCsv").addEventListener("click", importManualCsvRows);
+    $("#cancelManualCsv").addEventListener("click", () => { if (!manualCsvState.busy) $("#manualCsvDialog").close(); });
+    $("#manualCsvDialog").addEventListener("cancel", event => { if (manualCsvState.busy) event.preventDefault(); });
+    document.body.append($("#manualCsvExportDialog"));
+    $("#exportManualCsv").addEventListener("click", openManualCsvExport);
+    $("#refreshManualCsvExport").addEventListener("click", () => reviewManualCsvExport(false));
+    $("#downloadManualCsvExport").addEventListener("click", downloadManualCsvExport);
+    $("#cancelManualCsvExport").addEventListener("click", () => { if (!manualCsvExportState.busy) $("#manualCsvExportDialog").close(); });
+    $("#manualCsvExportDialog").addEventListener("cancel", event => { if (manualCsvExportState.busy) event.preventDefault(); });
+    for (const eventName of ["input", "change"]) $("#manualProofForm").addEventListener(eventName, event => {
+      if (event.target.matches("input, select, textarea")) manualProofState.dirty = true;
+    });
+    $("#openManualResults").addEventListener("click", prepareManualProofFromPlan);
+    $("#clearProofObservation").addEventListener("click", clearManualObservation);
+    $("#newManualProof").addEventListener("click", resetManualProof);
+    $("#proofCampaignInput").addEventListener("change", () => { $("#proofVariantInput").value = ""; renderProofChoices(); });
+    $("#proofVariantInput").addEventListener("change", renderProofChoices);
+    $("#manualProofList").addEventListener("click", event => {
+      const button = event.target.closest("[data-edit-proof]");
+      if (button) editManualProof(button.dataset.editProof);
+    });
     $("#saveDisk").addEventListener("click", () => saveToDisk().catch(error => alert(error.message)));
     $("#loadDisk").addEventListener("click", () => loadFromDisk().catch(error => alert(error.message)));
     $("#downloadContentDash")?.addEventListener("click", exportContent);
     $("#dismissAppResult").addEventListener("click", dismissAppResult);
     $("#importModelButton").addEventListener("click", () => $("#importModelInput").click());
     $("#importModelInput").addEventListener("change", e => e.target.files[0] && importModel(e.target.files[0]));
+    $("#applyRecovery").addEventListener("click", applyRecovery);
+    $("#cancelRecovery").addEventListener("click", () => { if (!recoveryState.busy) $("#recoveryDialog").close(); });
+    document.body.append($("#losingCampaignDialog"));
+    $("#importLosingCampaignButton").addEventListener("click", () => $("#importLosingCampaignInput").click());
+    $("#importLosingCampaignInput").addEventListener("change", event => { const file = event.target.files[0]; event.target.value = ""; if (file) openLosingCampaign(file); });
+    $("#losingCampaignSelect").addEventListener("change", event => { losingCampaignState.selected = Number(event.target.value); reviewLosingCampaign(); });
+    $("#refreshLosingCampaign").addEventListener("click", reviewLosingCampaign);
+    $("#createLosingCampaign").addEventListener("click", createLosingCampaign);
+    $("#downloadLosingCampaign").addEventListener("click", () => {
+      if (losingCampaignState.context !== losingContext()) return;
+      const file = losingCampaignState.files[losingCampaignState.selected];
+      if (file) exportJson("Social-Cues-losing-campaign.json", file);
+    });
+    $("#cancelLosingCampaign").addEventListener("click", () => { if (!losingCampaignState.busy) $("#losingCampaignDialog").close(); });
+    $("#losingCampaignDialog").addEventListener("cancel", event => { if (losingCampaignState.busy) event.preventDefault(); });
+    $("#recoveryDialog").addEventListener("cancel", event => { if (recoveryState.busy) event.preventDefault(); });
+    $("#recoveryDialog").addEventListener("close", () => { recoveryState.content = null; $("#importModelButton").focus(); });
     $("#resetAll").addEventListener("click", () => {
       if (!confirm("Reset the local Social Cues model? Export first if you want to keep it.")) return;
       localStorage.removeItem(STORAGE_KEY);

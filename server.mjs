@@ -6,6 +6,36 @@ import {
   sentryStatus,
   traceSupabaseOperation
 } from "./instrument.mjs";
+import {
+  launchPromoAssets,
+  publicLaunchPromoAssets,
+  publicMediaContentType
+} from "./launch-promo-assets.mjs";
+import {
+  audienceBriefOutputSchema,
+  platformVariantOutputSchema
+} from "./openai-response-schemas.mjs";
+import {
+  requireWorkspaceManagementAccess as authorizeWorkspaceManagement
+} from "./workspace-management-authorization.mjs";
+import {
+  applyCanonicalLocalOwnership,
+  createLocalWorkspaceIdentity,
+  LocalWorkspaceOwnershipError,
+  validateLocalOwnershipState
+} from "./local-workspace-ownership.mjs";
+import { resolveLocalWorkspaceManagementMembership } from "./local-workspace-membership.mjs";
+import { openLocalWorkspacePersistence } from "./local-workspace-persistence.mjs";
+import { WorkspaceContentPersistenceError } from "./workspace-content-persistence.mjs";
+import { localRecoveryValidation } from "./local-recovery-validation.mjs";
+import { PRICING_CONFIGURATION } from "./pricing-packaging.mjs";
+import { resolveStripeBillingConfiguration } from "./stripe-billing-configuration.mjs";
+import { createStripeBillingApplication } from "./stripe-billing-application.mjs";
+import {
+  createVizardConnectionService,
+  isVizardJsonMediaType,
+  normalizeVizardConnectionError
+} from "./vizard-connection-service.mjs";
 import http from "node:http";
 import crypto from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -39,14 +69,6 @@ const comingSoonImagePath = path.join(__dirname, "social-cues-coming-soon.png");
 const publicMediaDir = path.join(__dirname, "public", "media");
 const launchPromoAssetDir = path.join(publicMediaDir, "social-cues-promo-pack");
 const launchPromoAssetFallbackDir = __dirname;
-const launchPromoAssets = [
-  { id: "square-feed", platformFit: ["x", "threads", "facebook_feed", "instagram_feed"], fileName: "social-cues-coming-soon-square-feed-1080x1080.mp4", kind: "video", contentType: "video/mp4" },
-  { id: "vertical-9x16", platformFit: ["instagram", "facebook", "tiktok", "youtube"], fileName: "social-cues-coming-soon-vertical-9x16-1080x1920.mp4", kind: "video", contentType: "video/mp4" },
-  { id: "story-safe", platformFit: ["instagram_story", "facebook_story"], fileName: "social-cues-coming-soon-story-safe-1080x1920.mp4", kind: "video", contentType: "video/mp4" },
-  { id: "square-still", platformFit: ["x", "threads", "facebook_feed", "instagram_feed"], fileName: "social-cues-coming-soon-square-still-1080x1080.png", kind: "image", contentType: "image/png" },
-  { id: "vertical-still", platformFit: ["instagram", "facebook", "tiktok"], fileName: "social-cues-coming-soon-vertical-still-1080x1920.png", kind: "image", contentType: "image/png" },
-  { id: "youtube-thumbnail", platformFit: ["youtube"], fileName: "social-cues-coming-soon-youtube-thumbnail-1280x720.png", kind: "image", contentType: "image/png" }
-];
 
 async function loadEnvFile() {
   const envPath = path.join(__dirname, ".env");
@@ -127,6 +149,36 @@ function envValue(name, fallback = "") {
     if (value) return value;
   }
   return fallback;
+}
+
+function resolvedEnvCredential(name) {
+  const suppliedNames = new Set(Object.keys(process.env));
+  for (const source of [name, ...(envAliases[name] || [])]) {
+    if (!suppliedNames.has(source)) continue;
+    const value = String(process.env[source] || "").trim();
+    if (value) return Object.freeze({ value, source, present: true, valid: true });
+  }
+  return Object.freeze({ value: "", source: null, present: false, valid: false });
+}
+
+function resolveTwitchApplicationCredentialState() {
+  const clientId = resolvedEnvCredential("TWITCH_CLIENT_ID");
+  const clientSecret = resolvedEnvCredential("TWITCH_CLIENT_SECRET");
+  const missingEnv = [];
+  if (!clientId.valid) missingEnv.push("TWITCH_CLIENT_ID");
+  if (!clientSecret.valid) missingEnv.push("TWITCH_CLIENT_SECRET");
+  return Object.freeze({
+    clientId: clientId.value,
+    clientSecret: clientSecret.value,
+    clientIdSource: clientId.source,
+    clientSecretSource: clientSecret.source,
+    clientIdPresent: clientId.present,
+    clientSecretPresent: clientSecret.present,
+    clientIdValid: clientId.valid,
+    clientSecretValid: clientSecret.valid,
+    configured: missingEnv.length === 0,
+    missingEnv: Object.freeze(missingEnv)
+  });
 }
 
 function envScopeList(name, fallback = []) {
@@ -231,8 +283,9 @@ const patreonClientId = envValue("PATREON_CLIENT_ID").trim();
 const patreonClientSecret = envValue("PATREON_CLIENT_SECRET").trim();
 const patreonWebhookSecret = process.env.PATREON_WEBHOOK_SECRET || "";
 const twitchPublicAppUrl = (process.env.TWITCH_PUBLIC_APP_URL || process.env.twitch_public_app_url || publicAppUrl).replace(/\/$/, "");
-const twitchClientId = envValue("TWITCH_CLIENT_ID");
-const twitchClientSecret = envValue("TWITCH_CLIENT_SECRET");
+const twitchApplicationCredentials = resolveTwitchApplicationCredentialState();
+const twitchClientId = twitchApplicationCredentials.clientId;
+const twitchClientSecret = twitchApplicationCredentials.clientSecret;
 const twitchDeveloperReviewStatus = process.env.TWITCH_DEVELOPER_REVIEW_STATUS || "Developer status applied for on 2026-06-28; Twitch estimated about one week for approval.";
 const googlePublicAppUrl = (process.env.GOOGLE_PUBLIC_APP_URL || process.env.google_public_app_url || process.env.YOUTUBE_PUBLIC_APP_URL || process.env.youtube_public_app_url || publicAppUrl).replace(/\/$/, "");
 const googleClientId = envValue("GOOGLE_CLIENT_ID");
@@ -253,12 +306,8 @@ const openaiMonthlyRequestLimit = Math.max(openaiDailyRequestLimit, Number(proce
 const openaiMonthlyTokenLimit = Math.max(10000, Number(process.env.OPENAI_MONTHLY_TOKEN_LIMIT || 1500000));
 const openaiInputCostPerMillionMicrousd = Math.max(0, Number(process.env.OPENAI_INPUT_COST_PER_MILLION_MICROUSD || 0));
 const openaiOutputCostPerMillionMicrousd = Math.max(0, Number(process.env.OPENAI_OUTPUT_COST_PER_MILLION_MICROUSD || 0));
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
-const stripePublishableKey = process.env.STRIPE_PUBLISHABLE_KEY || "";
-const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
-const stripePriceFounderAudit = process.env.STRIPE_PRICE_FOUNDER_AUDIT || "";
-const stripePriceCampaignBuild = process.env.STRIPE_PRICE_CAMPAIGN_BUILD || "";
-const stripePriceProMonthly = process.env.STRIPE_PRICE_PRO_MONTHLY || "";
+const stripeBillingConfiguration = resolveStripeBillingConfiguration(process.env);
+const stripeWebhookSecret = stripeBillingConfiguration.internal?.gatewayConfiguration?.webhookSecret || "";
 const discordPublicAppUrl = (process.env.DISCORD_PUBLIC_APP_URL || publicAppUrl).replace(/\/$/, "");
 const discordClientId = envValue("DISCORD_CLIENT_ID");
 const discordClientSecret = envValue("DISCORD_CLIENT_SECRET");
@@ -302,8 +351,9 @@ const mediaMaxUploadMb = Number(process.env.MEDIA_MAX_UPLOAD_MB || 250);
 const mediaCameraCaptureEnabled = process.env.MEDIA_CAMERA_CAPTURE_ENABLED !== "false";
 const mediaMicCaptureEnabled = process.env.MEDIA_MIC_CAPTURE_ENABLED !== "false";
 const vercelBlobToken = process.env.VERCEL_BLOB_READ_WRITE_TOKEN || "";
-const authProvider = process.env.AUTH_PROVIDER || (supabaseEnabled ? "supabase" : "alpha-local");
+const authProvider = String(process.env.AUTH_PROVIDER || "supabase").trim().toLowerCase();
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || "";
+const supabaseAuthRequestTimeoutMs = Math.max(250, Math.min(Number(process.env.SUPABASE_AUTH_REQUEST_TIMEOUT_MS || 10_000), 30_000));
 const mediaStorageBucket = process.env.MEDIA_STORAGE_BUCKET || "social-cues-media";
 const maxJsonBodyBytes = Number(process.env.MAX_JSON_BODY_BYTES || 1024 * 1024);
 const localAuthSessionSecret = "social-cues-local-dev-session-secret";
@@ -869,11 +919,11 @@ const coreServiceStack = [
   {
     id: "stripe",
     name: "Stripe",
-    purpose: "Payment Links first, then Checkout/subscriptions and webhooks for paid workspaces.",
-    env: ["STRIPE_SECRET_KEY"],
-    optionalEnv: ["STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_FOUNDER_AUDIT", "STRIPE_PRICE_CAMPAIGN_BUILD", "STRIPE_PRICE_PRO_MONTHLY"],
-    configured: () => Boolean(stripeSecretKey || stripePublishableKey),
-    firstUse: "/api/billing/readiness and /api/billing/checkout"
+    purpose: "Readiness-only subscription billing boundary; checkout, portal, and webhook processing remain held.",
+    env: ["STRIPE_BILLING_MODE", "STRIPE_PRICING_CONFIGURATION_VERSION"],
+    optionalEnv: ["STRIPE_TEST_SECRET_KEY", "STRIPE_TEST_WEBHOOK_SECRET", "STRIPE_LIVE_SECRET_KEY", "STRIPE_LIVE_WEBHOOK_SECRET", "STRIPE_PRICE_BUSINESS_MONTHLY", "STRIPE_PRICE_GROWTH_MONTHLY", "STRIPE_PRICE_AGENCY_MONTHLY"],
+    configured: () => stripeBillingConfiguration.safeReadiness.configured,
+    firstUse: "/api/billing/readiness and /api/billing/status"
   },
   {
     id: "resend",
@@ -1010,7 +1060,8 @@ const providerServiceStack = [
     purpose: "Creator community signal, livestream moments, clips, channel metadata, and audience feedback loops.",
     env: ["TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET"],
     optionalEnv: [],
-    configured: () => Boolean(twitchClientId && twitchClientSecret),
+    credentialState: twitchApplicationCredentials,
+    configured: () => twitchApplicationCredentials.configured,
     firstUse: "/api/twitch/readiness"
   },
   {
@@ -1059,10 +1110,12 @@ function servicePortalAuditForReadiness(serviceId = "", auditById = new Map()) {
 
 function serviceReadinessRows(stack, auditById = new Map()) {
   return stack.map(service => {
-    const missingEnv = service.env.filter(name => !envPresent(name));
+    const missingEnv = service.credentialState?.missingEnv || service.env.filter(name => !envPresent(name));
     const optionalMissingEnv = (service.optionalEnv || []).filter(name => !envPresent(name));
     const portalAudit = servicePortalAuditForReadiness(service.id, auditById);
-    const configured = Boolean(service.configured());
+    const configured = service.credentialState
+      ? Boolean(service.credentialState.configured)
+      : Boolean(service.configured());
     const envReady = missingEnv.length === 0 && configured;
     const portalReady = portalAudit ? Boolean(portalAudit.ready) : true;
     return {
@@ -1436,7 +1489,9 @@ function publicIntegrationReadiness(integrations = {}, providerTruth = null, por
   const mediaReadiness = mediaEditorReadiness();
   for (const key of ["sora"]) delete safe[key];
   safe.openai = openaiApiKey ? "Connected in backend" : safe.openai || "Needed";
-  safe.stripe = stripeSecretKey || stripePublishableKey ? "Stripe Checkout ready" : safe.stripe || "Needed";
+  safe.stripe = stripeBillingConfiguration.safeReadiness.configured
+    ? "Stripe billing configuration held for readiness verification"
+    : safe.stripe || "Needed";
   safe.discord = discordClientId && discordClientSecret ? "Discord community OAuth/API ready" : safe.discord || "Needed";
   safe.mediaEditor = mediaReadiness.renderReady
     ? "Private upload, planning, and isolated rendering ready"
@@ -1456,7 +1511,7 @@ function publicIntegrationReadiness(integrations = {}, providerTruth = null, por
       : "OpenID Connect product approval pending"
     : "Developer credentials pending";
   safe.patreon = patreonClientId && patreonClientSecret ? "Patreon API v2 OAuth ready" : "Developer client setup pending";
-  safe.twitch = twitchClientId && twitchClientSecret ? "Developer credentials present" : "Developer app setup pending";
+  safe.twitch = twitchApplicationCredentials.configured ? "Developer credentials present" : "Developer app setup pending";
   safe.manychat = manychatAccountApiKey ? "Account Public API key present" : manychatProfileApiKey ? "Profile template API key present" : "Customer API key pending";
   safe.elevenlabs = elevenlabsServerApiKey ? "Server fallback key present" : "Customer restricted API key pending";
   safe.pinterest = pinterestCredentialsReady() ? (safe.pinterest || "OAuth credentials ready") : pinterestAppShellReady() ? "Developer app created; app secret not synced to the runtime" : "Developer app pending";
@@ -4839,14 +4894,22 @@ function developerPortalAudit() {
     {
       id: "twitch",
       name: "Twitch",
-      status: twitchClientId && twitchClientSecret ? "configured-approval-pending" : "needs-secret-or-approval",
-      ready: Boolean(twitchClientId && twitchClientSecret),
+      status: twitchApplicationCredentials.configured
+        ? "configured-approval-pending"
+        : twitchApplicationCredentials.clientIdPresent
+          ? "needs-client-secret"
+          : twitchApplicationCredentials.clientSecretPresent
+            ? "needs-client-id"
+            : "needs-application-credentials",
+      ready: twitchApplicationCredentials.configured,
       callback: twitchRedirectUri(),
       evidence: "Twitch app hziv2cvupsduzr0u3ksvpcgrown6rk shows Social Cues, exact OAuth callback, Broadcaster Suite category, Confidential client type, and Client ID.",
-      blocker: twitchClientSecret ? "Twitch developer approval may still gate public OAuth." : "TWITCH_CLIENT_SECRET is missing; secret generation must be paired with immediate secure storage.",
-      nextAction: twitchClientSecret
-        ? "Reconnect Twitch from a signed-in Social Cues workspace, then run readiness, channel, action-check, and publish-check to bank the lane."
-        : "Generate TWITCH_CLIENT_SECRET only when Vercel/env is ready, store it, then reconnect and retest."
+      blocker: twitchApplicationCredentials.configured
+        ? "Twitch developer approval may still gate public OAuth."
+        : `Missing ${twitchApplicationCredentials.missingEnv.join(" and ")}; Twitch OAuth cannot start until the application credential pair is complete.`,
+      nextAction: twitchApplicationCredentials.configured
+        ? "Confirm the registered Twitch callback and developer approval, then run the signed-in workspace setup audit and provider proof checks."
+        : `Configure ${twitchApplicationCredentials.missingEnv.join(" and ")} for the Twitch developer application before connecting a workspace account.`
     },
     {
       id: "pinterest",
@@ -4967,6 +5030,101 @@ function developerPortalAudit() {
     rows: rows.map(row => ({ ...row, portalRoute: providerPortalRoute(row.id) })),
     hardBlockers,
     reviewRisks
+  };
+}
+
+function twitchWorkspaceAccountProjection(model = {}, session = null) {
+  const user = session?.user || null;
+  if (!user?.id) {
+    return Object.freeze({
+      workspaceContext: false,
+      accountPresent: false,
+      connected: false,
+      banked: false,
+      connectionState: "workspace-context-unavailable"
+    });
+  }
+  const workspaceId = workspaceIdForUser(user);
+  const accounts = (model.connectedAccounts || []).filter(account => (
+    canonicalProviderAssetPlatform(account.platform) === "twitch"
+    && ownedByUser(account, user.id)
+    && String(account.workspaceId || "") === workspaceId
+  ));
+  const account = bestProviderAccountFromList(accounts, "twitch");
+  const state = account ? providerAccountConnectionState(account) : null;
+  return Object.freeze({
+    workspaceContext: true,
+    accountPresent: Boolean(account),
+    connected: Boolean(state?.connected),
+    banked: Boolean(state?.connected && state?.tokenStored),
+    connectionState: state?.reason || "not-connected"
+  });
+}
+
+function twitchSetupAuditForWorkspace({ applicationReadiness = {}, model = {}, session = null } = {}) {
+  const account = twitchWorkspaceAccountProjection(model, session);
+  const base = {
+    ...applicationReadiness,
+    configured: twitchApplicationCredentials.configured,
+    workspaceContext: account.workspaceContext,
+    accountPresent: account.accountPresent,
+    connected: account.connected,
+    banked: account.banked,
+    connectionState: account.connectionState,
+    workspaceReady: false
+  };
+
+  if (!twitchApplicationCredentials.configured) {
+    return {
+      ...base,
+      phase: "application-configuration",
+      category: "application-credentials"
+    };
+  }
+  if (!account.workspaceContext) {
+    return {
+      ...base,
+      phase: "application-readiness",
+      category: "developer-approval"
+    };
+  }
+  if (!account.accountPresent) {
+    return {
+      ...base,
+      status: "workspace-connect-required",
+      phase: "workspace-authorization",
+      category: "connect",
+      blocker: "This signed-in workspace has no Twitch authorization.",
+      nextAction: "Connect Twitch from this signed-in Social Cues workspace, then run readiness and the safest provider proof checks."
+    };
+  }
+  if (!account.banked) {
+    return {
+      ...base,
+      status: "workspace-reconnect-required",
+      phase: "workspace-authorization",
+      category: "reconnect",
+      blocker: `This workspace's existing Twitch authorization is unusable (${account.connectionState}).`,
+      nextAction: "Reconnect Twitch from this signed-in Social Cues workspace, then rerun readiness and provider proof checks."
+    };
+  }
+  return {
+    ...base,
+    status: "workspace-token-banked-approval-pending",
+    phase: "provider-proof",
+    category: "developer-approval",
+    workspaceReady: true,
+    nextAction: "Confirm Twitch developer approval, then run channel, action-check, and publish-check to bank live provider proof."
+  };
+}
+
+function developerPortalAuditForWorkspace(model = {}, session = null) {
+  const audit = developerPortalAudit();
+  return {
+    ...audit,
+    rows: audit.rows.map(row => row.id === "twitch"
+      ? twitchSetupAuditForWorkspace({ applicationReadiness: row, model, session })
+      : row)
   };
 }
 
@@ -5135,7 +5293,7 @@ function platformDepthCapabilities() {
       provider: "twitch",
       name: "Twitch",
       category: "live-community",
-      status: twitchClientId && twitchClientSecret ? "configured-approval-pending" : "needs-secret-or-approval",
+      status: twitchApplicationCredentials.configured ? "configured-approval-pending" : "needs-application-credentials",
       currentUse: "Readiness plus connected broadcaster channel, clips, videos, live status, schedule, and follower-signal lanes.",
       deeperUse: "Channel metadata, subscription signal, clips, game analytics, live moment capture, stream-to-short repurposing, and event-driven community follow-up.",
       dataSignals: ["channel", "clips", "videos", "live status", "schedule", "followers", "subscriptions", "game analytics", "stream moments"],
@@ -5422,66 +5580,6 @@ async function openaiStructuredResponse({ name, schema, instructions, input, max
   }
 }
 
-function platformVariantOutputSchema() {
-  return {
-    type: "object",
-    additionalProperties: false,
-    required: ["variants"],
-    properties: {
-      variants: {
-        type: "array",
-        minItems: 1,
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["platform", "copy", "tags", "rationale", "mediaDirection"],
-          properties: {
-            platform: { type: "string" },
-            copy: { type: "string" },
-            tags: { type: "array", items: { type: "string" } },
-            rationale: { type: "string" },
-            mediaDirection: { type: "string" }
-          }
-        }
-      }
-    }
-  };
-}
-
-function audienceBriefOutputSchema() {
-  return {
-    type: "object",
-    additionalProperties: false,
-    required: ["headline", "summary", "audienceMood", "evidenceStatus", "confidence", "strongestSignals", "risks", "nextMoves"],
-    properties: {
-      headline: { type: "string" },
-      summary: { type: "string" },
-      audienceMood: { type: "string" },
-      evidenceStatus: { type: "string", enum: ["live", "mixed", "limited"] },
-      confidence: { type: "string", enum: ["high", "medium", "low"] },
-      strongestSignals: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["signal", "evidence"],
-          properties: { signal: { type: "string" }, evidence: { type: "string" } }
-        }
-      },
-      risks: { type: "array", items: { type: "string" } },
-      nextMoves: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["action", "reason", "measure"],
-          properties: { action: { type: "string" }, reason: { type: "string" }, measure: { type: "string" } }
-        }
-      }
-    }
-  };
-}
-
 function platformVideoSpec(platformId) {
   const specs = {
     tiktok: { format: "9:16 vertical MP4", resolution: "1080x1920", duration: "9-34 seconds", maxFile: "Working target: under 500 MB before provider validation", safeArea: "Keep captions above bottom controls.", filter: "Fast captions, jump cuts, native sound, high-contrast first frame.", fileSuffix: "tiktok-9x16.mp4" },
@@ -5694,81 +5792,6 @@ function mediaStoragePath({ userId = "anonymous", fileName = "asset", kind = "me
   return `${sanitizeStorageName(userId)}/${Date.now()}-${crypto.randomBytes(6).toString("hex")}-${sanitizeStorageName(kind)}-${sanitizeStorageName(fileName)}`;
 }
 
-function stripePriceForPlan(plan = "") {
-  const normalized = String(plan).toLowerCase();
-  if (normalized.includes("campaign")) return stripePriceCampaignBuild;
-  if (normalized.includes("pro")) return stripePriceProMonthly;
-  return stripePriceFounderAudit;
-}
-
-async function createStripeCheckoutSession({ selectedPlan, successUrl, cancelUrl, customerEmail = "", userId = "" }) {
-  const price = stripePriceForPlan(selectedPlan);
-  if (!stripeSecretKey || !price) return null;
-  const mode = selectedPlan && selectedPlan.toLowerCase().includes("pro") ? "subscription" : "payment";
-  const body = new URLSearchParams({
-    mode,
-    success_url: successUrl,
-    cancel_url: cancelUrl,
-    "line_items[0][price]": price,
-    "line_items[0][quantity]": "1",
-    "metadata[source]": "social-cues",
-    "metadata[selected_plan]": selectedPlan || "",
-    "metadata[user_id]": userId || "",
-    "metadata[email]": normalizeEmail(customerEmail)
-  });
-  if (customerEmail) body.set("customer_email", normalizeEmail(customerEmail));
-  if (mode === "payment") body.set("customer_creation", "always");
-  const response = await fetch("https://api.stripe.com/v1/checkout/sessions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${stripeSecretKey}`,
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error?.message || `Stripe Checkout failed with ${response.status}`);
-  return payload;
-}
-
-async function createStripeCustomerPortalSession(customerId, returnUrl) {
-  if (!stripeSecretKey || !customerId) return null;
-  const body = new URLSearchParams({
-    customer: customerId,
-    return_url: returnUrl
-  });
-  const response = await fetch("https://api.stripe.com/v1/billing_portal/sessions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${stripeSecretKey}`,
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error?.message || `Stripe Customer Portal failed with ${response.status}`);
-  return payload;
-}
-
-function verifyStripeWebhook(raw, signatureHeader = "") {
-  if (!stripeWebhookSecret) throw new Error("STRIPE_WEBHOOK_SECRET is not configured.");
-  const parts = Object.fromEntries(String(signatureHeader).split(",").map(part => {
-    const [key, ...rest] = part.split("=");
-    return [key, rest.join("=")];
-  }).filter(([key]) => key));
-  const timestamp = parts.t || "";
-  const signatures = String(signatureHeader)
-    .split(",")
-    .filter(part => part.startsWith("v1="))
-    .map(part => part.slice(3));
-  if (!timestamp || !signatures.length) throw new Error("Missing Stripe signature timestamp or v1 signature.");
-  const age = Math.abs(Date.now() / 1000 - Number(timestamp));
-  if (!Number.isFinite(age) || age > 5 * 60) throw new Error("Stripe webhook signature timestamp is outside the allowed tolerance.");
-  const expected = crypto.createHmac("sha256", stripeWebhookSecret).update(`${timestamp}.${raw}`).digest("hex");
-  if (!signatures.some(signature => timingSafeEqualText(signature, expected))) throw new Error("Stripe webhook signature verification failed.");
-  return JSON.parse(raw || "{}");
-}
-
 async function claimDurableWebhookEvent(provider, event = {}) {
   const eventId = String(event.id || "").trim();
   if (!eventId || !supabaseEnabled) return { claimed: true, durable: false };
@@ -5824,6 +5847,21 @@ async function completeDurableWebhookEvent(provider, event = {}, error = "") {
   );
 }
 
+function recordStripeSubscriptionState() {
+  const heldEventTypes = ["customer.subscription.deleted", "invoice.payment_failed"];
+  throw new Error(`Stripe subscription reconciliation remains held for ${heldEventTypes.length} lifecycle event types.`);
+}
+
+function createStripeCustomerPortalSession() {
+  throw new Error("Stripe Customer Portal creation remains held during readiness_only.");
+}
+
+function inspectStripeCheckoutPaymentProofHeld(session = {}) {
+  const paid = session.payment_status === "paid";
+  void paid;
+  throw new Error("Stripe checkout payment reconciliation remains held during readiness_only.");
+}
+
 function stripeAccessForPlan(plan = "") {
   const normalized = String(plan || "").toLowerCase();
   if (normalized.includes("pro")) return "pro";
@@ -5853,23 +5891,32 @@ function supabaseHeaders(extra = {}) {
 }
 
 async function supabaseRequest(pathname, options = {}) {
-  return traceSupabaseOperation({ area: "rest", pathname, method: options.method || "GET" }, async () => {
-    const response = await fetch(`${supabaseUrl}/rest/v1${pathname}`, {
-      ...options,
-      headers: supabaseHeaders(options.headers || {})
-    });
-    const textValue = await response.text();
-    let body = textValue;
+  const {
+    tracePathname = pathname,
+    sanitizeError = null,
+    ...requestOptions
+  } = options;
+  return traceSupabaseOperation({ area: "rest", pathname: tracePathname, method: requestOptions.method || "GET" }, async () => {
     try {
-      body = textValue ? JSON.parse(textValue) : null;
-    } catch {
-      body = textValue;
+      const response = await fetch(`${supabaseUrl}/rest/v1${pathname}`, {
+        ...requestOptions,
+        headers: supabaseHeaders(requestOptions.headers || {})
+      });
+      const textValue = await response.text();
+      let body = textValue;
+      try {
+        body = textValue ? JSON.parse(textValue) : null;
+      } catch {
+        body = textValue;
+      }
+      if (!response.ok) {
+        const detail = typeof body === "string" ? body : JSON.stringify(body);
+        throw new Error(`Supabase ${response.status}: ${detail}`);
+      }
+      return body;
+    } catch (error) {
+      throw typeof sanitizeError === "function" ? sanitizeError(error) : error;
     }
-    if (!response.ok) {
-      const detail = typeof body === "string" ? body : JSON.stringify(body);
-      throw new Error(`Supabase ${response.status}: ${detail}`);
-    }
-    return body;
   });
 }
 
@@ -5882,6 +5929,45 @@ async function optionalSupabaseRequest(pathname, options = {}) {
     }
     throw error;
   }
+}
+
+async function stripeBillingGatewayRequest(url, options = {}) {
+  const response = await fetch(url, options);
+  return {
+    status: response.status,
+    body: await response.text()
+  };
+}
+
+const stripeBillingApplication = createStripeBillingApplication({
+  configuration: stripeBillingConfiguration,
+  gatewayRequest: stripeBillingGatewayRequest,
+  repositoryRequest: (pathname, options = {}) => supabaseRequest(pathname, {
+    ...options,
+    sanitizeError: () => new Error("Stripe billing persistence is unavailable.")
+  }),
+  clock: Date.now,
+  generateEventId: () => `evt_${crypto.randomBytes(16).toString("hex")}`
+});
+
+function vizardConnectionService() {
+  return createVizardConnectionService({
+    request: (pathname, options = {}) => supabaseRequest(pathname, {
+      ...options,
+      tracePathname: "/vizard-connection",
+      sanitizeError: normalizeVizardConnectionError
+    }),
+    environment: process.env
+  });
+}
+
+function vizardConnectionErrorResponse(res, error) {
+  const safe = normalizeVizardConnectionError(error);
+  return json(res, safe.status || 500, {
+    ok: false,
+    error: safe.message,
+    code: safe.code || "connection_update_failed"
+  });
 }
 
 function supabaseAuthHeaders(token = "", options = {}) {
@@ -5898,18 +5984,126 @@ function supabaseAuthHeaders(token = "", options = {}) {
   return headers;
 }
 
-async function supabaseAuthRequest(pathname, options = {}, token = "", authOptions = {}) {
-  if (!supabaseUrl || !(supabaseAnonKey || supabaseServiceKey)) {
-    throw new Error("Supabase Auth is not configured.");
+const authenticationServiceUnavailableMessage = "Authentication service is temporarily unavailable.";
+
+class SupabaseAuthenticationError extends Error {
+  constructor(category = "unavailable", providerStatus = 0) {
+    super(category === "rate-limited" ? "Too many authentication attempts." : "Authentication provider request failed.");
+    this.name = "SupabaseAuthenticationError";
+    this.category = category;
+    this.providerStatus = Number(providerStatus || 0);
   }
+}
+
+function isPlainAuthObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isValidAuthEmail(value) {
+  const email = normalizeEmail(value);
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function supabaseAuthReady() {
+  return Boolean(
+    authProvider === "supabase"
+    && supabaseEnabled
+    && supabaseUrl
+    && (supabaseAnonKey || supabaseServiceKey)
+  );
+}
+
+function localPasswordAuthEnabled() {
+  return runtimeMode === "local" && authProvider === "alpha-local";
+}
+
+function authenticationExecutionMode() {
+  if (runtimeMode === "vercel") return supabaseAuthReady() ? "supabase" : "unavailable";
+  if (authProvider === "supabase") return supabaseAuthReady() ? "supabase" : "unavailable";
+  return localPasswordAuthEnabled() ? "local-password" : "unavailable";
+}
+
+function supabaseAuthEnabled() {
+  return authenticationExecutionMode() === "supabase";
+}
+
+function requireSupabaseUserIdentity(value, expectedEmail = "") {
+  const id = String(value?.id || "").trim();
+  const email = normalizeEmail(value?.email);
+  const normalizedExpectedEmail = normalizeEmail(expectedEmail);
+  if (
+    !isPlainAuthObject(value)
+    || !isUuid(id)
+    || !isValidAuthEmail(email)
+    || (normalizedExpectedEmail && email !== normalizedExpectedEmail)
+  ) {
+    throw new SupabaseAuthenticationError("malformed-success", 502);
+  }
+  return value;
+}
+
+function requireSupabaseAuthenticatedSession(value, expectedEmail = "") {
+  if (!isPlainAuthObject(value)) throw new SupabaseAuthenticationError("malformed-success", 502);
+  const user = requireSupabaseUserIdentity(value.user, expectedEmail);
+  const accessToken = typeof value.access_token === "string" ? value.access_token.trim() : "";
+  if (!accessToken || !(user.email_confirmed_at || user.confirmed_at)) {
+    throw new SupabaseAuthenticationError("malformed-success", 502);
+  }
+  return { ...value, user, access_token: accessToken, sessionProvider: "supabase" };
+}
+
+function requireSupabaseSignupResult(value, expectedEmail = "") {
+  if (!isPlainAuthObject(value)) throw new SupabaseAuthenticationError("malformed-success", 502);
+  const hasNestedUser = isPlainAuthObject(value.user);
+  const candidate = hasNestedUser ? value.user : value;
+  const user = requireSupabaseUserIdentity(candidate, expectedEmail);
+  const rawAccessToken = value.access_token;
+  if (rawAccessToken !== undefined && rawAccessToken !== null && typeof rawAccessToken !== "string") {
+    throw new SupabaseAuthenticationError("malformed-success", 502);
+  }
+  const accessToken = typeof rawAccessToken === "string" ? rawAccessToken.trim() : "";
+  const confirmed = Boolean(user.email_confirmed_at || user.confirmed_at);
+  if (!accessToken) {
+    const unexpectedAccessToken = typeof rawAccessToken === "string";
+    const unexpectedRefreshToken = value.refresh_token !== undefined && value.refresh_token !== null;
+    if (unexpectedAccessToken || unexpectedRefreshToken || value.session !== undefined) {
+      throw new SupabaseAuthenticationError("malformed-success", 502);
+    }
+    return { needsEmailVerification: true, user };
+  }
+  if (!hasNestedUser) throw new SupabaseAuthenticationError("malformed-success", 502);
+  if (!confirmed) throw new SupabaseAuthenticationError("malformed-success", 502);
+  return { ...value, user, access_token: accessToken, sessionProvider: "supabase" };
+}
+
+function publicAuthenticationFailure(action, error) {
+  if (error?.category === "rate-limited") {
+    return { ok: false, status: 429, error: "Too many authentication attempts. Wait and try again." };
+  }
+  if (error?.category === "request-rejected") {
+    return action === "login"
+      ? { ok: false, status: 401, error: "Email or password did not match a verified Social Cues account." }
+      : { ok: false, status: 400, error: "Authentication request could not be completed." };
+  }
+  return { ok: false, status: 503, error: authenticationServiceUnavailableMessage };
+}
+
+async function supabaseAuthRequest(pathname, options = {}, token = "", authOptions = {}) {
+  if (!supabaseAuthReady()) throw new SupabaseAuthenticationError("configuration", 503);
   return traceSupabaseOperation({ area: "auth", pathname, method: options.method || "GET" }, async () => {
-    const response = await fetch(`${supabaseUrl}/auth/v1${pathname}`, {
-      ...options,
-      headers: {
-        ...supabaseAuthHeaders(token, authOptions),
-        ...(options.headers || {})
-      }
-    });
+    let response;
+    try {
+      response = await fetch(`${supabaseUrl}/auth/v1${pathname}`, {
+        ...options,
+        signal: options.signal || AbortSignal.timeout(supabaseAuthRequestTimeoutMs),
+        headers: {
+          ...supabaseAuthHeaders(token, authOptions),
+          ...(options.headers || {})
+        }
+      });
+    } catch {
+      throw new SupabaseAuthenticationError("unavailable", 503);
+    }
     const textValue = await response.text();
     let body = textValue;
     try {
@@ -5918,15 +6112,15 @@ async function supabaseAuthRequest(pathname, options = {}, token = "", authOptio
       body = textValue;
     }
     if (!response.ok) {
-      const message = body?.msg || body?.message || body?.error_description || body?.error || textValue || `Supabase Auth ${response.status}`;
-      throw new Error(message);
+      const category = response.status === 429
+        ? "rate-limited"
+        : [400, 401, 403].includes(response.status)
+          ? "request-rejected"
+          : "unavailable";
+      throw new SupabaseAuthenticationError(category, response.status);
     }
     return body;
   });
-}
-
-function supabaseAuthEnabled() {
-  return authProvider === "supabase" && Boolean(supabaseUrl && (supabaseAnonKey || supabaseServiceKey));
 }
 
 async function signInWithSupabasePassword(email, password) {
@@ -6171,20 +6365,16 @@ async function createSupabasePasswordUser(input = {}) {
       }
     })
   });
-  const confirmed = Boolean(signup?.user?.email_confirmed_at || signup?.user?.confirmed_at);
-  if (!signup?.access_token || !confirmed) {
-    const pendingUser = signup?.user || (signup?.id || signup?.email ? signup : null);
-    return { needsEmailVerification: true, user: pendingUser };
-  }
-  return signup;
+  return requireSupabaseSignupResult(signup, email);
 }
 
 async function getSupabaseAuthUser(token) {
   const body = await supabaseAuthRequest("/user", { method: "GET" }, token);
-  return body?.user || body;
+  return requireSupabaseUserIdentity(body?.user || body);
 }
 
 async function localGetModel() {
+  if (localWorkspacePersistence) return localWorkspacePersistence.load();
   await ensureModel();
   try {
     return await readJsonFile(modelPath);
@@ -6220,6 +6410,11 @@ async function renameLocalModelWithRetry(tempPath) {
 }
 
 async function localSaveModel(model) {
+  if (localWorkspacePersistence) {
+    const context = requestModelContext.getStore();
+    const session = context?.req ? await sessionFromRequest(model, context.req) : null;
+    return localPersistenceWrite(() => localWorkspacePersistence.save(model, context?.localActor || session?.user));
+  }
   const save = async () => {
     await mkdir(dataDir, { recursive: true });
     model.updatedAt = new Date().toISOString();
@@ -6541,6 +6736,7 @@ async function clientWorkspaceModelForUser(user = {}, input = {}, sharedModel = 
   const workspaceId = workspaceIdForUser(user);
   const userName = user.name || input.name || "Social Cues User";
   const workspaceName = input.workspaceName || `${userName}'s Social Cues`;
+  const workspaceCreatedAt = new Date().toISOString();
   const model = {
     version: "0.3.0-client-workspace",
     currentUser: publicAppUser(user),
@@ -6551,7 +6747,7 @@ async function clientWorkspaceModelForUser(user = {}, input = {}, sharedModel = 
       ownerUserId: user.id || "",
       ownerEmail: user.email || "",
       purpose: "Private client workspace",
-      createdAt: new Date().toISOString()
+      createdAt: workspaceCreatedAt
     },
     workspaces: [],
     onboarding: {
@@ -6610,11 +6806,15 @@ async function clientWorkspaceModelForUser(user = {}, input = {}, sharedModel = 
       version: 1,
       source: "client-isolated-blank",
       clientIsolated: true,
-      createdAt: new Date().toISOString()
+      createdAt: workspaceCreatedAt
     }
   };
+  if (!supabaseEnabled && Array.isArray(sharedModel.workspaces)) {
+    model.workspaces = cloneJson(sharedModel.workspaces);
+  }
   copySharedRegistryFields(model, sharedModel, { includeIntegrations: false });
   ensureUserWorkspace(model, user, { workspaceName });
+  if (localWorkspacePersistence) localWorkspacePersistence.inherit(model, sharedModel);
   return model;
 }
 
@@ -7502,7 +7702,7 @@ async function supabaseGetWorkspaceModel(user = {}, sharedModel = null) {
 async function modelForSession(session = null, sharedModel = null) {
   const base = sharedModel || await getModel();
   if (!session?.user) return base;
-  if (!supabaseEnabled) return base;
+  if (!supabaseEnabled) return localWorkspacePersistence ? localWorkspacePersistence.view(base, workspaceIdForUser(session.user)) : base;
   try {
     const workspaceModel = await supabaseGetWorkspaceModel(session.user, base);
     if (workspaceModel) return workspaceModel;
@@ -7517,6 +7717,7 @@ async function loadModel() {
   try {
     model = supabaseEnabled ? await supabaseGetModel() : await localGetModel();
   } catch (error) {
+    if (localWorkspacePersistence) throw error;
     lastPersistence = { driver: "supabase", ok: false, message: error.message };
     model = await localGetModel();
   }
@@ -7589,11 +7790,26 @@ async function loadModel() {
   if (sanitizeConnectedAccounts(model)) changed = true;
   if (reconcileProviderAccountEvidence(model)) changed = true;
   if (hydrateMetaLoginStatus(model)) changed = true;
-  if (changed) await saveModel(model);
+  if (changed && !localWorkspacePersistence) await saveModel(model);
+  localWorkspacePersistence?.baseline(model);
   return model;
 }
 
 const requestModelContext = new AsyncLocalStorage();
+
+async function localPersistenceWrite(action) {
+  const context = requestModelContext.getStore();
+  if (context?.persistenceError) throw context.persistenceError;
+  try { return await action(); }
+  catch (error) {
+    if (error instanceof WorkspaceContentPersistenceError || error instanceof LocalWorkspaceOwnershipError) {
+      error.retryable = false;
+      error.blocked = true;
+      if (context) context.persistenceError = error;
+    }
+    throw error;
+  }
+}
 
 async function getModel() {
   const context = requestModelContext.getStore();
@@ -7752,6 +7968,7 @@ function hydrateMetaLoginStatus(model) {
 }
 
 async function saveModel(model) {
+  if (localWorkspacePersistence) return localSaveModel(model);
   try {
     return supabaseEnabled ? await supabaseSaveModel(model) : await localSaveModel(model);
   } catch (error) {
@@ -7761,6 +7978,11 @@ async function saveModel(model) {
 }
 
 async function saveModelForUser(model, user = null) {
+  if (localWorkspacePersistence) {
+    const context = requestModelContext.getStore();
+    return localPersistenceWrite(() => localWorkspacePersistence.save(model, user || context?.localActor,
+      context?.req?.url?.split("?")[0] === "/api/auth/signup" ? "signup" : "server-write"));
+  }
   if (user?.id && supabaseEnabled) {
     const workspaceModel = await workspaceModelForRegistryWrite(model, user);
     await mirrorWorkspaceModel(workspaceModel, user);
@@ -7879,6 +8101,11 @@ function responseHeaders(contentType, options = {}) {
 }
 
 function json(res, status, value) {
+  const storageError = requestModelContext.getStore()?.persistenceError;
+  if (storageError) {
+    status = storageError.status;
+    value = { ok: false, code: storageError.code, error: storageError.code, commitStatus: storageError.commitStatus || "not_committed" };
+  }
   const body = JSON.stringify(value, null, 2);
   res.writeHead(status, responseHeaders("application/json; charset=utf-8"));
   res.end(body);
@@ -7922,6 +8149,7 @@ const anonymousApiGetPaths = new Set([
   "/api/auth/readiness",
   "/api/auth/smtp/readiness",
   "/api/billing/readiness",
+  "/api/pricing",
   "/api/cron/workers",
   "/api/linkedin/webhook",
   "/api/media/public-assets",
@@ -8059,6 +8287,154 @@ function escapeHtml(value) {
   }[char]));
 }
 
+const pricingPresentationSchemaVersion = "social-cues.pricing-presentation.v1";
+
+function requiredPricingText(value, field) {
+  const normalized = String(value || "").trim();
+  if (!normalized) throw new TypeError(`Invalid pricing field: ${field}`);
+  return normalized;
+}
+
+function publicPricingAllowance(item, classificationLabels) {
+  const classification = requiredPricingText(item?.classification, "allowance.classification");
+  if (!classificationLabels[classification]) throw new TypeError("Unknown pricing allowance classification.");
+  const result = {
+    id: requiredPricingText(item?.id, "allowance.id"),
+    label: requiredPricingText(item?.label, "allowance.label"),
+    display: requiredPricingText(item?.display, "allowance.display"),
+    classification,
+    detail: requiredPricingText(item?.detail, "allowance.detail")
+  };
+  for (const key of ["limit", "minimum", "maximum"]) {
+    if (Number.isFinite(item?.[key])) result[key] = Number(item[key]);
+  }
+  if (item?.unit) result.unit = requiredPricingText(item.unit, `allowance.${item.id}.unit`);
+  if (item?.serverBounded === true) result.serverBounded = true;
+  return result;
+}
+
+function publicPricingCapability(item, classificationLabels) {
+  const classification = requiredPricingText(item?.classification, "capability.classification");
+  if (!classificationLabels[classification]) throw new TypeError("Unknown pricing capability classification.");
+  return {
+    id: requiredPricingText(item?.id, "capability.id"),
+    label: requiredPricingText(item?.label, "capability.label"),
+    classification,
+    detail: requiredPricingText(item?.detail, "capability.detail")
+  };
+}
+
+function monthlyPriceDisplay(plan) {
+  const price = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: requiredPricingText(plan.currency, `plan.${plan.id}.currency`).toUpperCase(),
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  }).format(plan.monthlyPriceCents / 100);
+  return `${price} / month`;
+}
+
+function currentPricingPresentation() {
+  const configuration = PRICING_CONFIGURATION;
+  const classificationLabels = Object.fromEntries(
+    Object.entries(configuration?.classificationLabels || {}).map(([key, value]) => [
+      requiredPricingText(key, "classification.id"),
+      requiredPricingText(value, `classification.${key}`)
+    ])
+  );
+  if (!Array.isArray(configuration?.plans) || !configuration.plans.length) {
+    throw new TypeError("Pricing plans are unavailable.");
+  }
+  const plans = configuration.plans.map(plan => {
+    if (!Number.isInteger(plan?.monthlyPriceCents) || plan.monthlyPriceCents < 0) {
+      throw new TypeError("Invalid monthly pricing amount.");
+    }
+    if (plan?.support?.serviceLevelAgreement !== null || plan?.support?.guaranteedResponseTime !== null) {
+      throw new TypeError("Unapproved support guarantee detected.");
+    }
+    const supportClassification = requiredPricingText(plan.support?.classification, `plan.${plan.id}.support.classification`);
+    if (!classificationLabels[supportClassification]) throw new TypeError("Unknown pricing support classification.");
+    return {
+      id: requiredPricingText(plan.id, "plan.id"),
+      name: requiredPricingText(plan.name, `plan.${plan.id}.name`),
+      billingInterval: requiredPricingText(plan.billingInterval, `plan.${plan.id}.billingInterval`),
+      currency: requiredPricingText(plan.currency, `plan.${plan.id}.currency`),
+      priceType: requiredPricingText(plan.priceType, `plan.${plan.id}.priceType`),
+      monthlyPriceCents: plan.monthlyPriceCents,
+      monthlyPriceDisplay: monthlyPriceDisplay(plan),
+      description: requiredPricingText(plan.description, `plan.${plan.id}.description`),
+      intendedCustomer: requiredPricingText(plan.intendedCustomer, `plan.${plan.id}.intendedCustomer`),
+      allowances: (plan.allowances || []).map(item => publicPricingAllowance(item, classificationLabels)),
+      capabilities: (plan.capabilities || []).map(item => publicPricingCapability(item, classificationLabels)),
+      support: {
+        label: requiredPricingText(plan.support?.label, `plan.${plan.id}.support.label`),
+        classification: supportClassification,
+        queuePriority: plan.support?.queuePriority === null ? null : requiredPricingText(plan.support?.queuePriority, `plan.${plan.id}.support.queuePriority`),
+        serviceLevelAgreement: null,
+        guaranteedResponseTime: null,
+        detail: requiredPricingText(plan.support?.detail, `plan.${plan.id}.support.detail`)
+      },
+      checkout: { available: false, status: "unavailable" }
+    };
+  });
+  const planIds = new Set(plans.map(plan => plan.id));
+  const defaultPlanId = requiredPricingText(configuration.defaultPlanId, "defaultPlanId");
+  if (planIds.size !== plans.length || !planIds.has(defaultPlanId)) {
+    throw new TypeError("Pricing plan identities are invalid.");
+  }
+  const providers = (configuration.providers || []).map(provider => ({
+    id: requiredPricingText(provider.id, "provider.id"),
+    name: requiredPricingText(provider.name, `provider.${provider.id}.name`),
+    status: requiredPricingText(provider.status, `provider.${provider.id}.status`),
+    availability: requiredPricingText(provider.availability, `provider.${provider.id}.availability`),
+    disclosure: requiredPricingText(provider.disclosure, `provider.${provider.id}.disclosure`)
+  }));
+  const vizard = providers.find(provider => provider.id === "vizard");
+  if (vizard?.status !== "planned" || vizard?.availability !== "unavailable") {
+    throw new TypeError("Vizard pricing availability is invalid.");
+  }
+  return {
+    status: "available",
+    catalogVersion: requiredPricingText(configuration.version, "version"),
+    defaultPlanId,
+    currency: requiredPricingText(configuration.currency, "currency"),
+    billingInterval: requiredPricingText(configuration.billingInterval, "billingInterval"),
+    priceType: requiredPricingText(configuration.priceType, "priceType"),
+    positioning: requiredPricingText(configuration.positioning, "positioning"),
+    checkout: { available: false, status: "unavailable" },
+    billingActivation: { available: false, status: "unavailable" },
+    classificationLabels,
+    plans,
+    addOns: (configuration.addOns || []).map(addOn => ({
+      id: requiredPricingText(addOn.id, "addOn.id"),
+      name: requiredPricingText(addOn.name, `addOn.${addOn.id}.name`),
+      status: requiredPricingText(addOn.status, `addOn.${addOn.id}.status`)
+    })),
+    services: (configuration.services || []).map(service => ({
+      id: requiredPricingText(service.id, "service.id"),
+      name: requiredPricingText(service.name, `service.${service.id}.name`),
+      status: requiredPricingText(service.status, `service.${service.id}.status`),
+      description: requiredPricingText(service.description, `service.${service.id}.description`)
+    })),
+    providers,
+    agencyDataPolicy: requiredPricingText(configuration.agencyDataPolicy, "agencyDataPolicy"),
+    thirdPartyChargesDisclosure: requiredPricingText(configuration.thirdPartyChargesDisclosure, "thirdPartyChargesDisclosure")
+  };
+}
+
+function unavailablePricingEnvelope() {
+  return {
+    ok: false,
+    schemaVersion: pricingPresentationSchemaVersion,
+    pricing: {
+      status: "unavailable",
+      checkout: { available: false, status: "unavailable" },
+      billingActivation: { available: false, status: "unavailable" }
+    },
+    error: "Pricing is temporarily unavailable."
+  };
+}
+
 function binary(res, status, body, contentType) {
   const headers = responseHeaders(contentType);
   headers["Content-Length"] = String(body.length);
@@ -8068,27 +8444,6 @@ function binary(res, status, body, contentType) {
   }
   res.writeHead(status, headers);
   res.end(body);
-}
-
-function publicMediaAssetUrl(fileName) {
-  return `${brandHomeUrl}/media/social-cues-promo-pack/${encodeURIComponent(fileName)}`;
-}
-
-function publicMediaContentType(fileName) {
-  const ext = path.extname(fileName).toLowerCase();
-  if (ext === ".mp4") return "video/mp4";
-  if (ext === ".png") return "image/png";
-  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
-  return "application/octet-stream";
-}
-
-function publicLaunchPromoAssets() {
-  return launchPromoAssets.map(asset => ({
-    ...asset,
-    url: publicMediaAssetUrl(asset.fileName),
-    metaPullReady: true,
-    note: "Public HTTPS asset. Safe for Meta, TikTok, YouTube, X, and Threads pull-by-URL checks."
-  }));
 }
 
 async function bodyJson(req) {
@@ -9476,21 +9831,86 @@ async function workerStatusForUser(user = {}) {
   };
 }
 
-function canManageWorkspaceMembers(user = {}) {
-  const workspaceId = workspaceModelIdForUser(user);
-  const ownerUserId = supabaseUserIdForUser(user);
-  const ownsPrivateWorkspace = Boolean(workspaceId && ownerUserId && workspaceId === ownerUserId);
-  return Boolean(ownsPrivateWorkspace || isSignupOwnerEmail(user.email) || ["Owner", "Admin"].includes(resolvedAppUserRole(user)));
+async function persistWorkspaceManagementDenialAudit({ userId = "", workspaceId = "", action = "workspace.manage", category = "denied", at = "" } = {}) {
+  if (!supabaseEnabled || !isUuid(userId) || !isUuid(workspaceId)) return { ok: false, skipped: true };
+  await optionalSupabaseRequest("/audit_logs", {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify([{
+      workspace_id: workspaceId,
+      user_id: userId,
+      event_type: "workspace.management_denied",
+      provider: "social-cues",
+      platform: "workspace",
+      target_id: "",
+      metadata: { action, category },
+      created_at: at || new Date().toISOString()
+    }])
+  });
+  return { ok: true };
 }
 
-async function workspaceMembershipView(user = {}) {
-  const workspaceId = workspaceModelIdForUser(user);
-  if (!supabaseEnabled || !workspaceId) return { members: [], invites: [] };
+async function requireWorkspaceManagementAccess(session = null, options = {}) {
+  const localWorkspaceMembershipEnabled = runtimeMode === "local" && !supabaseEnabled;
+  const identityPolicy = localWorkspaceMembershipEnabled ? "local_canonical" : "hosted_uuid";
+  return authorizeWorkspaceManagement({
+    session,
+    identityPolicy,
+    requestedWorkspaceId: options.requestedWorkspaceId,
+    resourceWorkspaceId: options.resourceWorkspaceId,
+    action: options.action,
+    lookupMembership: async ({ workspaceId, userId }) => {
+      if (supabaseEnabled) {
+        const rows = await supabaseRequest(
+          `/workspace_members?workspace_id=eq.${encodeURIComponent(workspaceId)}&user_id=eq.${encodeURIComponent(userId)}&select=workspace_id,user_id,role,created_at,updated_at&limit=1`
+        );
+        return Array.isArray(rows) ? rows[0] || null : null;
+      }
+      if (!localWorkspaceMembershipEnabled) return null;
+      let canonicalModel = await getModel();
+      if (localWorkspacePersistence) canonicalModel = localWorkspacePersistence.view(canonicalModel, workspaceId);
+      return resolveLocalWorkspaceManagementMembership({
+        localMode: true,
+        authenticatedUserId: userId,
+        activeWorkspaceId: workspaceId,
+        canonicalModel
+      });
+    },
+    auditDenied: persistWorkspaceManagementDenialAudit
+  });
+}
+
+async function workspaceMembershipView(session = null) {
+  const userId = supabaseUserIdForUser(session?.user || {});
+  const workspaceId = String(session?.device?.workspaceId || "");
+  const deviceUserId = String(session?.device?.userId || "");
+  if (!supabaseEnabled || !isUuid(userId) || !isUuid(workspaceId) || deviceUserId !== userId) return null;
+
+  const currentMembershipRows = await supabaseRequest(
+    `/workspace_members?workspace_id=eq.${encodeURIComponent(workspaceId)}&user_id=eq.${encodeURIComponent(userId)}&select=workspace_id,user_id,role,created_at,updated_at&limit=1`
+  );
+  const currentMembership = Array.isArray(currentMembershipRows) ? currentMembershipRows[0] || null : null;
+  if (!currentMembership
+    || String(currentMembership.workspace_id || "") !== workspaceId
+    || String(currentMembership.user_id || "") !== userId) return null;
+
+  let managementAccess = null;
+  try {
+    managementAccess = await authorizeWorkspaceManagement({
+      session,
+      identityPolicy: "hosted_uuid",
+      action: "workspace.members.read_invitations",
+      lookupMembership: async () => currentMembership
+    });
+  } catch {
+    managementAccess = null;
+  }
+
   const [memberRows, profileRows, inviteRows] = await Promise.all([
     optionalSupabaseRequest(`/workspace_members?workspace_id=eq.${encodeURIComponent(workspaceId)}&select=user_id,role,created_at,updated_at&order=created_at.asc`),
     optionalSupabaseRequest(`/profiles?workspace_id=eq.${encodeURIComponent(workspaceId)}&select=id,display_name,email,role`),
-    canManageWorkspaceMembers(user)
-      ? optionalSupabaseRequest(`/workspace_invites?workspace_id=eq.${encodeURIComponent(workspaceId)}&select=id,invited_email,role,status,expires_at,accepted_at,revoked_at,created_at&order=created_at.desc&limit=50`)
+    managementAccess
+      ? optionalSupabaseRequest(`/workspace_invites?workspace_id=eq.${encodeURIComponent(managementAccess.workspaceId)}&select=id,invited_email,role,status,expires_at,accepted_at,revoked_at,created_at&order=created_at.desc&limit=50`)
       : Promise.resolve([])
   ]);
   const profiles = new Map((Array.isArray(profileRows) ? profileRows : []).map(row => [String(row.id), row]));
@@ -9725,92 +10145,6 @@ async function hydrateNormalizedSupabaseAccountState(model, user) {
   return user;
 }
 
-function recordStripeCheckoutCompletion(model, session = {}) {
-  model.billing = model.billing || {};
-  model.billing.stripeEvents = model.billing.stripeEvents || [];
-  model.billing.paidEmails = model.billing.paidEmails || [];
-  const metadata = session.metadata || {};
-  const email = normalizeEmail(metadata.email || session.customer_details?.email || session.customer_email || "");
-  const selectedPlan = metadata.selected_plan || model.billing.selectedPlan || "Paid access";
-  const payment = {
-    email,
-    userId: metadata.user_id || "",
-    selectedPlan,
-    access: stripeAccessForPlan(selectedPlan),
-    active: true,
-    customerId: session.customer || "",
-    checkoutSessionId: session.id || "",
-    subscriptionId: session.subscription || "",
-    paymentIntentId: session.payment_intent || "",
-    paymentStatus: session.payment_status || session.status || "",
-    amountTotal: session.amount_total || null,
-    currency: session.currency || "",
-    grantedAt: new Date().toISOString(),
-    reason: "Stripe Checkout completed"
-  };
-  model.billing.stripeEvents.unshift({
-    id: uid("stripe-event"),
-    type: "checkout.session.completed",
-    checkoutSessionId: payment.checkoutSessionId,
-    email,
-    selectedPlan,
-    receivedAt: new Date().toISOString()
-  });
-  model.billing.stripeEvents = model.billing.stripeEvents.slice(0, 100);
-  if (email) {
-    const existing = model.billing.paidEmails.find(item => normalizeEmail(item.email) === email);
-    if (existing) Object.assign(existing, payment);
-    else model.billing.paidEmails.unshift(payment);
-    const user = (model.authUsers || []).find(item => normalizeEmail(item.email) === email || item.id === payment.userId);
-    if (user) applyPaidEntitlement(user, payment);
-  }
-  model.billing.status = "Stripe payment confirmed";
-  model.billing.lastStripeCheckout = payment;
-  return payment;
-}
-
-function recordStripeSubscriptionState(model, subscription = {}, eventType = "") {
-  const customerId = String(subscription.customer || "");
-  const subscriptionId = String(subscription.id || "");
-  const activeStatuses = new Set(["active", "trialing"]);
-  const status = String(subscription.status || (eventType === "customer.subscription.deleted" ? "canceled" : ""));
-  const active = activeStatuses.has(status);
-  const payment = (model.billing?.paidEmails || []).find(item =>
-    (customerId && String(item.customerId || "") === customerId)
-    || (subscriptionId && String(item.subscriptionId || "") === subscriptionId)
-  );
-  if (!payment) return null;
-  payment.active = active;
-  payment.paymentStatus = status || eventType;
-  payment.subscriptionId = subscriptionId || payment.subscriptionId || "";
-  payment.currentPeriodEnd = subscription.current_period_end
-    ? new Date(Number(subscription.current_period_end) * 1000).toISOString()
-    : payment.currentPeriodEnd || null;
-  payment.updatedAt = new Date().toISOString();
-  const user = (model.authUsers || []).find(item =>
-    normalizeEmail(item.email) === normalizeEmail(payment.email)
-    || (payment.userId && item.id === payment.userId)
-  );
-  if (user) {
-    if (active) {
-      applyPaidEntitlement(user, {
-        ...payment,
-        subscriptionPaid: true,
-        appFeePaid: true,
-        reason: `Stripe subscription ${status}`
-      });
-      user.entitlement.expiresAt = payment.currentPeriodEnd;
-    } else if (user.entitlement?.source === "stripe") {
-      user.entitlement.active = false;
-      user.entitlement.subscriptionPaid = false;
-      user.entitlement.paymentStatus = status || "inactive";
-      user.entitlement.expiresAt = payment.currentPeriodEnd;
-      user.entitlement.grantedReason = `Stripe subscription ${status || "inactive"}`;
-    }
-  }
-  return { email: payment.email, active, status, subscriptionId, customerId };
-}
-
 function passwordError(password) {
   if (password.length < 8) return "Use at least 8 characters for your Social Cues password.";
   if (password.length > 256) return "Password is too long.";
@@ -9839,7 +10173,7 @@ function hashSecret(value) {
 function missingAuthSessionSecretResponse(res) {
   return json(res, 503, {
     ok: false,
-    error: "AUTH_SESSION_SECRET or OAUTH_TOKEN_ENCRYPTION_KEY is required before account sessions can be created."
+    error: authenticationServiceUnavailableMessage
   });
 }
 
@@ -11727,7 +12061,9 @@ async function exchangePatreonCode(code, redirectUri = patreonRedirectUri()) {
 }
 
 async function exchangeTwitchCode(code, redirectUri = twitchRedirectUri()) {
-  if (!twitchClientId || !twitchClientSecret) throw new Error("TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET are required for token exchange.");
+  if (!twitchApplicationCredentials.configured) {
+    throw new Error(`${twitchApplicationCredentials.missingEnv.join(" and ")} must be configured before Twitch token exchange.`);
+  }
   const payload = new URLSearchParams({
     client_id: twitchClientId,
     client_secret: twitchClientSecret,
@@ -12407,6 +12743,9 @@ async function verifyTikTokAccount(model, account, user = null) {
 
 async function refreshTwitchAccount(model, account, user = null) {
   if (!account) throw new Error("No Twitch account is stored.");
+  if (!twitchApplicationCredentials.configured) {
+    throw new Error(`${twitchApplicationCredentials.missingEnv.join(" and ")} must be configured before Twitch token refresh.`);
+  }
   const refreshToken = refreshTokenForTwitchAccount(account);
   if (!refreshToken) throw new Error("Twitch refresh token is missing. Reconnect Twitch OAuth.");
   const payload = new URLSearchParams({
@@ -12924,7 +13263,7 @@ async function requireCanvaAccountForRead(req, res, purpose = "read Canva data",
 async function requireDiscordAccountForRead(req, res, purpose = "read Discord data", requiredScopes = ["identify", "guilds"]) {
   const sharedModel = await getModel();
   const session = await entitledSessionFromRequest(sharedModel, req);
-  if (runtimeMode === "vercel" && !session) {
+  if ((runtimeMode === "vercel" || localWorkspacePersistence) && !session) {
     appAccessRequiredResponse(res);
     return null;
   }
@@ -13340,7 +13679,7 @@ function publicMetaAccount(account) {
 
 const sensitivePublicAccountKeys = new Set([
   "credential", "refreshcredential", "token", "accesstoken", "refreshtoken", "oauthcode",
-  "encryptedtoken", "encryptedrefreshtoken", "clientsecret", "appsecret", "codeverifier",
+  "encryptedtoken", "encryptedcredential", "encryptedrefreshtoken", "clientsecret", "appsecret", "codeverifier",
   "password", "sessiontoken", "sessiontokenhash", "authorization", "cookie"
 ]);
 
@@ -13488,14 +13827,15 @@ function upsertAppAccount(model, input = {}) {
 }
 
 function upsertSupabaseAppUser(model, supabaseUser, input = {}) {
+  const providerUser = requireSupabaseUserIdentity(supabaseUser);
   model.authUsers = model.authUsers || [];
-  const email = normalizeEmail(supabaseUser?.email || input.email);
-  const id = String(supabaseUser?.id || uid("user"));
+  const email = normalizeEmail(providerUser.email);
+  const id = String(providerUser.id).trim();
   let user = model.authUsers.find(item => item.id === id) || model.authUsers.find(item => normalizeEmail(item.email) === email);
   if (!user) {
     user = {
       id,
-      name: input.name || supabaseUser?.user_metadata?.name || "Social Cues User",
+      name: input.name || providerUser.user_metadata?.name || "Social Cues User",
       email,
       role: "Member",
       createdAt: new Date().toISOString(),
@@ -13504,11 +13844,11 @@ function upsertSupabaseAppUser(model, supabaseUser, input = {}) {
     model.authUsers.push(user);
   }
   user.id = id;
-  user.name = input.name || user.name || supabaseUser?.user_metadata?.name || "Social Cues User";
+  user.name = input.name || user.name || providerUser.user_metadata?.name || "Social Cues User";
   user.email = email;
   user.authProvider = "supabase";
   user.supabaseUserId = id;
-  user.emailConfirmedAt = supabaseUser?.email_confirmed_at || supabaseUser?.confirmed_at || user.emailConfirmedAt || null;
+  user.emailConfirmedAt = providerUser.email_confirmed_at || providerUser.confirmed_at || user.emailConfirmedAt || null;
   user.authAlerts = Array.isArray(user.authAlerts) ? user.authAlerts : [];
   delete user.passwordHash;
   delete user.emailVerificationPending;
@@ -13517,6 +13857,10 @@ function upsertSupabaseAppUser(model, supabaseUser, input = {}) {
 }
 
 async function createAppAccount(model, input = {}) {
+  const authMode = authenticationExecutionMode();
+  if (authMode === "unavailable") {
+    return { ok: false, status: 503, error: authenticationServiceUnavailableMessage };
+  }
   const password = normalizePassword(input.password);
   const issue = passwordError(password);
   if (issue) return { ok: false, status: 400, error: issue };
@@ -13552,13 +13896,12 @@ async function createAppAccount(model, input = {}) {
       error: "Social Cues account creation is invite-only during alpha. Use an active promo code or the owner email."
     };
   }
-  if (supabaseAuthEnabled()) {
+  if (authMode === "supabase") {
     let auth;
     try {
       auth = await createSupabasePasswordUser(input);
     } catch (error) {
-      const status = /rate limit|too many/i.test(error.message) ? 429 : /invalid|email|password/i.test(error.message) ? 400 : 502;
-      return { ok: false, status, error: `Supabase Auth signup failed: ${error.message}` };
+      return publicAuthenticationFailure("signup", error);
     }
     if (auth?.ok === false) return auth;
     if (auth?.needsEmailVerification) {
@@ -13581,64 +13924,64 @@ async function createAppAccount(model, input = {}) {
     hydrateUserAccessState(model, user, { supabaseUser: auth.user, input });
     return { ok: true, user, providerSession: auth };
   }
-  model.authUsers = model.authUsers || [];
-  let user = model.authUsers.find(item => normalizeEmail(item.email) === email);
-  if (user?.passwordHash) return { ok: false, status: 409, error: "That Social Cues account already exists. Use Log in on this device." };
-  if (!user) {
-    user = {
-      id: uid("user"),
-      name: input.name || "Social Cues User",
-      email,
-      role: "Member",
-      createdAt: new Date().toISOString(),
-      lastLoginAt: null
-    };
-    model.authUsers.push(user);
+  if (authMode === "local-password") {
+    model.authUsers = model.authUsers || [];
+    let user = model.authUsers.find(item => normalizeEmail(item.email) === email);
+    if (user?.passwordHash) return { ok: false, status: 409, error: "That Social Cues account already exists. Use Log in on this device." };
+    if (!user) {
+      user = {
+        id: uid("user"),
+        name: input.name || "Social Cues User",
+        email,
+        role: "Member",
+        createdAt: new Date().toISOString(),
+        lastLoginAt: null
+      };
+      model.authUsers.push(user);
+    }
+    user.name = input.name || user.name || "Social Cues User";
+    user.email = email;
+    user.passwordHash = hashPassword(password);
+    user.passwordSetAt = new Date().toISOString();
+    user.lastLoginAt = new Date().toISOString();
+    hydrateUserAccessState(model, user, { input: { ...input, promoCode: promo?.code || input.promoCode } });
+    return { ok: true, user, providerSession: { sessionProvider: "local-promo" } };
   }
-  user.name = input.name || user.name || "Social Cues User";
-  user.email = email;
-  user.passwordHash = hashPassword(password);
-  user.passwordSetAt = new Date().toISOString();
-  user.lastLoginAt = new Date().toISOString();
-  hydrateUserAccessState(model, user, { input: { ...input, promoCode: promo?.code || input.promoCode } });
-  return { ok: true, user };
+  return { ok: false, status: 503, error: authenticationServiceUnavailableMessage };
 }
 
 async function loginAppAccount(model, input = {}) {
+  const authMode = authenticationExecutionMode();
+  if (authMode === "unavailable") {
+    return { ok: false, status: 503, error: authenticationServiceUnavailableMessage };
+  }
   const email = normalizeEmail(input.email);
   const password = normalizePassword(input.password);
-  if (supabaseAuthEnabled()) {
+  if (authMode === "supabase") {
     try {
-      const auth = await signInWithSupabasePassword(email, password);
+      const auth = requireSupabaseAuthenticatedSession(
+        await signInWithSupabasePassword(email, password),
+        email
+      );
       const user = upsertSupabaseAppUser(model, auth.user, input);
       await hydrateNormalizedSupabaseAccountState(model, user);
       hydrateUserAccessState(model, user, { supabaseUser: auth.user, input });
       return { ok: true, user, providerSession: auth };
-    } catch {
-      if (runtimeMode === "vercel") {
-        return { ok: false, status: 401, error: "Email or password did not match a verified Social Cues account." };
-      }
-      const user = (model.authUsers || []).find(item => normalizeEmail(item.email) === email);
-      if (user?.authProvider === "promo-local" || user?.emailVerificationPending) {
-        return { ok: false, status: 403, error: "Verify this email address before opening Social Cues." };
-      }
-      if (user?.passwordHash && verifyPassword(password, user.passwordHash)) {
-        user.name = input.name || user.name || "Social Cues User";
-        user.lastLoginAt = new Date().toISOString();
-        hydrateUserAccessState(model, user, { input });
-        return { ok: true, user, providerSession: { sessionProvider: "local-promo" } };
-      }
-      return { ok: false, status: 401, error: "Email or password did not match a Social Cues account." };
+    } catch (error) {
+      return publicAuthenticationFailure("login", error);
     }
   }
-  const user = (model.authUsers || []).find(item => normalizeEmail(item.email) === email);
-  if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
-    return { ok: false, status: 401, error: "Email or password did not match a Social Cues account." };
+  if (authMode === "local-password") {
+    const user = (model.authUsers || []).find(item => normalizeEmail(item.email) === email);
+    if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
+      return { ok: false, status: 401, error: "Email or password did not match a Social Cues account." };
+    }
+    user.name = input.name || user.name || "Social Cues User";
+    user.lastLoginAt = new Date().toISOString();
+    hydrateUserAccessState(model, user, { input });
+    return { ok: true, user, providerSession: { sessionProvider: "local-promo" } };
   }
-  user.name = input.name || user.name || "Social Cues User";
-  user.lastLoginAt = new Date().toISOString();
-  hydrateUserAccessState(model, user, { input });
-  return { ok: true, user };
+  return { ok: false, status: 503, error: authenticationServiceUnavailableMessage };
 }
 
 function upsertDeviceSession(model, user, input = {}, token = crypto.randomBytes(32).toString("base64url"), providerSession = null) {
@@ -13808,12 +14151,14 @@ async function persistNormalizedDeviceAuthState(device = {}) {
 
 async function sessionFromRequest(model, req) {
   if (req.socialCuesAccessSession?.user) return req.socialCuesAccessSession;
+  const authMode = authenticationExecutionMode();
+  if (authMode === "unavailable") return null;
   const token = bearerToken(req);
   if (!token) return null;
   if (!authSessionSecret) return null;
   const tokenHash = hashSecret(token);
   let device = null;
-  if (supabaseAuthEnabled()) {
+  if (authMode === "supabase") {
     device = await normalizedDeviceSessionByTokenHash(tokenHash);
     if (device) {
       model.deviceSessions = [
@@ -13830,7 +14175,7 @@ async function sessionFromRequest(model, req) {
   if (!device) return null;
   if (device.expiresAt && Date.parse(device.expiresAt) < Date.now()) return null;
   let user = (model.authUsers || []).find(item => String(item.id || "") === String(device.userId || "") || String(item.supabaseUserId || "") === String(device.userId || ""));
-  if (!user && supabaseAuthEnabled()) {
+  if (!user && authMode === "supabase") {
     try {
       const supabaseUser = await getSupabaseAuthUser(token);
       user = upsertSupabaseAppUser(model, supabaseUser, {});
@@ -13857,7 +14202,7 @@ async function sessionFromRequest(model, req) {
     }
   }
   if (!user) return null;
-  if (supabaseAuthEnabled() && device.sessionProvider !== "local-promo") {
+  if (authMode === "supabase" && device.sessionProvider !== "local-promo") {
     try {
       const supabaseUser = await getSupabaseAuthUser(token);
       if (!supabaseUser?.id || String(supabaseUser.id) !== String(user.supabaseUserId || user.id)) return null;
@@ -13888,6 +14233,9 @@ async function sessionFromRequest(model, req) {
   }
   await hydrateNormalizedSupabaseAccountState(model, user);
   hydrateUserAccessState(model, user);
+  if (localWorkspacePersistence && requestModelContext.getStore()?.req === req) {
+    requestModelContext.getStore().localActor = user;
+  }
   return { user, device, token };
 }
 
@@ -13912,13 +14260,20 @@ async function entitledSessionFromRequest(model, req) {
 }
 
 async function hostedWriteRequiresSession(req, model) {
-  if (bearerToken(req)) {
-    const session = await sessionFromRequest(model, req);
-    if (runtimeMode === "vercel" && !hasActiveAppAccess(session?.user)) return null;
-    return session;
-  }
-  if (runtimeMode !== "vercel") return true;
-  return entitledSessionFromRequest(model, req);
+  const session = await sessionFromRequest(model, req);
+  if (!session?.user) return null;
+  if (runtimeMode === "vercel" && !hasActiveAppAccess(session.user)) return null;
+  return session;
+}
+
+function localOwnershipErrorResponse(res, error) {
+  if (!(error instanceof LocalWorkspaceOwnershipError)) return false;
+  json(res, error.status || 409, {
+    ok: false,
+    code: error.code || "ownership_integrity_invalid",
+    error: error.message
+  });
+  return true;
 }
 
 function workspaceIdForUser(user = {}) {
@@ -13948,10 +14303,10 @@ function hasOwnerMarker(item) {
   return Boolean(item && (item.ownerUserId || item.workspaceOwnerId || item.createdBy || item.userId || item.workspaceId));
 }
 
-function stampWorkspaceOwnership(item, user = {}, workspaceId = workspaceIdForUser(user)) {
+function stampWorkspaceOwnership(item, user = {}, workspaceId = workspaceIdForUser(user), options = {}) {
   if (!item || typeof item !== "object") return item;
-  if (!item.ownerUserId) item.ownerUserId = user.id || "alpha";
-  if (!item.workspaceId) item.workspaceId = workspaceId;
+  if (options.overwrite === true || !item.ownerUserId) item.ownerUserId = user.id || "alpha";
+  if (options.overwrite === true || !item.workspaceId) item.workspaceId = workspaceId;
   return item;
 }
 
@@ -14005,15 +14360,29 @@ function ensureUserWorkspace(model, user = {}, input = {}) {
   user.workspaceId = workspaceId;
   let workspace = model.workspaces.find(item => item.id === workspaceId);
   if (!workspace) {
-    workspace = {
-      id: workspaceId,
+    const workspaceFields = {
       name: input.workspaceName || model.workspace?.name || "Social Cues",
       owner: user.name || model.workspace?.owner || "Workspace Owner",
-      ownerUserId: user.id,
       ownerEmail: user.email || "",
-      createdAt: new Date().toISOString()
+      createdAt: model.workspace?.createdAt || new Date().toISOString()
     };
+    workspace = supabaseEnabled
+      ? { id: workspaceId, ownerUserId: user.id, ...workspaceFields }
+      : createLocalWorkspaceIdentity({
+          authenticatedUserId: user.id,
+          generatedWorkspaceId: workspaceId,
+          createdAt: workspaceFields.createdAt,
+          workspace: workspaceFields
+        });
     model.workspaces.push(workspace);
+  } else if (!supabaseEnabled) {
+    if (!workspace.ownerUserId || String(workspace.ownerUserId) !== String(user.id)) {
+      throw new LocalWorkspaceOwnershipError(
+        "ownership_mismatch",
+        "The stored local workspace owner does not match the authenticated account.",
+        403
+      );
+    }
   }
   workspace.name = input.workspaceName || workspace.name || model.workspace?.name || "Social Cues";
   workspace.owner = user.name || workspace.owner || "Workspace Owner";
@@ -14042,6 +14411,9 @@ function publicBilling(billing = {}) {
 function publicModel(model, session = null) {
   const safe = JSON.parse(JSON.stringify(model || {}));
   const sessionUser = session?.user || null;
+  safe.persistence = localWorkspacePersistence && sessionUser
+    ? localWorkspacePersistence.capability(model, workspaceIdForUser(sessionUser))
+    : { conditionalSave: false };
   if (sessionUser) {
     const userId = sessionUser.id;
     safe.currentUser = publicAppUser(sessionUser);
@@ -14205,7 +14577,9 @@ function mergeOwnedArray(key, merged, existing, user, workspaceId) {
   }
   const existingRows = Array.isArray(existing[key]) ? existing[key] : [];
   const incomingRows = mergeVariantRuntimeState(key, merged[key], existingRows);
-  const incomingOwned = incomingRows.map(item => stampWorkspaceOwnership(item, user, workspaceId));
+  const incomingOwned = incomingRows.map(item => stampWorkspaceOwnership(item, user, workspaceId, {
+    overwrite: !supabaseEnabled
+  }));
   const existingOther = existingRows.filter(item => !ownedByUser(item, user.id));
   merged[key] = [...incomingOwned, ...existingOther];
 }
@@ -14216,11 +14590,16 @@ function mergePublicModelUpdate(incoming, existing, user = null) {
   if (Array.isArray(merged.connectedAccounts)) {
     const existingAccounts = existing.connectedAccounts || [];
     const incomingAccounts = merged.connectedAccounts.map(account => {
-      const ownedAccount = user ? stampWorkspaceOwnership(account, user, workspaceId) : account;
+      const ownedAccount = user ? stampWorkspaceOwnership(account, user, workspaceId, {
+        overwrite: !supabaseEnabled
+      }) : account;
       const match = existingAccounts.find(item => item.id === ownedAccount.id)
         || existingAccounts.find(item => item.platform === ownedAccount.platform && item.providerAccountId && item.providerAccountId === ownedAccount.providerAccountId)
         || existingAccounts.find(item => item.platform === ownedAccount.platform && !item.providerAccountId && !ownedAccount.providerAccountId && (!user || ownedByUser(item, user.id)));
-      return mergeServerOnlyAccountFields(ownedAccount, match);
+      // Browser workspace snapshots carry only the public account projection.
+      // Strip credential-shaped input recursively before restoring fields from
+      // the private server-held account that already owns them.
+      return mergeServerOnlyAccountFields(scrubPublicAccountValue(ownedAccount || {}), match);
     });
     merged.connectedAccounts = user
       ? [
@@ -15498,11 +15877,11 @@ function marketingShell(title, body, canonicalPath = "/") {
 }
 
 function landingPageHtml() {
-  const checkoutOperational = Boolean(stripeSecretKey && stripeWebhookSecret && (stripePriceFounderAudit || stripePriceCampaignBuild || stripePriceProMonthly));
   return marketingShell("Social Cues - Build a social system that compounds", `
   <header class="wrap nav">
     <a class="brand" href="/" aria-label="Social Cues home">${brandMarkSvg()}<span>Social Cues</span></a>
     <div class="nav-actions">
+      <a class="btn" href="/pricing">Pricing</a>
       <a class="btn" href="/portal">Log in</a>
       <a class="btn primary" href="/portal?mode=create">Create account</a>
     </div>
@@ -15514,10 +15893,10 @@ function landingPageHtml() {
         <h1>Turn raw ideas into a working social engine.</h1>
         <p class="lead">Social Cues helps creators, founders, local operators, and agencies plan campaigns, approve posts, attach media, connect accounts, and translate platform signals into the next best move.</p>
         <div class="nav-actions" style="margin-top:22px">
-          <button class="btn accent" id="startCheckout" ${checkoutOperational ? "" : "disabled"}>${checkoutOperational ? "Pay to start" : "Payments opening soon"}</button>
+          <a class="btn accent" href="/pricing">View pricing</a>
           <a class="btn" href="/portal">Account portal</a>
         </div>
-        <p style="color:var(--muted);margin-top:12px">${checkoutOperational ? "Payment comes first for public access." : "Public payment access is not open yet."} Promo testers can create an account with a code and use the portal for devices, alerts, and app links.</p>
+        <p style="color:var(--muted);margin-top:12px">Monthly pricing is available for review. Checkout and billing activation are unavailable. Promo testers can use the portal for devices, alerts, and app links.</p>
       </div>
       <aside class="hero-panel">
         <div class="metric"><strong>Plan</strong><span class="pill">Platform-native variants</span></div>
@@ -15535,31 +15914,71 @@ function landingPageHtml() {
     <section class="band">
       <div class="wrap">
         <h2 style="margin:0 0 8px">Early access</h2>
-        <p style="max-width:760px">${checkoutOperational ? "Start with paid access or a temporary promo tester code." : "Current access is limited to approved promo testers while verified payment delivery is completed."} Use Social Cues to build the campaign proof loop before public launch.</p>
+        <p style="max-width:760px">Current access is limited to approved promo testers while billing activation remains unavailable. Use Social Cues to build the campaign proof loop before public launch.</p>
       </div>
     </section>
   </main>
-  <footer class="wrap footer"><a href="/privacy">Privacy</a> - <a href="/terms">Terms</a> - <a href="mailto:${supportEmail}">${supportEmail}</a></footer>
-  <script>
-    const checkoutButton = document.getElementById("startCheckout");
-    if (checkoutButton && !checkoutButton.disabled) checkoutButton.addEventListener("click", async () => {
-      const button = checkoutButton;
-      const original = button.textContent;
-      button.disabled = true;
-      button.textContent = "Opening checkout...";
-      try {
-        const res = await fetch("/api/billing/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ selectedPlan: "Founder Audit - $99" }) });
-        const data = await res.json();
-        if (!res.ok || !data.ok || !data.url) throw new Error(data.error || data.message || "Checkout is not ready.");
-        location.href = data.url;
-      } catch (error) {
-        alert(error.message);
-        button.disabled = false;
-        button.textContent = original;
-      }
-    });
-  </script>
+  <footer class="wrap footer"><a href="/pricing">Pricing</a> - <a href="/privacy">Privacy</a> - <a href="/terms">Terms</a> - <a href="mailto:${supportEmail}">${supportEmail}</a></footer>
   `, "/");
+}
+
+function pricingPageHtml(pricing) {
+  const classificationLabel = classification => pricing.classificationLabels[classification] || classification;
+  const plans = pricing.plans.map(plan => {
+    const allowanceRows = plan.allowances.map(item => `
+      <li><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.display)} <span class="pill">${escapeHtml(classificationLabel(item.classification))}</span><br><span style="color:var(--muted)">${escapeHtml(item.detail)}</span></li>`).join("");
+    const capabilityRows = plan.capabilities.map(item => `
+      <li><strong>${escapeHtml(item.label)}</strong> <span class="pill">${escapeHtml(classificationLabel(item.classification))}</span><br><span style="color:var(--muted)">${escapeHtml(item.detail)}</span></li>`).join("");
+    return `
+      <article class="panel" data-pricing-plan="${escapeHtml(plan.id)}">
+        <div class="eyebrow">${escapeHtml(plan.intendedCustomer)}</div>
+        <h2 style="font-size:30px;margin:10px 0 2px">${escapeHtml(plan.name)}</h2>
+        <p style="font-size:26px;color:#fff;margin:0 0 4px"><strong>${escapeHtml(plan.monthlyPriceDisplay)}</strong></p>
+        <p style="font-size:13px;margin-bottom:12px">${escapeHtml(plan.currency.toUpperCase())}, billed monthly</p>
+        <p>${escapeHtml(plan.description)}</p>
+        <h3 style="margin:20px 0 8px">Allowances</h3>
+        <ul style="display:grid;gap:12px;padding-left:20px">${allowanceRows}</ul>
+        <h3 style="margin:20px 0 8px">Capabilities</h3>
+        <ul style="display:grid;gap:12px;padding-left:20px">${capabilityRows}</ul>
+        <div class="notice"><strong>${escapeHtml(plan.support.label)}:</strong> ${escapeHtml(plan.support.detail)} <span class="pill">${escapeHtml(classificationLabel(plan.support.classification))}</span></div>
+        <div class="nav-actions" style="margin-top:18px"><button class="btn" type="button" disabled aria-disabled="true" style="cursor:not-allowed;opacity:.65">Checkout unavailable</button></div>
+      </article>`;
+  }).join("");
+  const services = pricing.services.map(service => `<div class="status-row"><div><strong>${escapeHtml(service.name)}</strong><br><span>${escapeHtml(service.description)}</span></div><span class="pill">${escapeHtml(service.status)}</span></div>`).join("");
+  const providers = pricing.providers.map(provider => `<div class="status-row"><div><strong>${escapeHtml(provider.name)}</strong><br><span>${escapeHtml(provider.disclosure)}</span></div><span class="pill">${escapeHtml(`${provider.status} / ${provider.availability}`)}</span></div>`).join("");
+  return marketingShell("Social Cues Pricing", `
+    <header class="wrap nav">
+      <a class="brand" href="/" aria-label="Social Cues home">${brandMarkSvg()}<span>Social Cues</span></a>
+      <div class="nav-actions"><a class="btn" href="/">Overview</a><a class="btn" href="/portal">Account portal</a></div>
+    </header>
+    <main>
+      <section class="wrap" style="padding:48px 20px 20px">
+        <div class="eyebrow">Monthly plans</div>
+        <h1 style="font-size:clamp(38px,6vw,66px);line-height:1;margin:12px 0 16px">Business, Growth, and Agency plans.</h1>
+        <p class="lead">${escapeHtml(pricing.positioning)}</p>
+        <div class="notice" style="margin-top:18px">Prices are monthly USD list prices. Checkout and billing activation are unavailable.</div>
+      </section>
+      <section class="wrap grid" style="align-items:start" data-pricing-catalog-version="${escapeHtml(pricing.catalogVersion)}">${plans}</section>
+      <section class="band"><div class="wrap"><h2 style="margin:0 0 8px">Guided services remain separate</h2><p>Services are scoped independently and are not included automatically with a plan.</p><div class="status-list">${services}</div></div></section>
+      <section class="wrap" style="padding:36px 20px 8px"><h2>Customer-owned providers</h2><p class="lead" style="font-size:17px">${escapeHtml(pricing.thirdPartyChargesDisclosure)}</p><div class="status-list">${providers}</div><div class="notice" style="margin-top:14px">${escapeHtml(pricing.agencyDataPolicy)}</div></section>
+    </main>
+    <footer class="wrap footer"><a href="/privacy">Privacy</a> - <a href="/terms">Terms</a> - <a href="mailto:${supportEmail}">${supportEmail}</a></footer>
+  `, "/pricing");
+}
+
+function pricingUnavailablePageHtml() {
+  return marketingShell("Social Cues Pricing Unavailable", `
+    <header class="wrap nav">
+      <a class="brand" href="/" aria-label="Social Cues home">${brandMarkSvg()}<span>Social Cues</span></a>
+      <div class="nav-actions"><a class="btn" href="/">Overview</a><a class="btn" href="/portal">Account portal</a></div>
+    </header>
+    <main class="wrap" style="padding:48px 20px">
+      <div class="eyebrow">Pricing unavailable</div>
+      <h1 style="font-size:clamp(38px,6vw,66px);line-height:1;margin:12px 0 16px">Pricing is temporarily unavailable.</h1>
+      <p class="lead">No fallback price is shown. Checkout and billing activation remain unavailable.</p>
+    </main>
+    <footer class="wrap footer"><a href="/privacy">Privacy</a> - <a href="/terms">Terms</a> - <a href="mailto:${supportEmail}">${supportEmail}</a></footer>
+  `, "/pricing");
 }
 
 function portalPageHtml() {
@@ -15568,6 +15987,7 @@ function portalPageHtml() {
     <a class="brand" href="/">${brandMarkSvg()}<span>Social Cues</span></a>
     <div class="nav-actions">
       <a class="btn" href="/">Website</a>
+      <a class="btn" href="/pricing">Pricing</a>
       <a class="btn" href="/app">App</a>
     </div>
   </header>
@@ -15625,7 +16045,7 @@ function portalPageHtml() {
       <article class="panel">
         <h3>Downloads and app access</h3>
         <div class="download-list">
-          <button class="btn accent" id="portalCheckout" disabled>Payments opening soon</button>
+          <button class="btn accent" id="portalCheckout" disabled>Checkout unavailable</button>
           <button class="btn openAppBtn">Open command center</button>
           <a class="btn" href="/manifest.webmanifest">PWA manifest</a>
           <button class="btn" id="copyAppLink">Copy app link</button>
@@ -15657,22 +16077,20 @@ function portalPageHtml() {
     function renderSignedIn(data){showPane("signedInBox");$("welcomeText").textContent="Signed in"+(data?.user?.name?" as "+data.user.name:"")}
     function renderDevices(devices=[]){$("deviceList").innerHTML=devices.length?devices.map(d=>'<div class="status-row"><div><strong>'+escapeHtml(d.name||"Device")+'</strong><br><span>'+escapeHtml(d.kind||"device")+' - '+escapeHtml(d.lastSeenAt?new Date(d.lastSeenAt).toLocaleString():"not seen yet")+'</span></div><span class="pill">'+(d.active?"remembered":"signed out")+'</span></div>').join(""):'<div class="notice">No remembered devices yet.</div>'}
     function renderAlerts(items){$("alertList").innerHTML=items.length?items.map(item=>'<div class="status-row"><div><strong>'+escapeHtml(item.label)+'</strong><br><span>'+escapeHtml(item.detail)+'</span></div><span class="pill">'+escapeHtml(item.status)+'</span></div>').join(""):'<div class="notice">Checking readiness after login.</div>'}
-    function accessDetail(entitlement){if(!entitlement?.active)return"Pay with Stripe or use an active promo code during account creation.";if(entitlement.source==="promo-code"){const until=entitlement.expiresAt?new Date(entitlement.expiresAt).toLocaleDateString():"120 days";return"Promo code "+entitlement.promoCode+" gives highest-tier full access through "+until+". App fee and subscription gate are satisfied for the test window."}return(entitlement.selectedPlan||"Highest-tier paid access")+" active. App fee and subscription gate are satisfied."}
+    function accessDetail(entitlement){if(!entitlement?.active)return"Billing activation is unavailable. Approved promo access remains separate.";if(entitlement.source==="promo-code"){const until=entitlement.expiresAt?new Date(entitlement.expiresAt).toLocaleDateString():"120 days";return"Promo code "+entitlement.promoCode+" gives highest-tier full access through "+until+". App fee and subscription gate are satisfied for the test window."}return(entitlement.selectedPlan||"Highest-tier paid access")+" active. App fee and subscription gate are satisfied."}
     async function acceptWorkspaceInvite(){const token=pageParams.get("invite");if(!token)return false;const accepted=await api("/api/workspace/invites/accept",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});history.replaceState({},document.title,"/portal?stay=1");$("authNotice").textContent="Workspace invitation accepted.";return Boolean(accepted.accepted)}
-    async function refreshPortal(){let entitlement=null;let session=null;try{session=await api("/api/auth/session");localStorage.removeItem(legacyTokenKey);renderSignedIn(session);renderDevices(session.devices||[]);entitlement=session.entitlement||null;if(pageParams.get("invite"))await acceptWorkspaceInvite();try{entitlement=(await api("/api/auth/entitlement")).entitlement||entitlement}catch{}}catch{}const [authReady,smtp,billing,media]=await Promise.all([fetch("/api/auth/readiness").then(r=>r.json()),fetch("/api/auth/smtp/readiness").then(r=>r.json()),fetch("/api/billing/readiness").then(r=>r.json()),fetch("/api/media/storage/readiness").then(r=>r.json())]);const personalAlerts=(session?.alerts||[]).slice(0,3).map(item=>({label:item.label,status:item.status||"info",detail:item.detail||""}));const coreAlerts=[{label:"Access",status:entitlement?.active?"full access":"payment needed",detail:accessDetail(entitlement)},{label:"Account security",status:authReady.alphaLocalFallback?"in progress":"ready",detail:authReady.emailVerificationRequired?"Verified email and remembered-device protection are active.":"Account protection is being prepared."},{label:"Recovery and alerts",status:authReady.passwordRecoveryReady&&authReady.loginAlertingReady&&authReady.rateLimitGuarded?"ready":"in progress",detail:"Email recovery, login alerts, and request limits protect the account lane."},{label:"Account email",status:smtp.ready?"ready":"in progress",detail:smtp.ready?"Verification and recovery email delivery is ready.":"Email delivery is being prepared before public signup."},{label:"Stripe checkout",status:billing.ready?"ready":"opening soon",detail:billing.mode||"billing not configured"},{label:"Media storage",status:media.ready?"ready":"in progress",detail:media.ready?"Private customer media storage is ready.":"Private media storage is being prepared."}];renderAlerts(personalAlerts.length?[...personalAlerts,...coreAlerts]:coreAlerts);if(entitlement?.active&&pageParams.get("stay")!=="1")location.replace("/app")}
+    async function refreshPortal(){let entitlement=null;let session=null;try{session=await api("/api/auth/session");localStorage.removeItem(legacyTokenKey);renderSignedIn(session);renderDevices(session.devices||[]);entitlement=session.entitlement||null;if(pageParams.get("invite"))await acceptWorkspaceInvite();try{entitlement=(await api("/api/auth/entitlement")).entitlement||entitlement}catch{}}catch{}const [authReady,smtp,media]=await Promise.all([fetch("/api/auth/readiness").then(r=>r.json()),fetch("/api/auth/smtp/readiness").then(r=>r.json()),fetch("/api/media/storage/readiness").then(r=>r.json())]);const personalAlerts=(session?.alerts||[]).slice(0,3).map(item=>({label:item.label,status:item.status||"info",detail:item.detail||""}));const coreAlerts=[{label:"Access",status:entitlement?.active?"full access":"activation unavailable",detail:accessDetail(entitlement)},{label:"Account security",status:authReady.alphaLocalFallback?"in progress":"ready",detail:authReady.emailVerificationRequired?"Verified email and remembered-device protection are active.":"Account protection is being prepared."},{label:"Recovery and alerts",status:authReady.passwordRecoveryReady&&authReady.loginAlertingReady&&authReady.rateLimitGuarded?"ready":"in progress",detail:"Email recovery, login alerts, and request limits protect the account lane."},{label:"Account email",status:smtp.ready?"ready":"in progress",detail:smtp.ready?"Verification and recovery email delivery is ready.":"Email delivery is being prepared before public signup."},{label:"Checkout",status:"unavailable",detail:"Checkout and billing activation are unavailable."},{label:"Media storage",status:media.ready?"ready":"in progress",detail:media.ready?"Private media storage is ready.":"Private media storage is being prepared."}];renderAlerts(personalAlerts.length?[...personalAlerts,...coreAlerts]:coreAlerts);if(entitlement?.active&&pageParams.get("stay")!=="1")location.replace("/app")}
     async function openApp(){try{await api("/api/auth/session");localStorage.removeItem(legacyTokenKey);location.href="/app"}catch(error){$("authNotice").textContent="Log in again before opening the command center.";setCreateMode(false)}}
-    $("loginBtn").addEventListener("click",()=>auth("login"));$("createBtn").addEventListener("click",()=>auth("create"));$("resendVerifyBtn").addEventListener("click",resendVerification);$("forgotPasswordBtn").addEventListener("click",()=>openRecoveryBox());$("sendRecoveryBtn").addEventListener("click",requestPasswordRecovery);$("backToLoginBtn").addEventListener("click",()=>setCreateMode(false));document.querySelectorAll(".openAppBtn").forEach(btn=>btn.addEventListener("click",openApp));$("logoutBtn").addEventListener("click",async()=>{await api("/api/auth/logout",{method:"POST"}).catch(()=>{});localStorage.removeItem(legacyTokenKey);location.reload()});$("copyAppLink").addEventListener("click",async()=>{await navigator.clipboard.writeText(location.origin+"/app");alert("App link copied.")});$("portalCheckout").addEventListener("click",async()=>{const data=await api("/api/billing/checkout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({selectedPlan:"Social Cues highest tier"})});if(data.url)location.href=data.url});if(hashParams.get("type")==="recovery"&&hashParams.get("access_token")){location.replace("/reset-password"+location.hash)}else{setCreateMode(createMode);if(pageParams.get("verified")==="1"){setCreateMode(false);$("authNotice").textContent="Email verified. Log in with that email and password to open Social Cues."}const inviteCode=pageParams.get("promo")||pageParams.get("code")||"";if(inviteCode)$("promoInput").value=inviteCode.toUpperCase();if(pageParams.get("mode")==="forgot-password"||pageParams.get("mode")==="reset-password")openRecoveryBox("Request a fresh password reset email. The new-password screen opens only from that email link.");refreshPortal()}
+    $("loginBtn").addEventListener("click",()=>auth("login"));$("createBtn").addEventListener("click",()=>auth("create"));$("resendVerifyBtn").addEventListener("click",resendVerification);$("forgotPasswordBtn").addEventListener("click",()=>openRecoveryBox());$("sendRecoveryBtn").addEventListener("click",requestPasswordRecovery);$("backToLoginBtn").addEventListener("click",()=>setCreateMode(false));document.querySelectorAll(".openAppBtn").forEach(btn=>btn.addEventListener("click",openApp));$("logoutBtn").addEventListener("click",async()=>{await api("/api/auth/logout",{method:"POST"}).catch(()=>{});localStorage.removeItem(legacyTokenKey);location.reload()});$("copyAppLink").addEventListener("click",async()=>{await navigator.clipboard.writeText(location.origin+"/app");alert("App link copied.")});if(hashParams.get("type")==="recovery"&&hashParams.get("access_token")){location.replace("/reset-password"+location.hash)}else{setCreateMode(createMode);if(pageParams.get("verified")==="1"){setCreateMode(false);$("authNotice").textContent="Email verified. Log in with that email and password to open Social Cues."}const inviteCode=pageParams.get("promo")||pageParams.get("code")||"";if(inviteCode)$("promoInput").value=inviteCode.toUpperCase();if(pageParams.get("mode")==="forgot-password"||pageParams.get("mode")==="reset-password")openRecoveryBox("Request a fresh password reset email. The new-password screen opens only from that email link.");refreshPortal()}
   </script>
   <script>
-    fetch("/api/billing/readiness", { cache: "no-store" }).then(response => response.json()).then(billing => {
-      const button = document.getElementById("portalCheckout");
-      if (!button) return;
-      button.disabled = !billing.ready;
+    const billing = { ready: false };
+    const button = document.getElementById("portalCheckout");
+    if (button) {
+      button.disabled = true;
       button.textContent = billing.ready ? "Pay or manage checkout" : "Payments opening soon";
-    }).catch(() => {
-      const button = document.getElementById("portalCheckout");
-      if (button) { button.disabled = true; button.textContent = "Payments opening soon"; }
-    });
+      button.textContent = "Checkout unavailable";
+    }
   </script>
   `, "/portal");
 }
@@ -15988,7 +16406,8 @@ function consumeOAuthState(model, provider, state, options = {}) {
   }
   const sessionUserId = String(options.session?.user?.id || "");
   const recordOwnerUserId = String(record.ownerUserId || record.userId || "");
-  if (runtimeMode === "vercel" && options.requireSessionOwner && (!sessionUserId || !recordOwnerUserId)) {
+  const enforceSessionOwner = runtimeMode === "vercel" || options.requireSessionOwner === true;
+  if (enforceSessionOwner && options.requireSessionOwner && (!sessionUserId || !recordOwnerUserId)) {
     const result = { ok: false, error: "Sign in to the same Social Cues account that started this connection, then try again." };
     recordOAuthEvent(model, {
       provider,
@@ -16001,7 +16420,7 @@ function consumeOAuthState(model, provider, state, options = {}) {
     });
     return result;
   }
-  if (runtimeMode === "vercel" && sessionUserId && recordOwnerUserId && sessionUserId !== recordOwnerUserId) {
+  if (enforceSessionOwner && sessionUserId && recordOwnerUserId && sessionUserId !== recordOwnerUserId) {
     const result = { ok: false, error: "OAuth state belongs to a different signed-in Social Cues user. Start the connection again from the app." };
     recordOAuthEvent(model, {
       provider,
@@ -16555,6 +16974,9 @@ async function exchangeShopifyCode(shop, code) {
 }
 
 function twitchOAuthUrl(state = "") {
+  if (!twitchApplicationCredentials.configured) {
+    throw new Error(`${twitchApplicationCredentials.missingEnv.join(" and ")} must be configured before Twitch OAuth can start.`);
+  }
   const params = new URLSearchParams({
     response_type: "code",
     client_id: twitchClientId,
@@ -18098,8 +18520,23 @@ async function route(req, res) {
   if (/^\/api\/oauth\/[^/]+\/callback$/.test(url.pathname) && req.method === "GET") {
     try {
       const oauthModel = await getModel();
+      const oauthCallbackMatch = url.pathname.match(/^\/api\/oauth\/([^/]+)\/callback$/);
+      const callbackProvider = oauthCallbackMatch[1];
+      const callbackState = url.searchParams.get("state") || "";
+      const localStateRecord = localWorkspacePersistence && callbackState
+        ? (oauthModel.oauthStates || []).find(item => item.provider === callbackProvider && item.state === callbackState)
+        : null;
       recordOAuthCallbackIngress(oauthModel, url, req);
-      await saveModel(oauthModel);
+      if (!localWorkspacePersistence) {
+        await saveModel(oauthModel);
+      } else if (localStateRecord) {
+        const ingressSession = await sessionFromRequest(oauthModel, req);
+        const stateOwnerUserId = String(localStateRecord.ownerUserId || localStateRecord.userId || "");
+        const stateWorkspaceId = String(localStateRecord.workspaceId || "");
+        const sessionWorkspaceId = ingressSession?.user ? String(workspaceIdForUser(ingressSession.user)) : "";
+        if (stateOwnerUserId === String(ingressSession?.user?.id || "")
+          && (!stateWorkspaceId || stateWorkspaceId === sessionWorkspaceId)) await saveModel(oauthModel);
+      }
     } catch (error) {
       oauthRuntimeLog("unknown", "callback_ingress_log_failed", { error: error.message });
     }
@@ -18107,6 +18544,36 @@ async function route(req, res) {
 
   if (url.pathname === "/") {
     return text(res, 200, landingPageHtml(), "text/html; charset=utf-8");
+  }
+
+  if (url.pathname === "/pricing" && req.method === "GET") {
+    try {
+      return text(res, 200, pricingPageHtml(currentPricingPresentation()), "text/html; charset=utf-8");
+    } catch (error) {
+      runtimeRequestLog("error", "pricing_presentation_unavailable", req, {
+        errorName: error?.name || "Error"
+      });
+      return text(res, 503, pricingUnavailablePageHtml(), "text/html; charset=utf-8");
+    }
+  }
+
+  if (url.pathname === "/pricing") {
+    return json(res, 405, { ok: false, error: "Method not allowed." });
+  }
+
+  if (url.pathname === "/api/pricing" && req.method === "GET") {
+    try {
+      return json(res, 200, {
+        ok: true,
+        schemaVersion: pricingPresentationSchemaVersion,
+        pricing: currentPricingPresentation()
+      });
+    } catch (error) {
+      runtimeRequestLog("error", "pricing_api_unavailable", req, {
+        errorName: error?.name || "Error"
+      });
+      return json(res, 503, unavailablePricingEnvelope());
+    }
   }
 
   if (url.pathname === "/portal" || url.pathname === "/account") {
@@ -18145,6 +18612,7 @@ async function route(req, res) {
     const body = [
       "User-agent: *",
       "Allow: /$",
+      "Allow: /pricing$",
       "Allow: /privacy$",
       "Allow: /privacy-policy$",
       "Allow: /terms$",
@@ -18205,7 +18673,7 @@ async function route(req, res) {
     return json(res, 200, {
       ok: true,
       baseUrl: `${brandHomeUrl}/media/social-cues-promo-pack`,
-      assets: publicLaunchPromoAssets(),
+      assets: publicLaunchPromoAssets(brandHomeUrl),
       providerNote: "These are intentionally public launch assets. Client uploads and private user media stay behind authenticated storage."
     });
   }
@@ -18970,9 +19438,15 @@ async function route(req, res) {
     const connected = Boolean(account && isRealConnectedAccount(account));
     return json(res, 200, {
       ok: true,
-      configured: Boolean(twitchClientId && twitchClientSecret),
-      clientIdPresent: Boolean(twitchClientId),
-      clientSecretPresent: Boolean(twitchClientSecret),
+      configured: twitchApplicationCredentials.configured,
+      clientIdPresent: twitchApplicationCredentials.clientIdPresent,
+      clientSecretPresent: twitchApplicationCredentials.clientSecretPresent,
+      clientIdValid: twitchApplicationCredentials.clientIdValid,
+      clientSecretValid: twitchApplicationCredentials.clientSecretValid,
+      credentialSources: {
+        clientId: twitchApplicationCredentials.clientIdSource,
+        clientSecret: twitchApplicationCredentials.clientSecretSource
+      },
       connected,
       connectionState: connected ? "connected" : refreshError ? "needs-reconnect" : account ? "stored-but-incomplete" : "not-connected",
       account: account ? publicAccount(account) : null,
@@ -18982,11 +19456,13 @@ async function route(req, res) {
       secureOAuthReady: secureTwitchOAuthReady(),
       warning: twitchSecurityWarning(),
       scopes: twitchScopes,
-      missingEnv: ["TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET"].filter(name => !envPresent(name)),
+      missingEnv: twitchApplicationCredentials.missingEnv,
       acceptedEnv: envAcceptedMap(["TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET"]),
       portal: "https://dev.twitch.tv/console/apps",
       developerReviewStatus: twitchDeveloperReviewStatus,
-      setupStatus: twitchClientId ? "Twitch app credentials present; developer-status approval may still gate production OAuth." : "Twitch developer status is pending approval; add app credentials after Twitch approves developer access.",
+      setupStatus: twitchApplicationCredentials.configured
+        ? "Twitch app credentials present; developer-status approval may still gate production OAuth."
+        : `Configure ${twitchApplicationCredentials.missingEnv.join(" and ")} before Twitch OAuth can start.`,
       securityModel: "Twitch access depends on OAuth scopes and channel ownership; analytics and subscriber scopes require the broadcaster's consent."
     });
   }
@@ -19279,7 +19755,14 @@ async function route(req, res) {
       authUrl = shopifyOAuthUrl(shop, state);
     } else if (provider === "twitch") {
       if (!secureTwitchOAuthReady()) return json(res, 409, { ok: false, error: twitchSecurityWarning() });
-      if (!twitchClientId) return json(res, 409, { ok: false, error: "TWITCH_CLIENT_ID is not configured." });
+      if (!twitchApplicationCredentials.configured) {
+        return json(res, 409, {
+          ok: false,
+          error: `${twitchApplicationCredentials.missingEnv.join(" and ")} must be configured before Twitch OAuth can start.`,
+          missingEnv: twitchApplicationCredentials.missingEnv,
+          acceptedEnv: envAcceptedMap(["TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET"])
+        });
+      }
       state = createOAuthState(model, "twitch", "twitch", oauthOwnerFields(session));
       authUrl = twitchOAuthUrl(state);
     } else if (provider === "canva") {
@@ -20118,8 +20601,8 @@ async function route(req, res) {
     if (!secureTwitchOAuthReady()) {
       return html(res, 200, `<h1>Twitch callback URL needed</h1><p>${twitchSecurityWarning()}</p><p>Current Twitch callback:</p><p><code>${twitchRedirectUri()}</code></p><p><a href="/app">Back to Social Cues</a></p>`);
     }
-    if (!twitchClientId) {
-      return html(res, 200, `<h1>Twitch client id needed</h1><p>Create a Twitch developer app, then add <code>TWITCH_CLIENT_ID</code> and <code>TWITCH_CLIENT_SECRET</code> to Vercel environment variables.</p><p>Use this OAuth redirect URL in Twitch Developers:</p><p><code>${twitchRedirectUri()}</code></p><p>Requested scopes: <code>${twitchScopes.join(" ")}</code></p><p><a href="/app">Back to Social Cues</a></p>`);
+    if (!twitchApplicationCredentials.configured) {
+      return html(res, 200, `<h1>Twitch application credentials needed</h1><p>Configure <code>${twitchApplicationCredentials.missingEnv.join("</code> and <code>")}</code> for the Twitch developer application before OAuth can start.</p><p>Use this OAuth redirect URL in Twitch Developers:</p><p><code>${twitchRedirectUri()}</code></p><p>Requested scopes: <code>${twitchScopes.join(" ")}</code></p><p><a href="/app">Back to Social Cues</a></p>`);
     }
     const model = await getModel();
     const session = await oauthStartSession(model, req);
@@ -20182,7 +20665,9 @@ async function route(req, res) {
       model.integrations.twitch = account.connectionEvidence;
     }
     renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
-    if (owner && model !== sharedModel) await saveModel(sharedModel);
+    // Local workspace persistence commits shared OAuth/session state and the
+    // owner-scoped account together from the workspace view's single baseline.
+    if (owner && model !== sharedModel && !localWorkspacePersistence) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     return html(res, 200, oauthReturnBody("Twitch", model.integrations.twitch, { provider: "twitch" }), "/app");
   }
@@ -20273,7 +20758,7 @@ async function route(req, res) {
     }
     const model = await getModel();
     const session = await oauthStartSession(model, req);
-    if (runtimeMode === "vercel" && !session) return html(res, 401, `<h1>Sign in required</h1><p>Open Social Cues, sign in, then connect YouTube from inside the app.</p><p><a href="/app">Back to Social Cues</a></p>`);
+    if ((runtimeMode === "vercel" || localWorkspacePersistence) && !session) return html(res, 401, `<h1>Sign in required</h1><p>Open Social Cues, sign in, then connect YouTube from inside the app.</p><p><a href="/app">Back to Social Cues</a></p>`);
     const state = createOAuthState(model, "youtube", googleBusinessMode ? "google_business" : "youtube", { ...oauthOwnerFields(session), requestedScopes });
     await saveModel(model);
     res.writeHead(302, { Location: googleBusinessMode ? googleBusinessOAuthUrl(state) : youtubeOAuthUrl(state) });
@@ -20292,7 +20777,10 @@ async function route(req, res) {
     }
     const sharedModel = await getModel();
     const session = await sessionFromRequest(sharedModel, req);
-    const stateCheck = consumeOAuthState(sharedModel, "youtube", state, { session });
+    const stateCheck = consumeOAuthState(sharedModel, "youtube", state, {
+      session,
+      allowSignedRecovery: !localWorkspacePersistence
+    });
     if (!stateCheck.ok) {
       await saveModel(sharedModel);
       return html(res, 400, `<h1>YouTube OAuth state rejected</h1><p>${stateCheck.error}</p><p><a href="/app">Back to Social Cues</a></p>`);
@@ -20374,7 +20862,12 @@ async function route(req, res) {
       model.integrations[googleBusinessMode ? "google_business" : "youtube"] = account.connectionEvidence;
     }
     renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
-    if (owner && model !== sharedModel) await saveModel(sharedModel);
+    // The local workspace view commits consumed state, renewed session data,
+    // OAuth audit evidence, and owner-scoped accounts from one tracked baseline.
+    if (localWorkspacePersistence && owner && model !== sharedModel) {
+      model.oauthEvents = cloneJson(sharedModel.oauthEvents || []);
+    }
+    if (owner && model !== sharedModel && !localWorkspacePersistence) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     if (account?.status === "connected" && owner) {
       let persistenceCheck = await confirmPersistedProviderAccount(owner, account.platform, account.providerAccountId, sharedModel, account);
@@ -20404,7 +20897,7 @@ async function route(req, res) {
     }
     const model = await getModel();
     const session = await oauthStartSession(model, req);
-    if (runtimeMode === "vercel" && !session) return html(res, 401, `<h1>Sign in required</h1><p>Open Social Cues, sign in, then connect Meta from inside the app.</p><p><a href="/app">Back to Social Cues</a></p>`);
+    if ((runtimeMode === "vercel" || localWorkspacePersistence) && !session) return html(res, 401, `<h1>Sign in required</h1><p>Open Social Cues, sign in, then connect Meta from inside the app.</p><p><a href="/app">Back to Social Cues</a></p>`);
     const requestScopes = metaOAuthScopesForRequest(platform, { testingPages });
     const state = createOAuthState(model, "meta", platform, { ...oauthOwnerFields(session), redirectUri, testingPages, requestedScopes: requestScopes });
     await saveModel(model);
@@ -20485,9 +20978,13 @@ async function route(req, res) {
     }
     const sharedModel = await getModel();
     const session = await sessionFromRequest(sharedModel, req);
-    const stateCheck = consumeOAuthState(sharedModel, "meta", state, { session });
+    const stateCheck = consumeOAuthState(sharedModel, "meta", state, {
+      session,
+      allowSignedRecovery: !localWorkspacePersistence,
+      requireSessionOwner: Boolean(localWorkspacePersistence)
+    });
     if (!stateCheck.ok) {
-      await saveModel(sharedModel);
+      if (!localWorkspacePersistence) await saveModel(sharedModel);
       return html(res, 400, `<h1>Meta OAuth state rejected</h1><p>${stateCheck.error}</p><p><a href="/app">Back to Social Cues</a></p>`);
     }
     const owner = userFromOAuthRecord(sharedModel, stateCheck.record, session);
@@ -20513,7 +21010,12 @@ async function route(req, res) {
       };
     }
     renewOAuthReturnSession(res, sharedModel, model, owner, stateCheck.record, req, session);
-    if (owner && model !== sharedModel) await saveModel(sharedModel);
+    // The local owner view carries the consumed state, renewed session data,
+    // callback audit, and Meta assets through one revision-checked save.
+    if (localWorkspacePersistence && owner && model !== sharedModel) {
+      model.oauthEvents = cloneJson(sharedModel.oauthEvents || []);
+    }
+    if (owner && model !== sharedModel && !localWorkspacePersistence) await saveModel(sharedModel);
     await saveModelForUser(model, owner);
     if (connected.length) {
       const items = connected.map(account => `<li>${account.name} (${account.platform})</li>`).join("");
@@ -20544,7 +21046,7 @@ async function route(req, res) {
       ok: true,
       ready,
       provider: authProvider,
-      alphaLocalFallback: !supabaseAuthEnabled(),
+      alphaLocalFallback: localPasswordAuthEnabled(),
       emailVerificationRequired: supabaseAuthEnabled(),
       passwordRecoveryReady: Boolean(supabaseAuthEnabled() && smtp.ready),
       loginAlertingReady: true,
@@ -20832,7 +21334,7 @@ async function route(req, res) {
   if (url.pathname === "/api/model" && req.method === "GET") {
     const sharedModel = await getModel();
     const session = await sessionFromRequest(sharedModel, req);
-    if ((runtimeMode === "vercel" || bearerToken(req)) && !session) {
+    if ((localWorkspacePersistence || runtimeMode === "vercel" || bearerToken(req)) && !session) {
       return json(res, 401, { ok: false, error: "Sign in to load this hosted Social Cues workspace." });
     }
     if (runtimeMode === "vercel" && session?.user && !hasActiveAppAccess(session.user)) {
@@ -20840,9 +21342,14 @@ async function route(req, res) {
     }
     const model = await modelForSession(session, sharedModel);
     if (session?.user) {
-      ensureUserWorkspace(model, session.user);
-      await ensureWorkspaceBootstrap(model, session.user);
-      await saveModelForUser(model, session.user);
+      try {
+        ensureUserWorkspace(model, session.user);
+        await ensureWorkspaceBootstrap(model, session.user);
+        if (!localWorkspacePersistence) await saveModelForUser(model, session.user);
+      } catch (error) {
+        if (localOwnershipErrorResponse(res, error)) return;
+        throw error;
+      }
     }
     refreshSessionCookieIfNeeded(res, session);
     return json(res, 200, publicModel(model, session));
@@ -20851,23 +21358,69 @@ async function route(req, res) {
   if (url.pathname === "/api/model" && req.method === "POST") {
     const sharedExisting = await getModel();
     const session = await hostedWriteRequiresSession(req, sharedExisting);
-    if (!session) {
-      return json(res, 401, { ok: false, error: "Sign in before saving the hosted Social Cues workspace." });
+    if (!session?.user) {
+      return json(res, 401, {
+        ok: false,
+        code: "authentication_required",
+        error: "Sign in before saving this Social Cues workspace."
+      });
     }
     const existing = await modelForSession(session, sharedExisting);
-    if (session?.user) {
+    if (localWorkspacePersistence) {
+      const envelope = await bodyJson(req);
+      const saved = await localPersistenceWrite(() => localWorkspacePersistence.clientSave(session.user, envelope));
+      refreshSessionCookieIfNeeded(res, session);
+      // A superseded receipt is not a representation of the original saved content.
+      return json(res, 200, saved.receipt.superseded
+        ? { ok: true, persistence: { conditionalSave: true, revision: saved.receipt.currentRevision }, receipt: saved.receipt }
+        : { ...publicModel(saved.model, session), receipt: saved.receipt });
+    }
+    try {
       ensureUserWorkspace(existing, session.user);
       await ensureWorkspaceBootstrap(existing, session.user);
+    } catch (error) {
+      if (localOwnershipErrorResponse(res, error)) return;
+      throw error;
     }
     const incoming = await bodyJson(req);
-    const merged = mergePublicModelUpdate(incoming, existing, session?.user || null);
+    let trustedIncoming = incoming;
+    if (!supabaseEnabled) {
+      try {
+        trustedIncoming = applyCanonicalLocalOwnership({
+          authenticatedUserId: session.user.id,
+          activeWorkspaceId: workspaceIdForUser(session.user),
+          currentModel: existing,
+          incomingModel: incoming,
+          operation: "model-update"
+        });
+      } catch (error) {
+        if (localOwnershipErrorResponse(res, error)) return;
+        throw error;
+      }
+    }
+    const merged = mergePublicModelUpdate(trustedIncoming, existing, session.user);
+    if (!supabaseEnabled) {
+      try {
+        validateLocalOwnershipState({
+          model: merged,
+          activeWorkspaceId: workspaceIdForUser(session.user),
+          authenticatedUserId: session.user.id
+        });
+      } catch (error) {
+        if (localOwnershipErrorResponse(res, error)) return;
+        throw error;
+      }
+    }
     sanitizeConnectedAccounts(merged);
     refreshSessionCookieIfNeeded(res, session);
-    return json(res, 200, publicModel(await saveModelForUser(merged, session?.user || null), session && session.user ? session : null));
+    return json(res, 200, publicModel(await saveModelForUser(merged, session.user), session));
   }
 
   if (url.pathname === "/api/auth/signup" && req.method === "POST") {
     if (!authSessionSecret) return missingAuthSessionSecretResponse(res);
+    if (authenticationExecutionMode() === "unavailable") {
+      return json(res, 503, { ok: false, error: authenticationServiceUnavailableMessage });
+    }
     const input = await bodyJson(req);
     const signupLimit = await authRateLimitDecision("signup", req, input.email);
     if (!signupLimit.ok) {
@@ -20890,7 +21443,9 @@ async function route(req, res) {
     }
     const user = created.user;
     const knownDevice = (model.deviceSessions || []).some(item => String(item.userId || "") === String(user.id || "") && String(item.deviceId || "") === String(input?.device?.deviceId || input?.deviceId || ""));
-    const token = created.providerSession?.access_token || crypto.randomBytes(32).toString("base64url");
+    const token = created.providerSession?.access_token
+      || (localPasswordAuthEnabled() ? crypto.randomBytes(32).toString("base64url") : "");
+    if (!token) return json(res, 503, { ok: false, error: authenticationServiceUnavailableMessage });
     const device = upsertDeviceSession(model, user, input.device || input, token, created.providerSession);
     await persistNormalizedDeviceAuthState(device);
     setCurrentUser(model, user);
@@ -21090,6 +21645,9 @@ async function route(req, res) {
 
   if (url.pathname === "/api/auth/login" && req.method === "POST") {
     if (!authSessionSecret) return missingAuthSessionSecretResponse(res);
+    if (authenticationExecutionMode() === "unavailable") {
+      return json(res, 503, { ok: false, error: authenticationServiceUnavailableMessage });
+    }
     const input = await bodyJson(req);
     const loginLimit = await authRateLimitDecision("login", req, input.email);
     if (!loginLimit.ok) {
@@ -21100,8 +21658,11 @@ async function route(req, res) {
     const loggedIn = await loginAppAccount(model, input);
     if (!loggedIn.ok) return json(res, loggedIn.status || 401, { ok: false, error: loggedIn.error });
     const user = loggedIn.user;
+    if (localWorkspacePersistence) requestModelContext.getStore().localActor = user;
     const knownDevice = (model.deviceSessions || []).some(item => String(item.userId || "") === String(user.id || "") && String(item.deviceId || "") === String(input?.device?.deviceId || input?.deviceId || ""));
-    const token = loggedIn.providerSession?.access_token || crypto.randomBytes(32).toString("base64url");
+    const token = loggedIn.providerSession?.access_token
+      || (localPasswordAuthEnabled() ? crypto.randomBytes(32).toString("base64url") : "");
+    if (!token) return json(res, 503, { ok: false, error: authenticationServiceUnavailableMessage });
     const device = upsertDeviceSession(model, user, input.device || input, token, loggedIn.providerSession);
     await persistNormalizedDeviceAuthState(device);
     setCurrentUser(model, user);
@@ -21154,8 +21715,10 @@ async function route(req, res) {
     const workspaceModel = hasActiveAppAccess(session.user) ? await modelForSession(session, model) : model;
     if (hasActiveAppAccess(session.user)) ensureUserWorkspace(workspaceModel, session.user);
     setCurrentUser(model, session.user);
-    if (hasActiveAppAccess(session.user)) await saveModelForUser(workspaceModel, session.user);
-    else await saveModel(model);
+    if (!localWorkspacePersistence) {
+      if (hasActiveAppAccess(session.user)) await saveModelForUser(workspaceModel, session.user);
+      else await saveModel(model);
+    }
     setCookie(res, sessionCookieValue(session.token, session.device.expiresAt));
     return json(res, 200, accountSessionResponse(workspaceModel, session.user, session.device, session.token || ""));
   }
@@ -21189,7 +21752,7 @@ async function route(req, res) {
     if (currentIndex >= 0) devices[currentIndex] = session.device;
     else devices.unshift(session.device);
     replaceUserDeviceSessions(model, session.user.id, devices);
-    await saveModel(model);
+    if (!localWorkspacePersistence) await saveModel(model);
     return json(res, 200, { ok: true, currentDeviceId: session.device.deviceId, devices: devices.map(publicDeviceSession) });
   }
 
@@ -21397,21 +21960,37 @@ async function route(req, res) {
     const model = await getModel();
     const session = await sessionFromRequest(model, req);
     if (!session?.user) return json(res, 401, { ok: false, error: "Sign in before reading workspace members." });
-    return json(res, 200, { ok: true, ...(await workspaceMembershipView(session.user)) });
+    try {
+      const membershipView = await workspaceMembershipView(session);
+      if (!membershipView) return json(res, 403, { ok: false, error: "Workspace access could not be verified." });
+      return json(res, 200, { ok: true, ...membershipView });
+    } catch {
+      return json(res, 403, { ok: false, error: "Workspace access could not be verified." });
+    }
   }
 
   if (url.pathname === "/api/workspace/invites" && req.method === "POST") {
     const input = await bodyJson(req);
     const model = await getModel();
     const session = await sessionFromRequest(model, req);
-    if (!session?.user || !canManageWorkspaceMembers(session.user)) {
+    if (!session?.user) {
+      return json(res, 403, { ok: false, error: "Only a workspace owner or admin can invite members." });
+    }
+    let managementAccess;
+    try {
+      managementAccess = await requireWorkspaceManagementAccess(session, {
+        requestedWorkspaceId: input.workspaceId,
+        resourceWorkspaceId: input.workspace_id,
+        action: "workspace.invites.create"
+      });
+    } catch {
       return json(res, 403, { ok: false, error: "Only a workspace owner or admin can invite members." });
     }
     const email = normalizeEmail(input.email);
     const role = ["admin", "member", "viewer"].includes(input.role) ? input.role : "member";
     if (!email) return json(res, 400, { ok: false, error: "Invite email is required." });
-    const workspaceId = workspaceModelIdForUser(session.user);
-    const ownerUserId = supabaseUserIdForUser(session.user);
+    const workspaceId = managementAccess.workspaceId;
+    const ownerUserId = managementAccess.userId;
     const inviteToken = crypto.randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const inserted = await supabaseRequest("/workspace_invites", {
@@ -21478,8 +22057,18 @@ async function route(req, res) {
     const input = await bodyJson(req);
     const model = await getModel();
     const session = await sessionFromRequest(model, req);
-    if (!session?.user || !canManageWorkspaceMembers(session.user)) return json(res, 403, { ok: false, error: "Only a workspace owner or admin can revoke invitations." });
-    const workspaceId = workspaceModelIdForUser(session.user);
+    if (!session?.user) return json(res, 403, { ok: false, error: "Only a workspace owner or admin can revoke invitations." });
+    let managementAccess;
+    try {
+      managementAccess = await requireWorkspaceManagementAccess(session, {
+        requestedWorkspaceId: input.workspaceId,
+        resourceWorkspaceId: input.workspace_id,
+        action: "workspace.invites.revoke"
+      });
+    } catch {
+      return json(res, 403, { ok: false, error: "Only a workspace owner or admin can revoke invitations." });
+    }
+    const workspaceId = managementAccess.workspaceId;
     await supabaseRequest(`/workspace_invites?id=eq.${encodeURIComponent(input.inviteId || "")}&workspace_id=eq.${encodeURIComponent(workspaceId)}&status=eq.pending`, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
@@ -22217,7 +22806,7 @@ async function route(req, res) {
         priorityBuildOrder: depth.priorityBuildOrder
       },
       futureApiBacklog: apiBacklog,
-      envRequired: ["OPENAI_API_KEY", "OPENAI_PROJECT_ID", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_PRO_MONTHLY", "DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET", "DISCORD_PUBLIC_KEY", "DISCORD_BOT_TOKEN", "RESEND_API_KEY", "SMTP_FROM", "SUPABASE_URL", "SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY", "MEDIA_STORAGE_BUCKET", "META_APP_ID", "META_APP_SECRET", "INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET", "THREADS_APP_ID", "THREADS_APP_SECRET", "X_CLIENT_ID", "X_CLIENT_SECRET", "TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET", "PINTEREST_APP_ID", "PINTEREST_APP_SECRET", "CANVA_CLIENT_ID", "CANVA_CLIENT_SECRET", "SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET", "ETSY_CLIENT_ID", "ETSY_CLIENT_SECRET", "TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "YOUTUBE_CHANNEL_ID", "GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ADS_CUSTOMER_ID", "GOOGLE_SEARCH_CONSOLE_SITE_URL", "GOOGLE_ANALYTICS_PROPERTY_ID", "REDDIT_COMMERCIAL_APPROVED", "REDDIT_ADS_API_CLIENT_ID", "REDDIT_ADS_API_CLIENT_SECRET", "REDDIT_ADS_ACCOUNT_ID"]
+      envRequired: ["OPENAI_API_KEY", "OPENAI_PROJECT_ID", "STRIPE_BILLING_MODE", "STRIPE_PRICING_CONFIGURATION_VERSION", "STRIPE_TEST_SECRET_KEY or STRIPE_LIVE_SECRET_KEY", "STRIPE_TEST_WEBHOOK_SECRET or STRIPE_LIVE_WEBHOOK_SECRET", "STRIPE_PRICE_BUSINESS_MONTHLY", "STRIPE_PRICE_GROWTH_MONTHLY", "STRIPE_PRICE_AGENCY_MONTHLY", "DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET", "DISCORD_PUBLIC_KEY", "DISCORD_BOT_TOKEN", "RESEND_API_KEY", "SMTP_FROM", "SUPABASE_URL", "SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY", "MEDIA_STORAGE_BUCKET", "META_APP_ID", "META_APP_SECRET", "INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET", "THREADS_APP_ID", "THREADS_APP_SECRET", "X_CLIENT_ID", "X_CLIENT_SECRET", "TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET", "PINTEREST_APP_ID", "PINTEREST_APP_SECRET", "CANVA_CLIENT_ID", "CANVA_CLIENT_SECRET", "SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET", "ETSY_CLIENT_ID", "ETSY_CLIENT_SECRET", "TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "YOUTUBE_CHANNEL_ID", "GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ADS_CUSTOMER_ID", "GOOGLE_SEARCH_CONSOLE_SITE_URL", "GOOGLE_ANALYTICS_PROPERTY_ID", "REDDIT_COMMERCIAL_APPROVED", "REDDIT_ADS_API_CLIENT_ID", "REDDIT_ADS_API_CLIENT_SECRET", "REDDIT_ADS_ACCOUNT_ID"]
     });
   }
 
@@ -23408,7 +23997,12 @@ async function route(req, res) {
   }
 
   if (url.pathname === "/api/dev-portal/audit" && req.method === "GET") {
-    return json(res, 200, developerPortalAudit());
+    const sharedModel = await getModel();
+    const session = await sessionFromRequest(sharedModel, req);
+    const model = session?.user ? await modelForSession(session, sharedModel) : sharedModel;
+    if (session?.user) ensureUserWorkspace(model, session.user);
+    refreshSessionCookieIfNeeded(res, session);
+    return json(res, 200, developerPortalAuditForWorkspace(model, session));
   }
 
   if (url.pathname === "/api/platform-capabilities/depth" && req.method === "GET") {
@@ -24289,82 +24883,50 @@ async function route(req, res) {
     return json(res, 200, { ok: true, mode: "sent", account: publicAccount(account), guildId: target.guildId, channelId, messageId: message.id || null, receipt: publicDiscordActionReceipt(receipt) });
   }
 
-  if ((url.pathname === "/api/billing/readiness" || url.pathname === "/api/billing/status") && req.method === "GET") {
-    const checkoutReady = Boolean(stripeSecretKey && (stripePriceFounderAudit || stripePriceCampaignBuild || stripePriceProMonthly));
-    const webhookReady = Boolean(stripeWebhookSecret);
+  if (url.pathname === "/api/billing/readiness" && req.method === "GET") {
+    const checkoutReady = false;
+    const webhookReady = false;
     return json(res, 200, {
-      ok: true,
-      ready: checkoutReady && webhookReady,
-      checkoutReady,
-      webhookReady,
-      customerPortalReady: Boolean(stripeSecretKey),
-      customerPortalEndpoint: "/api/billing/portal",
-      entitlementEvents: [
-        "checkout.session.completed",
-        "checkout.session.async_payment_succeeded",
-        "customer.subscription.created",
-        "customer.subscription.updated",
-        "customer.subscription.deleted",
-        "invoice.payment_failed"
-      ],
-      mode: checkoutReady && webhookReady
-        ? "stripe-entitlement-ready"
-        : checkoutReady
-          ? "checkout-blocked-until-webhook"
-          : stripeSecretKey
-            ? "stripe-price-required"
-            : "payment-link-first"
+      ...await stripeBillingApplication.getReadiness(),
+      ready: checkoutReady && webhookReady
     });
   }
 
-  if (url.pathname === "/api/billing/webhook" && req.method === "POST") {
-    const raw = await bodyText(req);
-    let event;
-    try {
-      event = verifyStripeWebhook(raw, req.headers["stripe-signature"] || "");
-    } catch (error) {
-      return json(res, stripeWebhookSecret ? 400 : 503, { ok: false, error: error.message });
-    }
-    let durableClaim;
-    try {
-      durableClaim = await claimDurableWebhookEvent("stripe", event);
-    } catch (error) {
-      return json(res, 503, { ok: false, error: "Stripe event ledger is temporarily unavailable. Stripe should retry this webhook." });
-    }
-    if (!durableClaim.claimed) return json(res, 200, { ok: true, duplicate: true, durable: durableClaim.durable });
+  if (url.pathname === "/api/billing/status" && req.method === "GET") {
     const model = await getModel();
-    model.billing = model.billing || {};
-    model.billing.webhookEvents = model.billing.webhookEvents || [];
-    if (event.id && model.billing.webhookEvents.some(item => item.stripeEventId === event.id)) {
-      await completeDurableWebhookEvent("stripe", event);
-      return json(res, 200, { ok: true, duplicate: true, durable: durableClaim.durable });
+    const session = await sessionFromRequest(model, req);
+    if (!session?.user) return json(res, 401, { ok: false, error: "Sign in before reading workspace billing status." });
+    let workspaceId = workspaceModelIdForUser(session.user);
+    if (runtimeMode === "local" && !supabaseEnabled) {
+      try {
+        const managementAccess = await requireWorkspaceManagementAccess(session, {
+          action: "workspace.billing.status.read"
+        });
+        workspaceId = managementAccess.workspaceId;
+      } catch {
+        return json(res, 403, { ok: false, error: "Authenticated workspace context is required." });
+      }
+    } else {
+      const userId = supabaseUserIdForUser(session.user);
+      if (!isUuid(workspaceId) || !isUuid(userId)) {
+        return json(res, 403, { ok: false, error: "Authenticated workspace context is required." });
+      }
+      if (supabaseEnabled) {
+        try {
+          const memberships = await supabaseRequest(`/workspace_members?workspace_id=eq.${encodeURIComponent(workspaceId)}&user_id=eq.${encodeURIComponent(userId)}&select=workspace_id,user_id,role&limit=2`);
+          if (!Array.isArray(memberships) || memberships.length !== 1) {
+            return json(res, 403, { ok: false, error: "Authenticated workspace context is required." });
+          }
+        } catch {
+          return json(res, 403, { ok: false, error: "Authenticated workspace context is required." });
+        }
+      }
     }
-    model.billing.webhookEvents.unshift({
-      id: uid("billing-webhook"),
-      stripeEventId: event.id || "",
-      type: event.type || "",
-      receivedAt: new Date().toISOString()
-    });
-    model.billing.webhookEvents = model.billing.webhookEvents.slice(0, 100);
-    let entitlement = null;
-    if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
-      const session = event.data?.object || {};
-      const paid = session.payment_status === "paid";
-      if (paid) entitlement = recordStripeCheckoutCompletion(model, session);
-    } else if (["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"].includes(event.type)) {
-      entitlement = recordStripeSubscriptionState(model, event.data?.object || {}, event.type);
-    } else if (event.type === "invoice.payment_failed") {
-      const invoice = event.data?.object || {};
-      entitlement = recordStripeSubscriptionState(model, {
-        id: invoice.subscription || "",
-        customer: invoice.customer || "",
-        status: "past_due",
-        current_period_end: invoice.lines?.data?.[0]?.period?.end || null
-      }, event.type);
-    }
-    await saveModel(model);
-    await completeDurableWebhookEvent("stripe", event);
-    return json(res, 200, { ok: true, received: true, type: event.type || "", entitlement: entitlement ? { email: entitlement.email, access: entitlement.access, selectedPlan: entitlement.selectedPlan } : null });
+    return json(res, 200, await stripeBillingApplication.getWorkspaceBillingStatus(workspaceId));
+  }
+
+  if (url.pathname === "/api/billing/webhook" && req.method === "POST") {
+    return json(res, 503, await stripeBillingApplication.handleWebhookHeld());
   }
 
   if (url.pathname === "/api/media/editor/readiness" && req.method === "GET") {
@@ -25449,8 +26011,8 @@ async function route(req, res) {
     refreshSessionCookieIfNeeded(res, session);
     return json(res, 200, {
       ok: true,
-      ready: Boolean(twitchClientId && twitchClientSecret && connected),
-      configured: Boolean(twitchClientId && twitchClientSecret),
+      ready: Boolean(twitchApplicationCredentials.configured && connected),
+      configured: twitchApplicationCredentials.configured,
       connected,
       connectionState: connected ? "connected" : refreshError ? "needs-reconnect" : account ? "stored-but-incomplete" : "not-connected",
       account: account ? publicAccount(account) : null,
@@ -25460,9 +26022,11 @@ async function route(req, res) {
       scopes: twitchScopes,
       allowedUse: ["read channel identity", "read subscription signal when broadcaster grants access", "read game analytics where allowed", "create clips after explicit user approval"],
       developerReviewStatus: twitchDeveloperReviewStatus,
-      portalStatus: twitchClientId && twitchClientSecret ? "developer credentials present; Twitch approval may still gate OAuth" : "Twitch developer status approval pending",
+      portalStatus: twitchApplicationCredentials.configured
+        ? "developer credentials present; Twitch approval may still gate OAuth"
+        : `application credentials incomplete: missing ${twitchApplicationCredentials.missingEnv.join(" and ")}`,
       connectRoute: "/api/oauth/twitch/start",
-      missingEnv: ["TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET"].filter(name => !envPresent(name))
+      missingEnv: twitchApplicationCredentials.missingEnv
     });
   }
 
@@ -25728,83 +26292,96 @@ async function route(req, res) {
   }
 
   if (url.pathname === "/api/billing/checkout" && req.method === "POST") {
-    const input = await bodyJson(req);
     const model = await getModel();
     const session = await sessionFromRequest(model, req);
-    if (runtimeMode === "vercel" && !session) {
+    if (!session?.user) {
       return json(res, 401, { ok: false, error: "Create and verify a Social Cues account before opening checkout." });
     }
-    if (runtimeMode === "vercel" && !stripeWebhookSecret) {
-      return json(res, 503, {
-        ok: false,
-        error: "Checkout is temporarily unavailable until verified payment delivery is configured. Promo tester access is unaffected.",
-        missingEnv: ["STRIPE_WEBHOOK_SECRET"]
+    try {
+      await requireWorkspaceManagementAccess(session, {
+        action: "workspace.billing.checkout.prepare"
       });
+    } catch {
+      return json(res, 403, { ok: false, error: "Only a workspace owner or admin can manage billing." });
     }
-    model.billing = model.billing || {};
-    model.billing.selectedPlan = input.selectedPlan || model.billing.selectedPlan || "Founder Audit - $99";
-    model.billing.paymentLink = input.paymentLink || model.billing.paymentLink || "";
-    let checkoutSession = null;
-    if (!model.billing.paymentLink) {
-      checkoutSession = await createStripeCheckoutSession({
-        selectedPlan: model.billing.selectedPlan,
-        successUrl: `${brandHomeUrl}/portal?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-        cancelUrl: `${brandHomeUrl}/portal?checkout=cancelled`,
-        customerEmail: input.email || session?.user?.email || "",
-        userId: session?.user?.id || ""
-      }).catch(error => ({ error: error.message }));
-    }
-    model.billing.status = checkoutSession?.url ? "Stripe Checkout ready" : model.billing.paymentLink ? "Payment Link ready" : "Not configured";
-    await saveModel(model);
-    return json(res, 200, {
-      ok: true,
-      mode: checkoutSession?.url ? "stripe-checkout" : model.billing.paymentLink ? "payment-link" : "stripe-not-configured",
-      url: checkoutSession?.url || model.billing.paymentLink || null,
-      checkoutSessionId: checkoutSession?.id || null,
-      message: checkoutSession?.url
-        ? "Open this Stripe Checkout Session."
-        : model.billing.paymentLink ? "Open this Stripe Payment Link." : "Set STRIPE_SECRET_KEY and Stripe price IDs on the backend to create live Checkout Sessions.",
-      error: checkoutSession?.error || null
-    });
+    const heldCheckout = await stripeBillingApplication.prepareCheckoutHeld();
+    if (runtimeMode === "vercel" && !stripeWebhookSecret) return json(res, 503, heldCheckout);
+    return json(res, 503, heldCheckout);
   }
 
   if (url.pathname === "/api/billing/portal" && req.method === "POST") {
     const model = await getModel();
     const session = await sessionFromRequest(model, req);
     if (!session?.user) return json(res, 401, { ok: false, error: "Sign in before managing billing." });
-    const entitlement = publicEntitlement(session.user);
-    const customerId = session.user.entitlement?.stripeCustomerId
-      || (model.billing?.paidEmails || []).find(item => normalizeEmail(item.email) === normalizeEmail(session.user.email))?.customerId
-      || "";
-    if (!customerId) return json(res, 409, { ok: false, error: "No Stripe customer is linked to this account yet." });
-    const portalSession = await createStripeCustomerPortalSession(customerId, `${brandHomeUrl}/portal?stay=1`)
-      .catch(error => ({ error: error.message }));
-    return json(res, portalSession?.url ? 200 : 502, {
-      ok: Boolean(portalSession?.url),
-      url: portalSession?.url || null,
-      entitlement,
-      error: portalSession?.error || null
-    });
+    try {
+      await requireWorkspaceManagementAccess(session, {
+        action: "workspace.billing.portal.prepare"
+      });
+    } catch {
+      return json(res, 403, { ok: false, error: "Only a workspace owner or admin can manage billing." });
+    }
+    return json(res, 503, await stripeBillingApplication.preparePortalHeld());
   }
 
   if (url.pathname === "/api/meta/assets" && req.method === "GET") {
     const sharedModel = await getModel();
     const session = await entitledSessionFromRequest(sharedModel, req);
+    if (localWorkspacePersistence && !session?.user) {
+      return json(res, 401, { ok: false, error: "Sign in to Social Cues before using this API." });
+    }
     if (runtimeMode === "vercel" && !session) {
       return appAccessRequiredResponse(res);
     }
     const model = session?.user ? await modelForSession(session, sharedModel) : sharedModel;
+    const localSharedMetaState = localWorkspacePersistence ? {
+      hasConnection: Object.hasOwn(model, "metaConnection"),
+      connection: model.metaConnection,
+      hasHealth: Object.hasOwn(model, "metaHealth"),
+      health: model.metaHealth,
+      hasIntegrations: Object.hasOwn(model, "integrations"),
+      hasIntegration: Object.hasOwn(model.integrations || {}, "meta"),
+      integration: model.integrations?.meta
+    } : null;
+    if (localSharedMetaState) {
+      delete model.metaConnection;
+      delete model.metaHealth;
+      if (model.integrations) delete model.integrations.meta;
+    }
     repairTokenBackedMetaAssets(model, session?.user || null);
     const inspection = await inspectMetaConnection(model, session?.user ? accountOwnerPatch(session.user) : {});
-    model.metaHealth = inspection;
+    const scopedMetaConnection = model.metaConnection || null;
+    const scopedCapabilityModel = session?.user ? {
+      ...model,
+      connectedAccounts: (model.connectedAccounts || []).filter(account => ownedByUser(account, session.user.id))
+    } : model;
+    inspection.capabilityMatrix = metaCapabilityMatrix(scopedCapabilityModel);
+    if (localSharedMetaState) {
+      if (localSharedMetaState.hasConnection) model.metaConnection = localSharedMetaState.connection;
+      else delete model.metaConnection;
+      if (localSharedMetaState.hasHealth) model.metaHealth = localSharedMetaState.health;
+      else delete model.metaHealth;
+      if (localSharedMetaState.hasIntegrations) {
+        model.integrations = model.integrations || {};
+        if (localSharedMetaState.hasIntegration) model.integrations.meta = localSharedMetaState.integration;
+        else delete model.integrations.meta;
+      } else {
+        delete model.integrations;
+      }
+    } else {
+      model.metaHealth = inspection;
+    }
     await saveModelForUser(model, session?.user || null);
     const accounts = realMetaAccounts(model)
       .filter(account => !session?.user || ownedByUser(account, session.user.id))
       .map(publicMetaAccount);
-    const diagnostic = accounts.length ? null : metaDiagnosticAgent(model);
+    const diagnostic = accounts.length ? null : metaDiagnosticAgent({
+      ...scopedCapabilityModel,
+      metaConnection: scopedMetaConnection,
+      metaHealth: inspection
+    });
     return json(res, 200, {
       ok: true,
-      metaConnection: model.metaConnection || null,
+      metaConnection: scopedMetaConnection,
       metaHealth: publicMetaHealth(inspection),
       diagnostic,
       capabilities: inspection.capabilityMatrix || metaCapabilityMatrix(model),
@@ -25819,6 +26396,9 @@ async function route(req, res) {
   if (url.pathname === "/api/meta/health" && ["GET", "POST"].includes(req.method)) {
     const sharedModel = await getModel();
     const session = req.method === "POST" ? await hostedWriteRequiresSession(req, sharedModel) : await entitledSessionFromRequest(sharedModel, req);
+    if (req.method === "POST" && !session?.user) {
+      return json(res, 401, { ok: false, error: "Sign in to Social Cues before using this API." });
+    }
     if (runtimeMode === "vercel" && !session) {
       return appAccessRequiredResponse(res);
     }
@@ -26865,7 +27445,7 @@ async function route(req, res) {
   if (url.pathname === "/api/x/account" && req.method === "GET") {
     const sharedModel = await getModel();
     const session = await entitledSessionFromRequest(sharedModel, req);
-    if (runtimeMode === "vercel" && !session) return appAccessRequiredResponse(res);
+    if ((runtimeMode === "vercel" || localWorkspacePersistence) && !session) return appAccessRequiredResponse(res);
     const model = session?.user ? await modelForSession(session, sharedModel) : sharedModel;
     let repaired = false;
     let account = null;
@@ -27491,6 +28071,89 @@ async function route(req, res) {
     return json(res, 200, { ok: true, accounts: accounts.map(publicAccount) });
   }
 
+  const vizardAction = {
+    "/api/accounts/vizard/connect": "connect",
+    "/api/accounts/vizard/replace": "replace",
+    "/api/accounts/vizard/disconnect": "disconnect"
+  }[url.pathname] || "";
+  const vizardStatusRequest = url.pathname === "/api/accounts/vizard/status" && req.method === "GET";
+  if (vizardStatusRequest || (vizardAction && req.method === "POST")) {
+    const sharedModel = await getModel();
+    const session = await sessionFromRequest(sharedModel, req);
+    if (!session?.user) {
+      return json(res, 401, {
+        ok: false,
+        error: "Sign in before managing the Vizard connection.",
+        code: "not_authenticated"
+      });
+    }
+    if ((vizardAction === "connect" || vizardAction === "replace")
+      && !isVizardJsonMediaType(req.headers["content-type"])) {
+      return json(res, 415, {
+        ok: false,
+        error: "Send the Vizard API key as JSON.",
+        code: "unsupported_media_type"
+      });
+    }
+    let input = {};
+    if (vizardStatusRequest) {
+      input = {
+        workspaceId: url.searchParams.get("workspaceId") || "",
+        workspace_id: url.searchParams.get("workspace_id") || ""
+      };
+    } else if (vizardAction !== "disconnect") {
+      try {
+        input = await bodyJson(req);
+        if (!input || typeof input !== "object" || Array.isArray(input)) {
+          return json(res, 400, {
+            ok: false,
+            error: "The Vizard connection request is invalid.",
+            code: "invalid_request"
+          });
+        }
+      } catch {
+        return json(res, 400, {
+          ok: false,
+          error: "The Vizard connection request is invalid.",
+          code: "invalid_request"
+        });
+      }
+    }
+    let managementAccess;
+    try {
+      managementAccess = await requireWorkspaceManagementAccess(session, {
+        requestedWorkspaceId: input.workspaceId,
+        resourceWorkspaceId: input.workspace_id,
+        action: vizardStatusRequest ? "vizard.connection.status" : `vizard.connection.${vizardAction}`
+      });
+    } catch {
+      return json(res, 403, {
+        ok: false,
+        error: "You do not have permission to manage this workspace connection.",
+        code: "not_authorized"
+      });
+    }
+    try {
+      const service = vizardConnectionService();
+      const connection = vizardStatusRequest
+        ? await service.status({ workspaceId: managementAccess.workspaceId })
+        : await service.manage({
+            action: vizardAction,
+            userId: managementAccess.userId,
+            workspaceId: managementAccess.workspaceId,
+            apiKey: input.apiKey || ""
+          });
+      return json(res, 200, {
+        ok: true,
+        action: vizardStatusRequest ? "status" : vizardAction,
+        canManage: true,
+        connection
+      });
+    } catch (error) {
+      return vizardConnectionErrorResponse(res, error);
+    }
+  }
+
   if (url.pathname.startsWith("/api/accounts/") && req.method === "POST") {
     const requestedPlatform = decodeURIComponent(url.pathname.split("/").pop());
     const platform = canonicalProviderAssetPlatform(requestedPlatform);
@@ -27615,7 +28278,28 @@ async function route(req, res) {
   return json(res, 404, { ok: false, error: "Not found", path: url.pathname });
 }
 
-await ensureModel();
+let localWorkspacePersistence = null;
+if (!supabaseEnabled && runtimeMode !== "vercel") {
+  const recovery = localRecoveryValidation(await readFile(uiPath, "utf8"));
+  const mergeLocalClient = (incoming, current, user) => {
+    const trusted = applyCanonicalLocalOwnership({ authenticatedUserId: user.id,
+      activeWorkspaceId: workspaceIdForUser(user), currentModel: current, incomingModel: incoming, operation: "model-update" });
+    const merged = mergePublicModelUpdate(trusted, current, user);
+    validateLocalOwnershipState({ model: merged, activeWorkspaceId: workspaceIdForUser(user), authenticatedUserId: user.id });
+    sanitizeConnectedAccounts(merged);
+    return merged;
+  };
+  localWorkspacePersistence = await openLocalWorkspacePersistence({ dataDir, seed: await getSeedModel(), mergeClient: mergeLocalClient,
+    recoverClient(request, current, user) {
+      let content;
+      try { content = recovery.project(request); }
+      catch { throw new WorkspaceContentPersistenceError("workspace_recovery_invalid", 400); }
+      const scoped = publicModel(current, { user });
+      if (recovery.conflict(scoped, content)) throw new WorkspaceContentPersistenceError("workspace_recovery_operation_conflict", 409);
+      return mergeLocalClient({ ...scoped, ...content }, current, user);
+    }
+  });
+} else await ensureModel();
 
 export default async function handler(req, res) {
   const startedAt = Date.now();
@@ -27634,7 +28318,10 @@ export default async function handler(req, res) {
       durationMs
     });
   });
-  return requestModelContext.run({}, () => route(req, res).catch(async error => {
+  return requestModelContext.run({ req }, () => route(req, res).catch(async error => {
+    if (error instanceof WorkspaceContentPersistenceError || error instanceof LocalWorkspaceOwnershipError) {
+      return json(res, error.status, { ok: false, code: error.code, error: error.code, commitStatus: error.commitStatus || "not_committed" });
+    }
     runtimeRequestLog("error", "unhandled_request_error", req, {
       errorName: error?.name || "Error",
       errorMessage: error?.message || "Unknown server error"
@@ -27656,6 +28343,20 @@ export default async function handler(req, res) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const server = http.createServer(handler);
+  let closing = false;
+  const shutdown = () => {
+    if (closing) return;
+    closing = true;
+    server.close(async () => {
+      try { await localWorkspacePersistence?.close(); process.exitCode = 0; }
+      catch { process.exitCode = 1; }
+      if (process.connected) process.disconnect();
+    });
+    server.closeIdleConnections();
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  process.on("message", message => { if (message?.type === "social-cues-local-shutdown") shutdown(); });
   server.listen(port, host, () => {
     console.log(`Social Cues local test app running at http://127.0.0.1:${port}`);
     console.log("For phone access, open http://YOUR-COMPUTER-LAN-IP:" + port + " while on the same Wi-Fi.");

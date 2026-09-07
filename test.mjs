@@ -1,11 +1,5774 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { createCipheriv, createHash, createHmac, generateKeyPairSync, randomBytes, sign as signPayload } from "node:crypto";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer as createNetServer } from "node:net";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
+import { openLocalWorkspacePersistence } from "./local-workspace-persistence.mjs";
+
+const PINTEREST_CREDENTIAL_ENV_NAMES = Object.freeze([
+  "PINTEREST_APP_ID",
+  "PINTEREST_APP_SECRET",
+  "PINTEREST_CLIENT_ID",
+  "PINTEREST_CLIENT_SECRET",
+  "PINTEREST_OAUTH_CLIENT_ID",
+  "PINTEREST_OAUTH_CLIENT_SECRET",
+  "pinterest_app_id",
+  "pinterest_app_secret",
+  "pinterest_client_id",
+  "pinterest_client_secret"
+]);
+
+function pinterestScenarioEnv(overrides = {}) {
+  const env = { ...process.env };
+  for (const existingName of Object.keys(env)) {
+    if (PINTEREST_CREDENTIAL_ENV_NAMES.some(name => name.toLowerCase() === existingName.toLowerCase())) {
+      delete env[existingName];
+    }
+  }
+  return { ...env, ...overrides };
+}
+
+const DISCORD_SCENARIO_ENV_NAMES = Object.freeze([
+  "DISCORD_CLIENT_ID",
+  "DISCORD_APPLICATION_ID",
+  "DISCORD_APP_ID",
+  "DISCORD_OAUTH_CLIENT_ID",
+  "discord_client_id",
+  "DISCORD_CLIENT_SECRET",
+  "DISCORD_APP_SECRET",
+  "DISCORD_OAUTH_CLIENT_SECRET",
+  "discord_client_secret",
+  "DISCORD_PUBLIC_KEY",
+  "DISCORD_INTERACTIONS_PUBLIC_KEY",
+  "DISCORD_APP_PUBLIC_KEY",
+  "discord_public_key",
+  "DISCORD_BOT_TOKEN",
+  "DISCORD_TOKEN",
+  "DISCORD_BOT_SECRET",
+  "discord_bot_token",
+  "DISCORD_GUILD_ID",
+  "DISCORD_SERVER_ID",
+  "discord_guild_id",
+  "DISCORD_ANNOUNCEMENT_CHANNEL_ID",
+  "DISCORD_CHANNEL_ID",
+  "DISCORD_DEFAULT_CHANNEL_ID",
+  "discord_announcement_channel_id",
+  "DISCORD_PUBLIC_APP_URL"
+]);
+const DISCORD_SCENARIO_ENV_KEYS = new Set(DISCORD_SCENARIO_ENV_NAMES.map(name => name.toLowerCase()));
+const SYNTHETIC_DISCORD_APPLICATION_ID = "test-discord-application-id";
+const SYNTHETIC_DISCORD_CLIENT_SECRET = "test-discord-app-secret";
+const {
+  publicKey: syntheticDiscordPublicKeyObject,
+  privateKey: syntheticDiscordPrivateKey
+} = generateKeyPairSync("ed25519");
+const SYNTHETIC_DISCORD_PUBLIC_KEY = syntheticDiscordPublicKeyObject
+  .export({ type: "spki", format: "der" })
+  .subarray(-32)
+  .toString("hex");
+const DISCORD_COMMUNITY_PUBLIC_CREDENTIAL_KEYS = new Set([
+  "credential", "refreshcredential", "token", "accesstoken", "refreshtoken",
+  "encryptedtoken", "encryptedcredential", "clientsecret", "appsecret",
+  "authorization", "cookie", "password", "sessiontoken", "sessiontokenhash"
+]);
+const SYNTHETIC_DISCORD_COMMUNITY_APPLICATION_ID = "280000000000000001";
+const SYNTHETIC_DISCORD_COMMUNITY_CLIENT_SECRET = "p28-discord-client-secret";
+const SYNTHETIC_DISCORD_COMMUNITY_AUTH_SECRET = "p28-discord-auth-secret-material-2026";
+const SYNTHETIC_DISCORD_COMMUNITY_ENCRYPTION_KEY = "p28-discord-encryption-key-material-2026";
+const SYNTHETIC_DISCORD_COMMUNITY_ACCESS_TOKEN = "p28-discord-access-token";
+const SYNTHETIC_DISCORD_COMMUNITY_OWNER_PROMO = "P28-DISCORD-OWNER";
+const SYNTHETIC_DISCORD_COMMUNITY_FOREIGN_PROMO = "P28-DISCORD-FOREIGN";
+const SYNTHETIC_DISCORD_COMMUNITY_PROVIDER_ID = "280000000000000002";
+const SYNTHETIC_DISCORD_COMMUNITY_GUILD_ID = "280000000000000003";
+const DISCORD_COMMUNITY_SCOPES = Object.freeze(["identify", "guilds"]);
+
+function discordScenarioEnv({ baseEnv = process.env, overrides = {} } = {}) {
+  const env = { ...baseEnv };
+  for (const existingName of Object.keys(env)) {
+    if (DISCORD_SCENARIO_ENV_KEYS.has(existingName.toLowerCase())) delete env[existingName];
+  }
+  return { ...env, ...overrides };
+}
+
+function assertDiscordCommunityPrivateMarkersAbsent(value, markers, label) {
+  const serialized = typeof value === "string" ? value : JSON.stringify(value) || "";
+  if (markers.some(marker => marker && serialized.includes(marker))) {
+    throw new Error(`Discord community fixture leaked a private value through ${label}`);
+  }
+}
+
+function containsDiscordCommunityCredentialField(value) {
+  if (Array.isArray(value)) return value.some(containsDiscordCommunityCredentialField);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(([key, nested]) => (
+    DISCORD_COMMUNITY_PUBLIC_CREDENTIAL_KEYS.has(String(key).replace(/[_-]/g, "").toLowerCase())
+    || containsDiscordCommunityCredentialField(nested)
+  ));
+}
+
+function discordInteractionSignature(rawBody, timestamp) {
+  return signPayload(null, Buffer.from(`${timestamp}${rawBody}`), syntheticDiscordPrivateKey).toString("hex");
+}
+
+const TWITCH_CLIENT_ID_ENV_NAMES = Object.freeze([
+  "TWITCH_CLIENT_ID",
+  "TWITCH_APP_ID",
+  "TWITCH_OAUTH_CLIENT_ID",
+  "twitch_client_id"
+]);
+const TWITCH_CLIENT_SECRET_ENV_NAMES = Object.freeze([
+  "TWITCH_CLIENT_SECRET",
+  "TWITCH_APP_SECRET",
+  "TWITCH_OAUTH_CLIENT_SECRET",
+  "twitch_client_secret"
+]);
+const TWITCH_APPLICATION_CREDENTIAL_ENV_NAMES = Object.freeze([
+  ...TWITCH_CLIENT_ID_ENV_NAMES,
+  ...TWITCH_CLIENT_SECRET_ENV_NAMES
+]);
+const TWITCH_APPLICATION_CREDENTIAL_ENV_KEYS = new Set(
+  TWITCH_APPLICATION_CREDENTIAL_ENV_NAMES.map(name => name.toLowerCase())
+);
+const TWITCH_PUBLIC_CREDENTIAL_KEYS = new Set([
+  "credential", "refreshcredential", "token", "accesstoken", "refreshtoken",
+  "encryptedtoken", "encryptedcredential", "clientsecret", "appsecret",
+  "authorization", "cookie", "password", "sessiontoken", "sessiontokenhash"
+]);
+const SYNTHETIC_TWITCH_APP_ID = "twitch-fixture-app-id";
+const SYNTHETIC_TWITCH_APP_SECRET = "twitch-fixture-app-secret";
+const SYNTHETIC_TWITCH_CALLBACK_ACCESS_TOKEN = "twitch-fixture-callback-access-token";
+const SYNTHETIC_TWITCH_CALLBACK_REFRESH_TOKEN = "twitch-fixture-callback-refresh-token";
+const SYNTHETIC_TWITCH_CALLBACK_CODE = "twitch-fixture-callback-code";
+const SYNTHETIC_TWITCH_TOKEN_ENCRYPTION_KEY = "twitch-fixture-token-encryption-key";
+const SYNTHETIC_TWITCH_PROMO_CODE = "TWITCH-PORTAL-FIXTURE";
+const SYNTHETIC_TWITCH_SECOND_PROMO_CODE = "TWITCH-PORTAL-FOREIGN";
+
+function twitchScenarioEnv({ baseEnv = process.env, overrides = {} } = {}) {
+  const env = { ...baseEnv };
+  for (const existingName of Object.keys(env)) {
+    if (TWITCH_APPLICATION_CREDENTIAL_ENV_KEYS.has(existingName.toLowerCase())) {
+      delete env[existingName];
+    }
+  }
+  return { ...env, ...overrides };
+}
+
+function assertTwitchCredentialValuesAbsent(value, credentialValues, label) {
+  const serialized = typeof value === "string" ? value : JSON.stringify(value) || "";
+  if (credentialValues.some(item => item && serialized.includes(item))) {
+    throw new Error(`twitch credential fixture leaked a value through ${label}`);
+  }
+}
+
+function containsTwitchPublicCredentialField(value) {
+  if (Array.isArray(value)) return value.some(containsTwitchPublicCredentialField);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(([key, nested]) => (
+    TWITCH_PUBLIC_CREDENTIAL_KEYS.has(String(key).replace(/[_-]/g, "").toLowerCase())
+    || containsTwitchPublicCredentialField(nested)
+  ));
+}
+
+const GOOGLE_CALLBACK_CREDENTIAL_ENV_NAMES = Object.freeze([
+  "GOOGLE_CLIENT_ID",
+  "GOOGLE_OAUTH_CLIENT_ID",
+  "YOUTUBE_CLIENT_ID",
+  "youtube_client_id",
+  "google_client_id",
+  "GOOGLE_CLIENT_SECRET",
+  "GOOGLE_OAUTH_CLIENT_SECRET",
+  "YOUTUBE_CLIENT_SECRET",
+  "youtube_client_secret",
+  "google_client_secret"
+]);
+const GOOGLE_CALLBACK_CREDENTIAL_ENV_KEYS = new Set(
+  GOOGLE_CALLBACK_CREDENTIAL_ENV_NAMES.map(name => name.toLowerCase())
+);
+const GOOGLE_CALLBACK_PUBLIC_CREDENTIAL_KEYS = new Set([
+  "credential", "refreshcredential", "token", "accesstoken", "refreshtoken",
+  "encryptedtoken", "encryptedcredential", "clientsecret", "appsecret",
+  "authorization", "cookie", "oauthcode", "codeverifier"
+]);
+const SYNTHETIC_GOOGLE_CLIENT_ID = "p20-google-client-id.apps.googleusercontent.com";
+const SYNTHETIC_GOOGLE_CLIENT_SECRET = "p20-google-client-secret";
+const SYNTHETIC_GOOGLE_ACCESS_TOKEN = "p20-google-access-token";
+const SYNTHETIC_GOOGLE_REFRESH_TOKEN = "p20-google-refresh-token";
+const SYNTHETIC_GOOGLE_FAILURE_CODE = "p20-google-failure-code";
+const SYNTHETIC_YOUTUBE_SUCCESS_CODE = "p20-youtube-success-code";
+const SYNTHETIC_GOOGLE_BUSINESS_SUCCESS_CODE = "p20-google-business-success-code";
+const SYNTHETIC_GOOGLE_TOKEN_ENCRYPTION_KEY = "p20-google-token-encryption-key";
+const SYNTHETIC_GOOGLE_OWNER_PROMO_CODE = "P20-GOOGLE-OWNER";
+const SYNTHETIC_GOOGLE_FOREIGN_PROMO_CODE = "P20-GOOGLE-FOREIGN";
+const SYNTHETIC_GOOGLE_START_CLIENT_ID = "p25-google-start-client.apps.googleusercontent.com";
+const SYNTHETIC_GOOGLE_START_CLIENT_SECRET = "p25-google-start-client-secret";
+const SYNTHETIC_GOOGLE_START_AUTH_SECRET = "p25-google-start-auth-secret-material-2026";
+const SYNTHETIC_GOOGLE_START_ENCRYPTION_KEY = "p25-google-start-encryption-key-material-2026";
+const SYNTHETIC_GOOGLE_START_FOREIGN_PROMO_CODE = "P25-GOOGLE-START-FOREIGN";
+
+const X_ACCOUNT_ENV_NAMES = Object.freeze([
+  "X_CLIENT_ID",
+  "TWITTER_CLIENT_ID",
+  "X_OAUTH_CLIENT_ID",
+  "X_CLIENT_SECRET",
+  "TWITTER_CLIENT_SECRET",
+  "X_OAUTH_CLIENT_SECRET",
+  "X_OAUTH_SCOPES",
+  "X_SCOPES",
+  "TWITTER_OAUTH_SCOPES",
+  "X_OAUTH_WRITE_SCOPES",
+  "X_WRITE_SCOPES",
+  "TWITTER_OAUTH_WRITE_SCOPES",
+  "X_PUBLIC_APP_URL"
+]);
+const X_ACCOUNT_ENV_KEYS = new Set(X_ACCOUNT_ENV_NAMES.map(name => name.toLowerCase()));
+const X_ACCOUNT_PUBLIC_CREDENTIAL_KEYS = new Set([
+  "credential", "refreshcredential", "token", "accesstoken", "refreshtoken",
+  "encryptedtoken", "encryptedcredential", "clientsecret", "appsecret",
+  "authorization", "cookie", "password", "sessiontoken", "sessiontokenhash"
+]);
+const SYNTHETIC_X_ACCOUNT_CLIENT_ID = "p26-x-client-id";
+const SYNTHETIC_X_ACCOUNT_CLIENT_SECRET = "p26-x-client-secret";
+const SYNTHETIC_X_ACCOUNT_AUTH_SECRET = "p26-x-auth-secret-material-2026";
+const SYNTHETIC_X_ACCOUNT_ENCRYPTION_KEY = "p26-x-encryption-key-material-2026";
+const SYNTHETIC_X_ACCOUNT_ACCESS_TOKEN = "fake-test-token-marker";
+const SYNTHETIC_X_ACCOUNT_OWNER_PROMO = "P26-X-OWNER";
+const SYNTHETIC_X_ACCOUNT_FOREIGN_PROMO = "P26-X-FOREIGN";
+const SYNTHETIC_X_ACCOUNT_PROVIDER_ID = "test-p26-x-owner";
+const X_ACCOUNT_READ_SCOPES = Object.freeze(["tweet.read", "users.read", "offline.access"]);
+const X_ACCOUNT_WRITE_SCOPES = Object.freeze(["tweet.read", "tweet.write", "users.read", "offline.access"]);
+
+function xAccountScenarioEnv({ baseEnv = process.env, overrides = {} } = {}) {
+  const env = { ...baseEnv };
+  for (const existingName of Object.keys(env)) {
+    if (X_ACCOUNT_ENV_KEYS.has(existingName.toLowerCase())) delete env[existingName];
+  }
+  return { ...env, ...overrides };
+}
+
+function assertXAccountPrivateMarkersAbsent(value, markers, label) {
+  const serialized = typeof value === "string" ? value : JSON.stringify(value) || "";
+  if (markers.some(marker => marker && serialized.includes(marker))) {
+    throw new Error(`X account fixture leaked a private value through ${label}`);
+  }
+}
+
+function containsXAccountCredentialField(value) {
+  if (Array.isArray(value)) return value.some(containsXAccountCredentialField);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(([key, nested]) => (
+    X_ACCOUNT_PUBLIC_CREDENTIAL_KEYS.has(String(key).replace(/[_-]/g, "").toLowerCase())
+    || containsXAccountCredentialField(nested)
+  ));
+}
+
+function googleCallbackScenarioEnv({ baseEnv = process.env, overrides = {} } = {}) {
+  const env = { ...baseEnv };
+  for (const existingName of Object.keys(env)) {
+    if (GOOGLE_CALLBACK_CREDENTIAL_ENV_KEYS.has(existingName.toLowerCase())) delete env[existingName];
+  }
+  return { ...env, ...overrides };
+}
+
+function assertGoogleCallbackSecretsAbsent(value, markers, label) {
+  const serialized = typeof value === "string" ? value : JSON.stringify(value) || "";
+  if (markers.some(marker => marker && serialized.includes(marker))) {
+    throw new Error(`Google callback fixture leaked a private value through ${label}`);
+  }
+}
+
+function assertGoogleStartPrivateMarkersAbsent(value, markers, label) {
+  const serialized = typeof value === "string" ? value : JSON.stringify(value) || "";
+  if (markers.some(marker => marker && serialized.includes(marker))) {
+    throw new Error(`Google start fixture leaked a private value through ${label}`);
+  }
+}
+
+function containsGoogleCallbackCredentialField(value) {
+  if (Array.isArray(value)) return value.some(containsGoogleCallbackCredentialField);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(([key, nested]) => (
+    GOOGLE_CALLBACK_PUBLIC_CREDENTIAL_KEYS.has(String(key).replace(/[_-]/g, "").toLowerCase())
+    || containsGoogleCallbackCredentialField(nested)
+  ));
+}
+
+const META_START_CREDENTIAL_ENV_NAMES = Object.freeze([
+  "META_APP_ID",
+  "META_CLIENT_ID",
+  "FACEBOOK_APP_ID",
+  "FACEBOOK_CLIENT_ID",
+  "FB_APP_ID",
+  "META_APP_SECRET",
+  "META_CLIENT_SECRET",
+  "FACEBOOK_APP_SECRET",
+  "FACEBOOK_CLIENT_SECRET",
+  "FB_APP_SECRET"
+]);
+const META_START_CREDENTIAL_ENV_KEYS = new Set(META_START_CREDENTIAL_ENV_NAMES.map(name => name.toLowerCase()));
+const SYNTHETIC_META_START_APP_ID = "p21-meta-app-id";
+const SYNTHETIC_META_START_APP_SECRET = "p21-meta-app-secret";
+const SYNTHETIC_META_START_AUTH_SECRET = "p21-meta-session-secret";
+const SYNTHETIC_META_START_ENCRYPTION_KEY = "p21-meta-encryption-key";
+const SYNTHETIC_META_START_OWNER_PROMO = "P21-META-OWNER";
+const SYNTHETIC_META_ASSETS_APP_ID = "220000000000001";
+const SYNTHETIC_META_ASSETS_APP_SECRET = "p22-meta-assets-app-secret";
+const SYNTHETIC_META_ASSETS_USER_ID = "220000000000002";
+const SYNTHETIC_META_ASSETS_USER_TOKEN = "p22-meta-user-token";
+const SYNTHETIC_META_ASSETS_PAGE_ID = "220000000000003";
+const SYNTHETIC_META_ASSETS_PAGE_TOKEN = "p22-facebook-page-token";
+const SYNTHETIC_META_ASSETS_INSTAGRAM_ID = "220000000000004";
+const SYNTHETIC_META_ASSETS_AUTH_SECRET = "p22-meta-assets-session-secret";
+const SYNTHETIC_META_ASSETS_ENCRYPTION_KEY = "p22-meta-assets-encryption-key";
+const SYNTHETIC_META_ASSETS_OWNER_PROMO = "P22-META-ASSETS-OWNER";
+const SYNTHETIC_META_ASSETS_FOREIGN_PROMO = "P22-META-ASSETS-FOREIGN";
+const SYNTHETIC_META_CALLBACK_APP_ID = "230000000000001";
+const SYNTHETIC_META_CALLBACK_APP_SECRET = "p23-meta-callback-app-secret";
+const SYNTHETIC_META_CALLBACK_AUTH_SECRET = "p23-meta-callback-session-secret";
+const SYNTHETIC_META_CALLBACK_ENCRYPTION_KEY = "p23-meta-callback-encryption-key";
+const SYNTHETIC_META_CALLBACK_FAILURE_CODE = "p23-meta-callback-failure-code";
+const SYNTHETIC_META_CALLBACK_OWNER_PROMO = "P23-META-CALLBACK-OWNER";
+const SYNTHETIC_META_CALLBACK_FOREIGN_PROMO = "P23-META-CALLBACK-FOREIGN";
+const SYNTHETIC_META_ATOMIC_APP_ID = "240000000000001";
+const SYNTHETIC_META_ATOMIC_APP_SECRET = "p24-meta-callback-app-secret";
+const SYNTHETIC_META_ATOMIC_AUTH_SECRET = "p24-meta-callback-session-secret";
+const SYNTHETIC_META_ATOMIC_ENCRYPTION_KEY = "p24-meta-callback-encryption-key";
+const SYNTHETIC_META_ATOMIC_FAILURE_CODE = "p24-meta-callback-failure-code";
+const SYNTHETIC_META_ATOMIC_SUCCESS_CODE = "p24-meta-callback-success-code";
+const SYNTHETIC_META_ATOMIC_SHORT_TOKEN = "p24-meta-short-lived-token";
+const SYNTHETIC_META_ATOMIC_USER_TOKEN = "p24-meta-long-lived-token";
+const SYNTHETIC_META_ATOMIC_PAGE_TOKEN = "p24-meta-page-token";
+const SYNTHETIC_META_ATOMIC_USER_ID = "240000000000002";
+const SYNTHETIC_META_ATOMIC_PAGE_ID = "240000000000003";
+const SYNTHETIC_META_ATOMIC_INSTAGRAM_ID = "240000000000004";
+const SYNTHETIC_META_ATOMIC_OWNER_PROMO = "P24-META-CALLBACK-OWNER";
+const SYNTHETIC_META_ATOMIC_FOREIGN_PROMO = "P24-META-CALLBACK-FOREIGN";
+const META_CALLBACK_UNISSUED_ERROR = "OAuth state was not issued by this backend or was already used.";
+const META_CALLBACK_OWNER_REQUIRED_ERROR = "Sign in to the same Social Cues account that started this connection, then try again.";
+const META_CALLBACK_OWNER_MISMATCH_ERROR = "OAuth state belongs to a different signed-in Social Cues user. Start the connection again from the app.";
+const META_ASSETS_GRANTED_SCOPES = Object.freeze([
+  "public_profile",
+  "pages_show_list",
+  "pages_read_engagement",
+  "pages_manage_posts"
+]);
+
+function metaStartScenarioEnv({ baseEnv = process.env, overrides = {} } = {}) {
+  const env = { ...baseEnv };
+  for (const existingName of Object.keys(env)) {
+    if (META_START_CREDENTIAL_ENV_KEYS.has(existingName.toLowerCase()) || existingName.toLowerCase() === "vercel") {
+      delete env[existingName];
+    }
+  }
+  return { ...env, ...overrides };
+}
+
+function assertMetaStartPrivateMarkersAbsent(value, markers, label) {
+  const serialized = typeof value === "string" ? value : JSON.stringify(value) || "";
+  if (markers.some(marker => marker && serialized.includes(marker))) {
+    throw new Error(`Meta start fixture leaked a private marker through ${label}`);
+  }
+}
+
+function assertMetaAssetsPrivateMarkersAbsent(value, markers, label) {
+  const serialized = typeof value === "string" ? value : JSON.stringify(value) || "";
+  if (markers.some(marker => marker && serialized.includes(marker))) {
+    throw new Error(`Meta assets fixture leaked a private marker through ${label}`);
+  }
+}
+
+function assertMetaCallbackPrivateMarkersAbsent(value, markers, label) {
+  const serialized = typeof value === "string" ? value : JSON.stringify(value) || "";
+  if (markers.some(marker => marker && serialized.includes(marker))) {
+    throw new Error(`Meta callback fixture leaked a private marker through ${label}`);
+  }
+}
+
+function signedMetaCallbackState(sourceState, overrides, secret) {
+  const decoded = JSON.parse(Buffer.from(sourceState, "base64url").toString("utf8"));
+  const { sig: ignoredSignature, ...payload } = decoded;
+  const nextPayload = { ...payload, ...overrides };
+  const sig = createHmac("sha256", secret).update(JSON.stringify(nextPayload)).digest("base64url");
+  return Buffer.from(JSON.stringify({ ...nextPayload, sig })).toString("base64url");
+}
+
+function metaAssetsPublicShapeIsSafe(value) {
+  const sensitiveKeys = new Set([
+    "credential", "refreshcredential", "token", "accesstoken", "refreshtoken", "oauthcode",
+    "encryptedtoken", "encryptedcredential", "encryptedrefreshtoken", "clientsecret", "appsecret",
+    "codeverifier", "password", "sessiontoken", "sessiontokenhash", "authorization", "cookie",
+    "oauthstates", "oauthevents"
+  ]);
+  const visit = current => {
+    if (Array.isArray(current)) return current.every(visit);
+    if (!current || typeof current !== "object") return true;
+    return Object.entries(current).every(([key, nested]) => (
+      !sensitiveKeys.has(String(key).replace(/[_-]/g, "").toLowerCase()) && visit(nested)
+    ));
+  };
+  return visit(value);
+}
+
+// The focused contract owns the exhaustive credential/callback matrix. This helper keeps
+// the monolithic suite at the authenticated workspace-integration boundary.
+function twitchPortalIntegrationStateIsTruthful(fixture = {}) {
+  const portal = fixture.portal || {};
+  const missingEnv = fixture.missingEnv || [];
+  const action = String(portal.nextAction || "");
+  const connect = /^Connect Twitch\b/iu.test(action);
+  const reconnect = /^Reconnect Twitch\b/iu.test(action);
+  const credentialLike = fixture.publicPayload && containsTwitchPublicCredentialField(fixture.publicPayload);
+  if (!fixture.authenticated || !fixture.workspaceContext || !fixture.workspaceIdMatches) return false;
+  if (fixture.foreignMetadataPresent || credentialLike) return false;
+  if (fixture.externalRequests !== 0) return false;
+  if (fixture.requiredProviderGatesMissing && fixture.executable) return false;
+  if (fixture.configured !== fixture.readinessConfigured || fixture.configured !== fixture.envReady) return false;
+  if (fixture.configured && missingEnv.length) return false;
+
+  if (fixture.expectedDecision === "application-credentials") {
+    return !fixture.configured
+      && missingEnv.includes("TWITCH_CLIENT_ID")
+      && missingEnv.includes("TWITCH_CLIENT_SECRET")
+      && fixture.accountPresent === true
+      && fixture.connected === true
+      && fixture.banked === true
+      && portal.status === "needs-application-credentials"
+      && portal.phase === "application-configuration"
+      && portal.category === "application-credentials"
+      && /^Configure TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET\b/iu.test(action)
+      && !connect
+      && !reconnect
+      && !fixture.executable;
+  }
+  if (fixture.expectedDecision === "connect") {
+    return fixture.configured
+      && fixture.accountPresent === false
+      && fixture.connected === false
+      && fixture.banked === false
+      && portal.status === "workspace-connect-required"
+      && portal.phase === "workspace-authorization"
+      && portal.category === "connect"
+      && connect
+      && !reconnect
+      && !fixture.executable;
+  }
+  if (fixture.expectedDecision === "developer-approval") {
+    return fixture.configured
+      && fixture.accountPresent === true
+      && fixture.connected === true
+      && fixture.banked === true
+      && portal.status === "workspace-token-banked-approval-pending"
+      && portal.phase === "provider-proof"
+      && portal.category === "developer-approval"
+      && !connect
+      && !reconnect
+      && /developer approval/iu.test(action)
+      && !fixture.executable;
+  }
+  return false;
+}
+
+function assertTwitchPortalIntegrationMutations(missingFixture, connectFixture, bankedFixture) {
+  const mutations = [
+    ["missing app credentials reported as reconnect", missingFixture, fixture => { fixture.portal.category = "reconnect"; fixture.portal.nextAction = "Reconnect Twitch"; }],
+    ["no account reported as reconnect", connectFixture, fixture => { fixture.portal.category = "reconnect"; fixture.portal.nextAction = "Reconnect Twitch"; }],
+    ["banked account reported as connect", bankedFixture, fixture => { fixture.portal.category = "connect"; fixture.portal.nextAction = "Connect Twitch"; }],
+    ["banked account reported as reconnect", bankedFixture, fixture => { fixture.portal.category = "reconnect"; fixture.portal.nextAction = "Reconnect Twitch"; }],
+    ["workspace token satisfied app readiness", missingFixture, fixture => { fixture.configured = true; fixture.readinessConfigured = true; fixture.envReady = true; }],
+    ["foreign workspace influenced guidance", connectFixture, fixture => { fixture.workspaceIdMatches = false; fixture.foreignMetadataPresent = true; }],
+    ["configured secret remained missing", connectFixture, fixture => { fixture.missingEnv = ["TWITCH_CLIENT_SECRET"]; }],
+    ["credential-like public field", bankedFixture, fixture => { fixture.publicPayload = { accessToken: "synthetic-public-token" }; }],
+    ["provider label without workspace proof", connectFixture, fixture => { fixture.authenticated = false; fixture.workspaceContext = false; }],
+    ["executable while provider gates remain", bankedFixture, fixture => { fixture.executable = true; fixture.requiredProviderGatesMissing = true; }]
+  ];
+  for (const [label, source, mutate] of mutations) {
+    const fixture = structuredClone(source);
+    mutate(fixture);
+    if (twitchPortalIntegrationStateIsTruthful(fixture)) {
+      throw new Error(`Twitch portal integration assertion accepted mutation: ${label}`);
+    }
+  }
+  return mutations.length;
+}
+
+function assertTwitchScenarioEnvironmentHelper() {
+  const parentBefore = JSON.stringify(Object.entries(process.env));
+  const baseEnv = {
+    ...process.env,
+    ...Object.fromEntries(TWITCH_APPLICATION_CREDENTIAL_ENV_NAMES.map((name, index) => [name, `inherited-twitch-${index}`])),
+    TwItCh_ApP_Id: "inherited-twitch-mixed-case-id",
+    tWiTcH_aPp_SeCrEt: "inherited-twitch-mixed-case-secret",
+    SOCIAL_CUES_TWITCH_UNRELATED_SENTINEL: "preserved"
+  };
+  const baseBefore = JSON.stringify(Object.entries(baseEnv));
+  const overrides = {
+    TWITCH_APP_ID: SYNTHETIC_TWITCH_APP_ID,
+    TWITCH_APP_SECRET: SYNTHETIC_TWITCH_APP_SECRET
+  };
+  const first = twitchScenarioEnv({ baseEnv, overrides });
+  const second = twitchScenarioEnv({ baseEnv, overrides });
+  if (first === second || first === baseEnv || second === baseEnv) throw new Error("twitch scenario environments must be fresh objects");
+  if (first.SOCIAL_CUES_TWITCH_UNRELATED_SENTINEL !== "preserved") throw new Error("twitch scenario isolation removed an unrelated environment variable");
+  const retainedNames = Object.keys(first).filter(name => TWITCH_APPLICATION_CREDENTIAL_ENV_KEYS.has(name.toLowerCase())).sort();
+  if (JSON.stringify(retainedNames) !== JSON.stringify(Object.keys(overrides).sort())) throw new Error("twitch scenario isolation retained inherited application credentials");
+  if (JSON.stringify(Object.entries(baseEnv)) !== baseBefore) throw new Error("twitch scenario isolation mutated its supplied base environment");
+  if (JSON.stringify(Object.entries(process.env)) !== parentBefore) throw new Error("twitch scenario isolation mutated the parent process environment");
+}
+
+function assertCommittedTwitchCredentialContract(source) {
+  const requiredMarkers = [
+    'TWITCH_CLIENT_ID: ["TWITCH_APP_ID", "TWITCH_OAUTH_CLIENT_ID", "twitch_client_id"]',
+    'TWITCH_CLIENT_SECRET: ["TWITCH_APP_SECRET", "TWITCH_OAUTH_CLIENT_SECRET", "twitch_client_secret"]',
+    'function resolveTwitchApplicationCredentialState()',
+    'const twitchApplicationCredentials = resolveTwitchApplicationCredentialState();',
+    'credentialState: twitchApplicationCredentials',
+    'configured: () => twitchApplicationCredentials.configured',
+    'client_id: twitchClientId',
+    'client_secret: twitchClientSecret',
+    'function twitchSetupAuditForWorkspace(',
+    'function developerPortalAuditForWorkspace(',
+    'if (!twitchApplicationCredentials.configured)'
+  ];
+  if (requiredMarkers.some(marker => !source.includes(marker))) throw new Error("committed Twitch credential-resolution contract is incomplete");
+}
+
+const SHOPIFY_CLIENT_ID_ENV_NAMES = Object.freeze([
+  "SHOPIFY_CLIENT_ID",
+  "SHOPIFY_API_KEY",
+  "SHOPIFY_APP_ID",
+  "SHOPIFY_APP_CLIENT_ID",
+  "shopify_client_id",
+  "shopify_api_key"
+]);
+const SHOPIFY_CLIENT_SECRET_ENV_NAMES = Object.freeze([
+  "SHOPIFY_CLIENT_SECRET",
+  "SHOPIFY_API_SECRET",
+  "SHOPIFY_APP_SECRET",
+  "SHOPIFY_APP_CLIENT_SECRET",
+  "shopify_client_secret",
+  "shopify_api_secret"
+]);
+const SHOPIFY_APPLICATION_CREDENTIAL_ENV_NAMES = Object.freeze([
+  ...SHOPIFY_CLIENT_ID_ENV_NAMES,
+  ...SHOPIFY_CLIENT_SECRET_ENV_NAMES
+]);
+const SHOPIFY_SHOP_DOMAIN_ENV_NAMES = Object.freeze([
+  "SHOPIFY_SHOP_DOMAIN",
+  "SHOPIFY_STORE_DOMAIN",
+  "SHOPIFY_TEST_STORE_DOMAIN",
+  "shopify_shop_domain"
+]);
+const SHOPIFY_CONFIGURATION_ENV_NAMES = Object.freeze([
+  ...SHOPIFY_SHOP_DOMAIN_ENV_NAMES,
+  "SHOPIFY_PUBLIC_APP_URL",
+  "SHOPIFY_API_VERSION",
+  "PUBLIC_APP_URL"
+]);
+const SHOPIFY_SCENARIO_ENV_NAMES = Object.freeze([
+  ...SHOPIFY_APPLICATION_CREDENTIAL_ENV_NAMES,
+  ...SHOPIFY_CONFIGURATION_ENV_NAMES
+]);
+const SHOPIFY_TEST_ONLY_UNKNOWN_ENV_NAMES = Object.freeze([
+  "SHOPIFY_FIXTURE_UNKNOWN_CLIENT_ID",
+  "SHOPIFY_FIXTURE_UNKNOWN_CLIENT_SECRET"
+]);
+const SHOPIFY_SCENARIO_ENV_KEYS = new Set(SHOPIFY_SCENARIO_ENV_NAMES.map(name => name.toLowerCase()));
+const SHOPIFY_MISSING_CLIENT_ID = "SHOPIFY_CLIENT_ID (32-character Shopify client ID/API key)";
+const SHOPIFY_MISSING_CLIENT_SECRET = "SHOPIFY_CLIENT_SECRET (shpss_ client secret)";
+const SYNTHETIC_SHOPIFY_APP_ID = "0".repeat(32);
+const SYNTHETIC_SHOPIFY_APP_SECRET = `shpss_${"0".repeat(32)}`;
+
+function shopifyScenarioEnv({ baseEnv = process.env, overrides = {} } = {}) {
+  const env = { ...baseEnv };
+  for (const existingName of Object.keys(env)) {
+    if (SHOPIFY_SCENARIO_ENV_KEYS.has(existingName.toLowerCase())) {
+      delete env[existingName];
+    }
+  }
+  return { ...env, ...overrides };
+}
+
+function assertShopifyCredentialValuesAbsent(value, credentialValues, label) {
+  const serialized = typeof value === "string" ? value : JSON.stringify(value) || "";
+  if (credentialValues.some(item => item && serialized.includes(item))) {
+    throw new Error(`shopify credential fixture leaked a value through ${label}`);
+  }
+}
 
 const port = 4199;
 const base = `http://127.0.0.1:${port}`;
 const testDataDir = path.join(process.cwd(), ".tmp", `regression-data-${port}-${Date.now()}`);
+const externalRequestLogPath = path.join(testDataDir, "external-http-requests.ndjson");
+const providerMockLogPath = path.join(testDataDir, "provider-mocks.ndjson");
+const externalRequestGuardPath = path.join(testDataDir, "external-request-guard.mjs");
+await mkdir(testDataDir, { recursive: true });
+await writeFile(externalRequestGuardPath, `
+import { appendFile } from "node:fs/promises";
+
+const originalFetch = globalThis.fetch;
+const logPath = process.env.SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG || "";
+const mockLogPath = process.env.SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG || "";
+const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+async function recordProviderMock(entry) {
+  if (mockLogPath) await appendFile(mockLogPath, JSON.stringify(entry) + "\\n", "utf8");
+}
+
+globalThis.fetch = async (input, init = {}) => {
+  const rawUrl = input instanceof URL || typeof input === "string" ? String(input) : String(input?.url || "");
+  const target = new URL(rawUrl);
+  if (process.env.SOCIAL_CUES_TEST_MOCK_TWITCH_CALLBACK === "true"
+    && target.hostname === "id.twitch.tv"
+    && target.pathname === "/oauth2/token") {
+    const parameters = new URLSearchParams(String(init.body || ""));
+    await recordProviderMock({
+      kind: "twitch-token-mock",
+      clientIdMatches: parameters.get("client_id") === process.env.TWITCH_APP_ID,
+      clientSecretMatches: parameters.get("client_secret") === process.env.TWITCH_APP_SECRET,
+      grantType: parameters.get("grant_type") || ""
+    });
+    return new Response(JSON.stringify({
+      access_token: "${SYNTHETIC_TWITCH_CALLBACK_ACCESS_TOKEN}",
+      refresh_token: "${SYNTHETIC_TWITCH_CALLBACK_REFRESH_TOKEN}",
+      token_type: "bearer",
+      expires_in: 3600,
+      scope: ["user:read:email"]
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_TWITCH_CALLBACK === "true"
+    && target.hostname === "id.twitch.tv"
+    && target.pathname === "/oauth2/validate") {
+    const headers = new Headers(init.headers || (typeof input === "object" ? input.headers : undefined));
+    await recordProviderMock({
+      kind: "twitch-validate-mock",
+      bearerPresent: /^OAuth\\s+\\S+$/u.test(headers.get("authorization") || "")
+    });
+    return new Response(JSON.stringify({
+      client_id: process.env.TWITCH_APP_ID,
+      login: "synthetic_portal_fixture",
+      scopes: ["user:read:email"],
+      user_id: "123456789",
+      expires_in: 3600
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_TWITCH_CALLBACK === "true"
+    && target.hostname === "api.twitch.tv"
+    && target.pathname === "/helix/users") {
+    const headers = new Headers(init.headers || (typeof input === "object" ? input.headers : undefined));
+    await recordProviderMock({
+      kind: "twitch-users-mock",
+      clientIdMatches: headers.get("client-id") === process.env.TWITCH_APP_ID,
+      bearerPresent: /^Bearer\\s+\\S+$/u.test(headers.get("authorization") || "")
+    });
+    return new Response(JSON.stringify({
+      data: [{ id: "123456789", login: "synthetic_portal_fixture", display_name: "Synthetic Portal Fixture" }]
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_GOOGLE_CALLBACK === "true"
+    && target.hostname === "oauth2.googleapis.com"
+    && target.pathname === "/token") {
+    const parameters = new URLSearchParams(String(init.body || ""));
+    const code = parameters.get("code") || "";
+    const failed = code === process.env.SOCIAL_CUES_TEST_GOOGLE_FAILURE_CODE;
+    const business = code === process.env.SOCIAL_CUES_TEST_GOOGLE_BUSINESS_SUCCESS_CODE;
+    await recordProviderMock({
+      kind: "google-token-mock",
+      outcome: failed ? "failed" : "succeeded",
+      flow: business ? "google_business" : "youtube",
+      clientIdMatches: parameters.get("client_id") === process.env.GOOGLE_CLIENT_ID,
+      clientSecretMatches: parameters.get("client_secret") === process.env.GOOGLE_CLIENT_SECRET,
+      redirectMatches: parameters.get("redirect_uri") === "https://socialcuesapp.com/api/oauth/youtube/callback",
+      grantType: parameters.get("grant_type") || ""
+    });
+    if (failed) {
+      return new Response(JSON.stringify({
+        error: "invalid_grant",
+        error_description: "Synthetic Google token exchange rejected."
+      }), { status: 400, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({
+      access_token: "${SYNTHETIC_GOOGLE_ACCESS_TOKEN}",
+      refresh_token: "${SYNTHETIC_GOOGLE_REFRESH_TOKEN}",
+      token_type: "Bearer",
+      expires_in: 3600,
+      scope: business
+        ? "https://www.googleapis.com/auth/business.manage"
+        : "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.force-ssl https://www.googleapis.com/auth/yt-analytics.readonly"
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_GOOGLE_CALLBACK === "true"
+    && target.hostname === "www.googleapis.com"
+    && target.pathname === "/youtube/v3/channels") {
+    const headers = new Headers(init.headers || (typeof input === "object" ? input.headers : undefined));
+    await recordProviderMock({
+      kind: "youtube-channels-mock",
+      bearerPresent: /^Bearer\\s+\\S+$/u.test(headers.get("authorization") || ""),
+      mine: target.searchParams.get("mine") || "",
+      partPresent: Boolean(target.searchParams.get("part"))
+    });
+    return new Response(JSON.stringify({
+      items: [{
+        id: "test-p20-youtube-channel",
+        snippet: { title: "P20 YouTube Channel", customUrl: "@p20-youtube" },
+        statistics: { subscriberCount: "20", videoCount: "2", viewCount: "200" },
+        contentDetails: {},
+        status: { privacyStatus: "public" }
+      }]
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_GOOGLE_CALLBACK === "true"
+    && target.hostname === "mybusinessaccountmanagement.googleapis.com"
+    && target.pathname === "/v1/accounts") {
+    const headers = new Headers(init.headers || (typeof input === "object" ? input.headers : undefined));
+    await recordProviderMock({
+      kind: "google-business-accounts-mock",
+      bearerPresent: /^Bearer\\s+\\S+$/u.test(headers.get("authorization") || ""),
+      pageSize: target.searchParams.get("pageSize") || ""
+    });
+    return new Response(JSON.stringify({
+      accounts: [{
+        name: "accounts/p20-business-account",
+        accountName: "P20 Business Account",
+        type: "LOCATION_GROUP",
+        role: "PRIMARY_OWNER",
+        verificationState: "VERIFIED",
+        vettedState: "VETTED"
+      }]
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_GOOGLE_CALLBACK === "true"
+    && target.hostname === "mybusinessbusinessinformation.googleapis.com"
+    && target.pathname === "/v1/accounts/p20-business-account/locations") {
+    const headers = new Headers(init.headers || (typeof input === "object" ? input.headers : undefined));
+    await recordProviderMock({
+      kind: "google-business-locations-mock",
+      bearerPresent: /^Bearer\\s+\\S+$/u.test(headers.get("authorization") || ""),
+      readMaskPresent: Boolean(target.searchParams.get("readMask")),
+      pageSize: target.searchParams.get("pageSize") || ""
+    });
+    return new Response(JSON.stringify({
+      locations: [{
+        name: "locations/p20-location-1",
+        title: "P20 Business Location",
+        storeCode: "P20-01",
+        websiteUri: "https://example.test/p20",
+        metadata: { canOperateLocalPost: true },
+        profile: { description: "Synthetic P20 business location" }
+      }]
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_META_CALLBACK_ATOMIC === "true"
+    && target.hostname === "graph.facebook.com"
+    && target.pathname.endsWith("/oauth/access_token")) {
+    const grantType = target.searchParams.get("grant_type") || "";
+    const code = target.searchParams.get("code") || "";
+    if (code === process.env.SOCIAL_CUES_TEST_META_ATOMIC_FAILURE_CODE) {
+      await recordProviderMock({
+        kind: "meta-token-exchange-failure-mock-p24",
+        method: String(init?.method || input?.method || "GET").toUpperCase(),
+        clientIdMatches: target.searchParams.get("client_id") === process.env.META_APP_ID,
+        clientSecretMatches: target.searchParams.get("client_secret") === process.env.META_APP_SECRET,
+        redirectMatches: target.searchParams.get("redirect_uri") === "https://socialcuesapp.com/api/oauth/meta/callback",
+        codeMatches: code === process.env.SOCIAL_CUES_TEST_META_ATOMIC_FAILURE_CODE,
+        grantTypeAbsent: !grantType
+      });
+      return new Response(JSON.stringify({
+        error: { message: "Synthetic P24 Meta token exchange rejected.", type: "OAuthException", code: 190 }
+      }), { status: 400, headers: { "Content-Type": "application/json" } });
+    }
+    if (!grantType && code === process.env.SOCIAL_CUES_TEST_META_ATOMIC_SUCCESS_CODE) {
+      await recordProviderMock({
+        kind: "meta-short-token-mock-p24",
+        method: String(init?.method || input?.method || "GET").toUpperCase(),
+        clientIdMatches: target.searchParams.get("client_id") === process.env.META_APP_ID,
+        clientSecretMatches: target.searchParams.get("client_secret") === process.env.META_APP_SECRET,
+        redirectMatches: target.searchParams.get("redirect_uri") === "https://socialcuesapp.com/api/oauth/meta/callback",
+        codeMatches: true,
+        grantTypeAbsent: true
+      });
+      return new Response(JSON.stringify({
+        access_token: process.env.SOCIAL_CUES_TEST_META_ATOMIC_SHORT_TOKEN,
+        token_type: "bearer",
+        expires_in: 3600
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (grantType === "fb_exchange_token") {
+      await recordProviderMock({
+        kind: "meta-long-token-mock-p24",
+        method: String(init?.method || input?.method || "GET").toUpperCase(),
+        clientIdMatches: target.searchParams.get("client_id") === process.env.META_APP_ID,
+        clientSecretMatches: target.searchParams.get("client_secret") === process.env.META_APP_SECRET,
+        shortTokenMatches: target.searchParams.get("fb_exchange_token") === process.env.SOCIAL_CUES_TEST_META_ATOMIC_SHORT_TOKEN,
+        grantTypeMatches: true
+      });
+      return new Response(JSON.stringify({
+        access_token: process.env.SOCIAL_CUES_TEST_META_ATOMIC_USER_TOKEN,
+        token_type: "bearer",
+        expires_in: 5184000
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_META_CALLBACK_ATOMIC === "true"
+    && target.hostname === "graph.facebook.com"
+    && target.pathname.endsWith("/me")) {
+    await recordProviderMock({
+      kind: "meta-user-mock-p24",
+      method: String(init?.method || input?.method || "GET").toUpperCase(),
+      userTokenMatches: target.searchParams.get("access_token") === process.env.SOCIAL_CUES_TEST_META_ATOMIC_USER_TOKEN,
+      fieldsPresent: target.searchParams.get("fields") === "id,name,picture"
+    });
+    return new Response(JSON.stringify({
+      id: process.env.SOCIAL_CUES_TEST_META_ATOMIC_USER_ID,
+      name: "P24 Meta User"
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_META_CALLBACK_ATOMIC === "true"
+    && target.hostname === "graph.facebook.com"
+    && target.pathname.endsWith("/debug_token")) {
+    await recordProviderMock({
+      kind: "meta-debug-token-mock-p24",
+      method: String(init?.method || input?.method || "GET").toUpperCase(),
+      inputTokenMatches: target.searchParams.get("input_token") === process.env.SOCIAL_CUES_TEST_META_ATOMIC_USER_TOKEN,
+      appAccessTokenMatches: target.searchParams.get("access_token") === process.env.META_APP_ID + "|" + process.env.META_APP_SECRET
+    });
+    return new Response(JSON.stringify({
+      data: {
+        is_valid: true,
+        app_id: process.env.META_APP_ID,
+        user_id: process.env.SOCIAL_CUES_TEST_META_ATOMIC_USER_ID,
+        expires_at: 4102444800,
+        scopes: ${JSON.stringify(META_ASSETS_GRANTED_SCOPES)}
+      }
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_META_CALLBACK_ATOMIC === "true"
+    && target.hostname === "graph.facebook.com"
+    && target.pathname.endsWith("/me/permissions")) {
+    await recordProviderMock({
+      kind: "meta-permissions-mock-p24",
+      method: String(init?.method || input?.method || "GET").toUpperCase(),
+      userTokenMatches: target.searchParams.get("access_token") === process.env.SOCIAL_CUES_TEST_META_ATOMIC_USER_TOKEN
+    });
+    return new Response(JSON.stringify({
+      data: ${JSON.stringify(META_ASSETS_GRANTED_SCOPES)}.map(permission => ({ permission, status: "granted" }))
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_META_CALLBACK_ATOMIC === "true"
+    && target.hostname === "graph.facebook.com"
+    && target.pathname.endsWith("/me/accounts")) {
+    await recordProviderMock({
+      kind: "meta-accounts-mock-p24",
+      method: String(init?.method || input?.method || "GET").toUpperCase(),
+      userTokenMatches: target.searchParams.get("access_token") === process.env.SOCIAL_CUES_TEST_META_ATOMIC_USER_TOKEN,
+      fieldsPresent: Boolean(target.searchParams.get("fields"))
+    });
+    return new Response(JSON.stringify({
+      data: [{
+        id: process.env.SOCIAL_CUES_TEST_META_ATOMIC_PAGE_ID,
+        name: "P24 Facebook Page",
+        category: "Software",
+        access_token: process.env.SOCIAL_CUES_TEST_META_ATOMIC_PAGE_TOKEN,
+        tasks: ["ANALYZE", "CREATE_CONTENT"],
+        instagram_business_account: {
+          id: process.env.SOCIAL_CUES_TEST_META_ATOMIC_INSTAGRAM_ID,
+          username: "p24_instagram",
+          name: "P24 Instagram"
+        }
+      }]
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_META_CALLBACK_ATOMIC === "true"
+    && target.hostname === "graph.facebook.com"
+    && target.pathname.endsWith("/me/businesses")) {
+    await recordProviderMock({
+      kind: "meta-businesses-mock-p24",
+      method: String(init?.method || input?.method || "GET").toUpperCase(),
+      userTokenMatches: target.searchParams.get("access_token") === process.env.SOCIAL_CUES_TEST_META_ATOMIC_USER_TOKEN,
+      fieldsPresent: Boolean(target.searchParams.get("fields"))
+    });
+    return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_META_CALLBACK === "true"
+    && target.hostname === "graph.facebook.com"
+    && target.pathname.endsWith("/oauth/access_token")) {
+    await recordProviderMock({
+      kind: "meta-token-exchange-failure-mock",
+      method: String(init?.method || input?.method || "GET").toUpperCase(),
+      clientIdMatches: target.searchParams.get("client_id") === process.env.META_APP_ID,
+      clientSecretMatches: target.searchParams.get("client_secret") === process.env.META_APP_SECRET,
+      redirectMatches: target.searchParams.get("redirect_uri") === "https://socialcuesapp.com/api/oauth/meta/callback",
+      codeMatches: target.searchParams.get("code") === process.env.SOCIAL_CUES_TEST_META_FAILURE_CODE
+    });
+    return new Response(JSON.stringify({
+      error: {
+        message: "Synthetic Meta token exchange rejected.",
+        type: "OAuthException",
+        code: 190
+      }
+    }), { status: 400, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_META_ASSETS === "true"
+    && target.hostname === "graph.facebook.com"
+    && target.pathname.endsWith("/debug_token")) {
+    await recordProviderMock({
+      kind: "meta-debug-token-mock",
+      method: String(init?.method || input?.method || "GET").toUpperCase(),
+      inputTokenMatches: target.searchParams.get("input_token") === process.env.SOCIAL_CUES_TEST_META_USER_TOKEN,
+      appAccessTokenMatches: target.searchParams.get("access_token") === process.env.META_APP_ID + "|" + process.env.META_APP_SECRET
+    });
+    return new Response(JSON.stringify({
+      data: {
+        is_valid: true,
+        app_id: process.env.META_APP_ID,
+        user_id: process.env.SOCIAL_CUES_TEST_META_USER_ID,
+        expires_at: 4102444800,
+        scopes: ${JSON.stringify(META_ASSETS_GRANTED_SCOPES)}
+      }
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_META_ASSETS === "true"
+    && target.hostname === "graph.facebook.com"
+    && target.pathname.endsWith("/me/permissions")) {
+    await recordProviderMock({
+      kind: "meta-permissions-mock",
+      method: String(init?.method || input?.method || "GET").toUpperCase(),
+      userTokenMatches: target.searchParams.get("access_token") === process.env.SOCIAL_CUES_TEST_META_USER_TOKEN
+    });
+    return new Response(JSON.stringify({
+      data: ${JSON.stringify(META_ASSETS_GRANTED_SCOPES)}.map(permission => ({ permission, status: "granted" }))
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_META_ASSETS === "true"
+    && target.hostname === "graph.facebook.com"
+    && target.pathname.endsWith("/me/accounts")) {
+    await recordProviderMock({
+      kind: "meta-accounts-mock",
+      method: String(init?.method || input?.method || "GET").toUpperCase(),
+      userTokenMatches: target.searchParams.get("access_token") === process.env.SOCIAL_CUES_TEST_META_USER_TOKEN,
+      fieldsPresent: Boolean(target.searchParams.get("fields"))
+    });
+    return new Response(JSON.stringify({
+      data: [{
+        id: process.env.SOCIAL_CUES_TEST_META_PAGE_ID,
+        name: "P22 Facebook Page",
+        category: "Software",
+        access_token: process.env.SOCIAL_CUES_TEST_META_PAGE_TOKEN,
+        tasks: ["ANALYZE", "CREATE_CONTENT"],
+        instagram_business_account: {
+          id: process.env.SOCIAL_CUES_TEST_META_INSTAGRAM_ID,
+          username: "p22_instagram",
+          name: "P22 Instagram"
+        }
+      }]
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_META_ASSETS === "true"
+    && target.hostname === "graph.facebook.com"
+    && target.pathname.endsWith("/me/businesses")) {
+    await recordProviderMock({
+      kind: "meta-businesses-mock",
+      method: String(init?.method || input?.method || "GET").toUpperCase(),
+      userTokenMatches: target.searchParams.get("access_token") === process.env.SOCIAL_CUES_TEST_META_USER_TOKEN,
+      fieldsPresent: Boolean(target.searchParams.get("fields"))
+    });
+    return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_DISCORD_COMMUNITY === "true"
+    && target.hostname === "discord.com"
+    && target.pathname === "/api/v10/users/@me") {
+    const headers = new Headers(init.headers || (typeof input === "object" ? input.headers : undefined));
+    await recordProviderMock({
+      kind: "discord-community-user-mock",
+      method: String(init?.method || input?.method || "GET").toUpperCase(),
+      bearerPresent: /^Bearer\\s+\\S+$/u.test(headers.get("authorization") || ""),
+      accessTokenMatches: headers.get("authorization") === "Bearer " + (process.env.SOCIAL_CUES_TEST_DISCORD_ACCESS_TOKEN || "")
+    });
+    return new Response(JSON.stringify({
+      id: "${SYNTHETIC_DISCORD_COMMUNITY_PROVIDER_ID}",
+      username: "p28_discord_owner",
+      global_name: "P28 Discord Owner",
+      avatar: "synthetic-avatar"
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (process.env.SOCIAL_CUES_TEST_MOCK_DISCORD_COMMUNITY === "true"
+    && target.hostname === "discord.com"
+    && target.pathname === "/api/v10/users/@me/guilds") {
+    const headers = new Headers(init.headers || (typeof input === "object" ? input.headers : undefined));
+    await recordProviderMock({
+      kind: "discord-community-guilds-mock",
+      method: String(init?.method || input?.method || "GET").toUpperCase(),
+      bearerPresent: /^Bearer\\s+\\S+$/u.test(headers.get("authorization") || ""),
+      accessTokenMatches: headers.get("authorization") === "Bearer " + (process.env.SOCIAL_CUES_TEST_DISCORD_ACCESS_TOKEN || ""),
+      boundedLimit: target.searchParams.get("limit") === "200",
+      countsRequested: target.searchParams.get("with_counts") === "true"
+    });
+    return new Response(JSON.stringify([{
+      id: "${SYNTHETIC_DISCORD_COMMUNITY_GUILD_ID}",
+      name: "P28 Community",
+      owner: true,
+      permissions: "8",
+      features: [],
+      approximate_member_count: 28,
+      approximate_presence_count: 7
+    }]), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (["http:", "https:"].includes(target.protocol) && !loopbackHosts.has(target.hostname)) {
+    if (logPath) {
+      await appendFile(logPath, JSON.stringify({
+        method: String(init?.method || input?.method || "GET").toUpperCase(),
+        origin: target.origin
+      }) + "\\n", "utf8");
+    }
+    throw new Error("External HTTP request blocked by the Social Cues test guard.");
+  }
+  return originalFetch(input, init);
+};
+`, "utf8");
+
+function shopifyEnvironmentState(env) {
+  return Object.entries(env)
+    .filter(([name]) => SHOPIFY_SCENARIO_ENV_KEYS.has(name.toLowerCase()))
+    .sort(([left], [right]) => left.localeCompare(right));
+}
+
+function assertShopifyScenarioEnvironmentHelper() {
+  const parentBefore = Object.entries(process.env);
+  const inheritedShopifyEntries = Object.fromEntries(SHOPIFY_SCENARIO_ENV_NAMES.map((name, index) => [name, `shopify-inherited-${index}`]));
+  const baseEnv = {
+    ...process.env,
+    ...inheritedShopifyEntries,
+    ShOpIfY_ClIeNt_Id: "shopify-inherited-mixed-case-id",
+    sHoPiFy_ApP_sEcReT: "shopify-inherited-mixed-case-secret",
+    SOCIAL_CUES_SHOPIFY_UNRELATED_SENTINEL: "preserved"
+  };
+  const baseBefore = JSON.stringify(Object.entries(baseEnv));
+  const overrides = {
+    SHOPIFY_APP_ID: SYNTHETIC_SHOPIFY_APP_ID,
+    SHOPIFY_APP_SECRET: SYNTHETIC_SHOPIFY_APP_SECRET
+  };
+  const first = shopifyScenarioEnv({ baseEnv, overrides });
+  const second = shopifyScenarioEnv({ baseEnv, overrides: { SHOPIFY_APP_SECRET: SYNTHETIC_SHOPIFY_APP_SECRET, SHOPIFY_APP_ID: SYNTHETIC_SHOPIFY_APP_ID } });
+  if (first === second || first === baseEnv || second === baseEnv) throw new Error("shopify scenario environments must be fresh objects");
+  if (first.SOCIAL_CUES_SHOPIFY_UNRELATED_SENTINEL !== "preserved") throw new Error("shopify scenario isolation removed an unrelated environment variable");
+  const expectedState = Object.entries(overrides).sort(([left], [right]) => left.localeCompare(right));
+  if (JSON.stringify(shopifyEnvironmentState(first)) !== JSON.stringify(expectedState)) throw new Error("shopify scenario isolation retained inherited Shopify configuration");
+  if (JSON.stringify(shopifyEnvironmentState(first)) !== JSON.stringify(shopifyEnvironmentState(second))) {
+    throw new Error("shopify scenario environment depends on override insertion order");
+  }
+  if (JSON.stringify(Object.entries(baseEnv)) !== baseBefore) throw new Error("shopify scenario isolation mutated its supplied base environment");
+  if (JSON.stringify(Object.entries(process.env)) !== JSON.stringify(parentBefore)) throw new Error("shopify scenario isolation mutated the parent process environment");
+}
+
+function assertCommittedShopifyCredentialFamilies(source) {
+  const requiredMarkers = [
+    'SHOPIFY_CLIENT_ID: ["SHOPIFY_API_KEY", "SHOPIFY_APP_ID", "SHOPIFY_APP_CLIENT_ID", "shopify_client_id", "shopify_api_key"]',
+    'SHOPIFY_CLIENT_SECRET: ["SHOPIFY_API_SECRET", "SHOPIFY_APP_SECRET", "SHOPIFY_APP_CLIENT_SECRET", "shopify_client_secret", "shopify_api_secret"]',
+    'SHOPIFY_SHOP_DOMAIN: ["SHOPIFY_STORE_DOMAIN", "SHOPIFY_TEST_STORE_DOMAIN", "shopify_shop_domain"]',
+    'const shopifyPublicAppUrl = (process.env.SHOPIFY_PUBLIC_APP_URL || publicAppUrl)',
+    'const shopifyApiVersion = process.env.SHOPIFY_API_VERSION || "2026-07"',
+    'const shopifyClientId = envValue("SHOPIFY_CLIENT_ID")',
+    'const shopifyClientSecret = envValue("SHOPIFY_CLIENT_SECRET")',
+    'client_id: shopifyClientId',
+    'client_secret: shopifyClientSecret',
+    'crypto.createHmac("sha256", shopifyClientSecret)',
+    'account.credential = encryptedToken(token.accessToken)',
+    'encrypted_token: account.credential',
+    '/provider_tokens?on_conflict=connected_account_id,token_kind',
+    '"X-Shopify-Access-Token": accessToken'
+  ];
+  if (requiredMarkers.some(marker => !source.includes(marker))) throw new Error("committed Shopify credential-family contract is incomplete");
+  const committedNames = new Set([
+    ...[...source.matchAll(/["']((?:SHOPIFY|shopify)_[A-Za-z0-9_]+)["']/g)].map(match => match[1]),
+    ...[...source.matchAll(/process\.env\.((?:SHOPIFY|shopify)_[A-Za-z0-9_]+)/g)].map(match => match[1])
+  ]);
+  for (const name of SHOPIFY_SCENARIO_ENV_NAMES.filter(item => item !== "PUBLIC_APP_URL")) {
+    if (!committedNames.has(name)) throw new Error(`Shopify test environment inventory is not backed by committed source: ${name}`);
+  }
+  if (!source.includes("process.env.PUBLIC_APP_URL")) throw new Error("Shopify public URL fallback is missing from committed source");
+  for (const unknownName of SHOPIFY_TEST_ONLY_UNKNOWN_ENV_NAMES) {
+    if (committedNames.has(unknownName)) throw new Error(`Shopify unknown-alias control unexpectedly became accepted: ${unknownName}`);
+  }
+}
+
+function assertShopifyScenarioDefinitions(scenarios, source) {
+  const committedKeys = new Set(SHOPIFY_SCENARIO_ENV_NAMES.map(name => name.toLowerCase()));
+  const testOnlyUnknownKeys = new Set(SHOPIFY_TEST_ONLY_UNKNOWN_ENV_NAMES.map(name => name.toLowerCase()));
+  const requiredKeys = [
+    "canonical-pair",
+    "api-key-pair",
+    "app-id-pair",
+    "app-client-pair",
+    "lowercase-client-pair",
+    "lowercase-api-pair",
+    "canonical-id-only",
+    "canonical-secret-only",
+    "alias-id-only",
+    "alias-secret-only",
+    "blank-canonical-id",
+    "blank-canonical-secret",
+    "whitespace-canonical-id",
+    "whitespace-canonical-secret",
+    "blank-alias-id",
+    "blank-alias-secret",
+    "whitespace-alias-id",
+    "whitespace-alias-secret",
+    "invalid-id-characters",
+    "invalid-id-length",
+    "invalid-secret-format",
+    "unknown-id-valid-secret",
+    "valid-id-unknown-secret",
+    "unknown-id-and-secret",
+    "canonical-conflicting-alias",
+    "empty-canonical-id-alias-fallback",
+    "empty-canonical-secret-alias-fallback",
+    "empty-canonical-pair-alias-fallback",
+    "whitespace-canonical-id-blocks-alias",
+    "whitespace-canonical-secret-blocks-alias",
+    "mixed-canonical-id-alias-secret",
+    "mixed-alias-id-canonical-secret",
+    "mixed-api-key-app-secret",
+    "mixed-app-id-api-secret",
+    "mixed-app-client-lowercase-secret",
+    "mixed-lowercase-id-uppercase-secret",
+    "hostile-inherited-environment",
+    "workspace-token-without-app-credentials"
+  ];
+  const scenarioKeys = new Set(scenarios.map(scenario => scenario.key));
+  if (requiredKeys.some(key => !scenarioKeys.has(key))) throw new Error("Shopify credential matrix is missing a required independent scenario");
+  if (scenarioKeys.size !== scenarios.length) throw new Error("Shopify credential matrix contains duplicate scenario keys");
+  for (const scenario of scenarios) {
+    const allowedUnknown = new Set((scenario.allowedUnknownEnvNames || []).map(name => name.toLowerCase()));
+    for (const name of Object.keys(scenario.overrides || {})) {
+      if (!/^shopify_/i.test(name)) continue;
+      const normalized = name.toLowerCase();
+      if (!committedKeys.has(normalized) && !(testOnlyUnknownKeys.has(normalized) && allowedUnknown.has(normalized))) {
+        throw new Error(`Shopify scenario introduced an unproven production environment name: ${name}`);
+      }
+    }
+    for (const name of scenario.hostileEnvNames || []) {
+      if (!committedKeys.has(name.toLowerCase())) throw new Error(`Shopify hostile environment used an unproven configuration name: ${name}`);
+    }
+  }
+  const acceptedSource = source.slice(source.indexOf("const envAliases ="), source.indexOf("function envValue"));
+  for (const unknownName of SHOPIFY_TEST_ONLY_UNKNOWN_ENV_NAMES) {
+    if (acceptedSource.includes(unknownName)) throw new Error(`Shopify unknown alias was added to the committed resolver: ${unknownName}`);
+  }
+}
+
+async function availableLoopbackPort() {
+  return new Promise((resolve, reject) => {
+    const probe = createNetServer();
+    probe.unref();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      const selectedPort = typeof address === "object" && address ? address.port : 0;
+      probe.close(error => error ? reject(error) : resolve(selectedPort));
+    });
+  });
+}
+
+async function stopShopifyScenarioServer(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  let exited = false;
+  const exit = new Promise(resolve => child.once("exit", () => {
+    exited = true;
+    resolve();
+  }));
+  if (child.connected) child.send({ type: "social-cues-local-shutdown" });
+  else child.kill();
+  await Promise.race([exit, delay(3000)]);
+  if (!exited && child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+    await Promise.race([exit, delay(1500)]);
+  }
+}
+
+async function waitForShopifyScenarioServer(child, scenarioBaseUrl, label) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    if (child.exitCode !== null) throw new Error(`shopify credential scenario exited before startup: ${label}`);
+    try {
+      const response = await fetch(`${scenarioBaseUrl}/health`);
+      if (response.ok) return;
+    } catch {
+      // The loopback server may still be binding its port.
+    }
+    await delay(50);
+  }
+  throw new Error(`shopify credential scenario did not start: ${label}`);
+}
+
+async function shopifyScenarioResponse(scenarioBaseUrl, route, options = {}) {
+  const response = await fetch(scenarioBaseUrl + route, { redirect: "manual", ...options });
+  const text = await response.text();
+  let body = text;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    // OAuth start and callback routes intentionally return HTML.
+  }
+  return {
+    status: response.status,
+    body,
+    text,
+    headers: Object.fromEntries(response.headers.entries()),
+    location: response.headers.get("location") || ""
+  };
+}
+
+async function shopifyScenarioExternalAttempts(logPath) {
+  try {
+    const source = await readFile(logPath, "utf8");
+    return source.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function waitForTwitchScenarioServer(child, scenarioBaseUrl) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    if (child.exitCode !== null) throw new Error("twitch portal credential scenario exited before startup");
+    try {
+      const response = await fetch(`${scenarioBaseUrl}/health`);
+      if (response.ok) return;
+    } catch {
+      // The loopback server may still be binding its port.
+    }
+    await delay(50);
+  }
+  throw new Error("twitch portal credential scenario did not start");
+}
+
+async function runMetaOAuthStartScenario() {
+  const parentBefore = JSON.stringify(Object.entries(process.env));
+  const scenarioPort = await availableLoopbackPort();
+  const scenarioBaseUrl = `http://127.0.0.1:${scenarioPort}`;
+  const scenarioDataDir = path.join(process.cwd(), ".tmp", `meta-start-p21-${Date.now()}`);
+  const requestLogPath = path.join(scenarioDataDir, "external-http-requests.ndjson");
+  const workspaceLockPath = path.join(scenarioDataDir, ".workspace-content.lock");
+  const expectedNormalScopes = ["public_profile", "pages_show_list", "pages_read_engagement"];
+  const expectedTestingScopes = [
+    ...expectedNormalScopes,
+    "pages_manage_posts",
+    "pages_manage_metadata",
+    "business_management"
+  ];
+  const ownerPassword = "p21-meta-owner-password-2026";
+  const privateMarkers = [
+    SYNTHETIC_META_START_APP_SECRET,
+    SYNTHETIC_META_START_AUTH_SECRET,
+    SYNTHETIC_META_START_ENCRYPTION_KEY,
+    ownerPassword
+  ];
+  await mkdir(scenarioDataDir, { recursive: true });
+  const childEnv = metaStartScenarioEnv({
+    overrides: {
+      PORT: String(scenarioPort),
+      HOST: "127.0.0.1",
+      AUTH_PROVIDER: "alpha-local",
+      SUPABASE_ENABLED: "false",
+      SENTRY_DSN: "",
+      PUBLIC_APP_URL: "https://socialcuesapp.com",
+      META_PUBLIC_APP_URL: "https://socialcuesapp.com",
+      META_APP_ID: SYNTHETIC_META_START_APP_ID,
+      META_APP_SECRET: SYNTHETIC_META_START_APP_SECRET,
+      AUTH_SESSION_SECRET: SYNTHETIC_META_START_AUTH_SECRET,
+      OAUTH_TOKEN_ENCRYPTION_KEY: SYNTHETIC_META_START_ENCRYPTION_KEY,
+      SOCIAL_CUES_DATA_DIR: scenarioDataDir,
+      SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
+      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
+        { code: SYNTHETIC_META_START_OWNER_PROMO, label: "P21 Meta owner", days: 1, active: true }
+      ])
+    }
+  });
+  const retainedCredentialNames = Object.keys(childEnv)
+    .filter(name => META_START_CREDENTIAL_ENV_KEYS.has(name.toLowerCase()))
+    .sort();
+  if (JSON.stringify(retainedCredentialNames) !== JSON.stringify(["META_APP_ID", "META_APP_SECRET"])) {
+    throw new Error("Meta start fixture retained inherited application credentials");
+  }
+
+  let stdout = "";
+  let stderr = "";
+  let result;
+  let scenarioFailure;
+  let childStopped = false;
+  const child = spawn(process.execPath, [`--import=${pathToFileURL(externalRequestGuardPath).href}`, "server.mjs"], {
+    cwd: new URL(".", import.meta.url),
+    env: childEnv,
+    stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  child.stdout.on("data", chunk => { stdout += chunk; });
+  child.stderr.on("data", chunk => { stderr += chunk; });
+  const modelHash = async () => {
+    try {
+      return createHash("sha256").update(await readFile(path.join(scenarioDataDir, "model.json"))).digest("hex");
+    } catch (error) {
+      if (error?.code === "ENOENT") return "absent";
+      throw error;
+    }
+  };
+  const auth = token => ({ headers: { Authorization: `Bearer ${token}` } });
+  const revision = response => response.body?.persistence?.revision || null;
+
+  try {
+    await waitForShopifyScenarioServer(child, scenarioBaseUrl, "P21 Meta start");
+    const attemptsBefore = await shopifyScenarioExternalAttempts(requestLogPath);
+    const hashBeforeAnonymous = await modelHash();
+    const anonymous = await shopifyScenarioResponse(scenarioBaseUrl, "/api/oauth/meta/start?platform=facebook");
+    const hashAfterAnonymous = await modelHash();
+    const tampered = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      "/api/oauth/meta/start?platform=facebook",
+      auth("p21-invalid-session")
+    );
+    const hashAfterTampered = await modelHash();
+    for (const [label, response] of [["anonymous", anonymous], ["tampered session", tampered]]) {
+      if (response.status !== 401
+        || !/sign in required/iu.test(response.text)
+        || response.location
+        || /workspace_writer_unclassified|commitStatus/iu.test(response.text)) {
+        throw new Error(`Meta start fixture did not return a sanitized sign-in requirement for ${label}`);
+      }
+    }
+    if (hashBeforeAnonymous !== hashAfterAnonymous || hashAfterAnonymous !== hashAfterTampered) {
+      throw new Error("Meta start fixture committed OAuth state before authentication");
+    }
+    if (JSON.stringify(await shopifyScenarioExternalAttempts(requestLogPath)) !== JSON.stringify(attemptsBefore)) {
+      throw new Error("Meta start fixture attempted provider traffic for an unauthenticated request");
+    }
+
+    const signup = await shopifyScenarioResponse(scenarioBaseUrl, "/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "P21 Meta Owner",
+        email: `p21-meta-owner-${Date.now()}@example.test`,
+        password: ownerPassword,
+        promoCode: SYNTHETIC_META_START_OWNER_PROMO,
+        workspaceName: "P21 Meta Workspace"
+      })
+    });
+    const ownerToken = signup.body?.session?.token || "";
+    const ownerUserId = signup.body?.user?.id || "";
+    const ownerWorkspaceId = signup.body?.workspace?.id || "";
+    if (signup.status !== 200 || !ownerToken || !ownerUserId || !ownerWorkspaceId
+      || signup.body.workspace?.ownerUserId !== ownerUserId) {
+      throw new Error("Meta start fixture could not establish its synthetic owner workspace");
+    }
+    const ownerAuth = auth(ownerToken);
+    const modelBefore = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const normal = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      "/api/oauth/meta/start?platform=facebook",
+      ownerAuth
+    );
+    const modelAfterNormal = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const testing = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      "/api/oauth/meta/start?platform=facebook&testing=pages",
+      ownerAuth
+    );
+    const modelAfterTesting = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    if (normal.status !== 302 || !normal.location || testing.status !== 302 || !testing.location) {
+      throw new Error("Meta start fixture did not redirect both authenticated Facebook lanes");
+    }
+    const normalUrl = new URL(normal.location);
+    const testingUrl = new URL(testing.location);
+    const normalScopes = (normalUrl.searchParams.get("scope") || "").split(",").filter(Boolean);
+    const testingScopes = (testingUrl.searchParams.get("scope") || "").split(",").filter(Boolean);
+    for (const [label, redirect] of [["normal", normalUrl], ["testing", testingUrl]]) {
+      if (redirect.hostname !== "www.facebook.com"
+        || redirect.pathname !== "/v23.0/dialog/oauth"
+        || redirect.searchParams.get("client_id") !== SYNTHETIC_META_START_APP_ID
+        || redirect.searchParams.get("redirect_uri") !== "https://socialcuesapp.com/api/oauth/meta/callback"
+        || redirect.searchParams.get("auth_type") !== "rerequest"
+        || redirect.searchParams.get("response_type") !== "code"
+        || !redirect.searchParams.get("state")) {
+        throw new Error(`Meta start fixture returned an invalid ${label} provider redirect`);
+      }
+    }
+    if (JSON.stringify(normalScopes) !== JSON.stringify(expectedNormalScopes)
+      || normalUrl.searchParams.has("enable_profile_selector")) {
+      throw new Error("Meta start fixture changed the normal Facebook scope contract");
+    }
+    if (JSON.stringify(testingScopes) !== JSON.stringify(expectedTestingScopes)
+      || testingUrl.searchParams.get("enable_profile_selector") !== "1") {
+      throw new Error("Meta start fixture changed the Facebook testing scope or selector contract");
+    }
+    if (modelBefore.status !== 200 || modelAfterNormal.status !== 200 || modelAfterTesting.status !== 200
+      || JSON.stringify(revision(modelBefore)) === JSON.stringify(revision(modelAfterNormal))
+      || JSON.stringify(revision(modelAfterNormal)) === JSON.stringify(revision(modelAfterTesting))) {
+      throw new Error("Meta start fixture did not durably advance both owner workspace revisions");
+    }
+
+    const rawModelSource = await readFile(path.join(scenarioDataDir, "model.json"), "utf8");
+    const rawModel = JSON.parse(rawModelSource);
+    const metaStates = (rawModel.shared?.oauthStates || [])
+      .filter(record => record.provider === "meta" && record.platform === "facebook");
+    const normalRecord = metaStates.find(record => record.state === normalUrl.searchParams.get("state"));
+    const testingRecord = metaStates.find(record => record.state === testingUrl.searchParams.get("state"));
+    const recordOwnerMatches = record => record?.ownerUserId === ownerUserId
+      && record?.userId === ownerUserId
+      && record?.workspaceId === ownerWorkspaceId;
+    if (metaStates.length !== 2
+      || !recordOwnerMatches(normalRecord)
+      || !recordOwnerMatches(testingRecord)
+      || normalRecord.testingPages !== false
+      || testingRecord.testingPages !== true
+      || JSON.stringify(normalRecord.requestedScopes) !== JSON.stringify(expectedNormalScopes)
+      || JSON.stringify(testingRecord.requestedScopes) !== JSON.stringify(expectedTestingScopes)
+      || rawModel.shared?.workspaces?.find(workspace => workspace.id === ownerWorkspaceId)?.ownerUserId !== ownerUserId
+      || !rawModel.workspaces?.[ownerWorkspaceId]) {
+      throw new Error("Meta start fixture did not durably bind OAuth states to the authenticated owner workspace");
+    }
+    if ([modelBefore, modelAfterNormal, modelAfterTesting]
+      .some(response => /"oauthStates"|"oauthEvents"/u.test(JSON.stringify(response.body)))) {
+      throw new Error("Meta start fixture exposed a private OAuth ledger through the public model");
+    }
+
+    const attemptsAfter = await shopifyScenarioExternalAttempts(requestLogPath);
+    if (JSON.stringify(attemptsAfter) !== JSON.stringify(attemptsBefore)) {
+      throw new Error("Meta start fixture attempted an external provider request");
+    }
+    assertMetaStartPrivateMarkersAbsent(
+      [anonymous.text, tampered.text, normal.location, testing.location, modelBefore.body, modelAfterNormal.body, modelAfterTesting.body, rawModelSource],
+      privateMarkers,
+      "HTTP or persistence"
+    );
+    assertMetaStartPrivateMarkersAbsent(rawModelSource, [ownerToken], "private persistence");
+    result = {
+      anonymousStatus: anonymous.status,
+      tamperedSessionStatus: tampered.status,
+      unauthenticatedMutation: false,
+      normalStatus: normal.status,
+      normalRedirectHost: normalUrl.hostname,
+      normalRedirectPath: normalUrl.pathname,
+      normalScopes,
+      testingStatus: testing.status,
+      testingRedirectHost: testingUrl.hostname,
+      testingRedirectPath: testingUrl.pathname,
+      testingScopes,
+      selectorRequiredForTesting: true,
+      revisionsAdvanced: true,
+      ownerWorkspaceBound: true,
+      externalRequests: attemptsAfter.length
+    };
+  } catch (error) {
+    scenarioFailure = error;
+  } finally {
+    await stopShopifyScenarioServer(child);
+    childStopped = child.exitCode !== null || child.signalCode !== null;
+  }
+
+  let postFailure = scenarioFailure;
+  let cleanupComplete = false;
+  try {
+    assertMetaStartPrivateMarkersAbsent(`${stdout}\n${stderr}`, privateMarkers, "stdout or stderr");
+    const finalAttempts = await shopifyScenarioExternalAttempts(requestLogPath);
+    if (finalAttempts.length !== 0) throw new Error("Meta start fixture recorded an external request");
+    if (!childStopped) throw new Error("Meta start fixture did not stop its child process");
+    try {
+      await access(workspaceLockPath);
+      throw new Error("Meta start fixture retained the workspace lock after shutdown");
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    if (JSON.stringify(Object.entries(process.env)) !== parentBefore) {
+      throw new Error("Meta start fixture mutated the parent process environment");
+    }
+  } catch (error) {
+    if (!postFailure) postFailure = error;
+  } finally {
+    await rm(scenarioDataDir, { recursive: true, force: true });
+    try {
+      await access(scenarioDataDir);
+    } catch (error) {
+      if (error?.code === "ENOENT") cleanupComplete = true;
+      else if (!postFailure) postFailure = error;
+    }
+  }
+  if (!cleanupComplete && !postFailure) postFailure = new Error("Meta start fixture cleanup was incomplete");
+  if (postFailure) throw postFailure;
+  return { ...result, cleanupComplete };
+}
+
+async function runGoogleOAuthStartScenario() {
+  const parentBefore = JSON.stringify(Object.entries(process.env));
+  const scenarioPort = await availableLoopbackPort();
+  const scenarioBaseUrl = `http://127.0.0.1:${scenarioPort}`;
+  const scenarioDataDir = path.join(process.cwd(), ".tmp", `google-start-p25-${Date.now()}`);
+  const modelPath = path.join(scenarioDataDir, "model.json");
+  const requestLogPath = path.join(scenarioDataDir, "external-http-requests.ndjson");
+  const providerMockLogPath = path.join(scenarioDataDir, "provider-mocks.ndjson");
+  const workspaceLockPath = path.join(scenarioDataDir, ".workspace-content.lock");
+  const expectedYouTubeScopes = [
+    "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.force-ssl",
+    "https://www.googleapis.com/auth/yt-analytics.readonly"
+  ];
+  const expectedBusinessScopes = ["https://www.googleapis.com/auth/business.manage"];
+  const ownerPassword = "p25-google-start-owner-password-2026";
+  const foreignPassword = "p25-google-start-foreign-password-2026";
+  const privateMarkers = [
+    SYNTHETIC_GOOGLE_START_CLIENT_SECRET,
+    SYNTHETIC_GOOGLE_START_AUTH_SECRET,
+    SYNTHETIC_GOOGLE_START_ENCRYPTION_KEY,
+    ownerPassword,
+    foreignPassword
+  ];
+  await mkdir(scenarioDataDir, { recursive: true });
+  const childEnv = googleCallbackScenarioEnv({
+    baseEnv: {
+      ...process.env,
+      ...Object.fromEntries(GOOGLE_CALLBACK_CREDENTIAL_ENV_NAMES.map((name, index) => [name, `inherited-google-start-${index}`])),
+      GoOgLe_ClIeNt_Id: "inherited-google-start-mixed-case-id",
+      gOoGlE_cLiEnT_sEcReT: "inherited-google-start-mixed-case-secret"
+    },
+    overrides: {
+      PORT: String(scenarioPort),
+      HOST: "127.0.0.1",
+      AUTH_PROVIDER: "alpha-local",
+      SUPABASE_ENABLED: "false",
+      SENTRY_DSN: "",
+      PUBLIC_APP_URL: "https://socialcuesapp.com",
+      GOOGLE_PUBLIC_APP_URL: "https://socialcuesapp.com",
+      GOOGLE_CLIENT_ID: SYNTHETIC_GOOGLE_START_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET: SYNTHETIC_GOOGLE_START_CLIENT_SECRET,
+      AUTH_SESSION_SECRET: SYNTHETIC_GOOGLE_START_AUTH_SECRET,
+      OAUTH_TOKEN_ENCRYPTION_KEY: SYNTHETIC_GOOGLE_START_ENCRYPTION_KEY,
+      SOCIAL_CUES_DATA_DIR: scenarioDataDir,
+      SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
+      SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath,
+      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
+        { code: SYNTHETIC_GOOGLE_START_FOREIGN_PROMO_CODE, label: "P25 Google start foreign", days: 1, active: true }
+      ])
+    }
+  });
+  const retainedCredentialNames = Object.keys(childEnv)
+    .filter(name => GOOGLE_CALLBACK_CREDENTIAL_ENV_KEYS.has(name.toLowerCase()))
+    .sort();
+  if (JSON.stringify(retainedCredentialNames) !== JSON.stringify(["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"])) {
+    throw new Error("Google start fixture retained inherited application credentials");
+  }
+
+  let stdout = "";
+  let stderr = "";
+  let result;
+  let scenarioFailure;
+  let childStopped = false;
+  let issuedStates = [];
+  const child = spawn(process.execPath, [`--import=${pathToFileURL(externalRequestGuardPath).href}`, "server.mjs"], {
+    cwd: new URL(".", import.meta.url),
+    env: childEnv,
+    stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  child.stdout.on("data", chunk => { stdout += chunk; });
+  child.stderr.on("data", chunk => { stderr += chunk; });
+  const auth = token => ({ headers: { Authorization: `Bearer ${token}` } });
+  const revision = response => JSON.stringify(response.body?.persistence?.revision || null);
+  const parseStart = (response, platform, expectedScopes) => {
+    if (response.status !== 302 || !response.location) {
+      throw new Error(`Google start fixture did not redirect the authenticated ${platform} lane`);
+    }
+    const location = new URL(response.location);
+    const state = location.searchParams.get("state") || "";
+    const scopes = (location.searchParams.get("scope") || "").split(" ").filter(Boolean);
+    if (location.origin !== "https://accounts.google.com"
+      || location.pathname !== "/o/oauth2/v2/auth"
+      || location.searchParams.get("client_id") !== SYNTHETIC_GOOGLE_START_CLIENT_ID
+      || location.searchParams.get("redirect_uri") !== "https://socialcuesapp.com/api/oauth/youtube/callback"
+      || location.searchParams.get("response_type") !== "code"
+      || location.searchParams.get("access_type") !== "offline"
+      || location.searchParams.get("include_granted_scopes") !== "true"
+      || location.searchParams.get("prompt") !== "consent select_account"
+      || JSON.stringify(scopes) !== JSON.stringify(expectedScopes)
+      || !state) {
+      throw new Error(`Google start fixture changed the authenticated ${platform} redirect contract`);
+    }
+    let signedPayload;
+    try {
+      signedPayload = JSON.parse(Buffer.from(state, "base64url").toString("utf8"));
+    } catch {
+      throw new Error(`Google start fixture issued a malformed signed state for ${platform}`);
+    }
+    if (!signedPayload?.sig || signedPayload.provider !== "youtube" || signedPayload.platform !== platform
+      || JSON.stringify(signedPayload.requestedScopes) !== JSON.stringify(expectedScopes)) {
+      throw new Error(`Google start fixture changed the signed state contract for ${platform}`);
+    }
+    return { location, scopes, state, signedPayload };
+  };
+
+  try {
+    await waitForShopifyScenarioServer(child, scenarioBaseUrl, "P25 Google start");
+    const foreignSignup = await shopifyScenarioResponse(scenarioBaseUrl, "/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "P25 Google Start Foreign",
+        email: `p25-google-start-foreign-${Date.now()}@example.test`,
+        password: foreignPassword,
+        promoCode: SYNTHETIC_GOOGLE_START_FOREIGN_PROMO_CODE,
+        workspaceName: "P25 Google Start Foreign Workspace"
+      })
+    });
+    const ownerSignup = await shopifyScenarioResponse(scenarioBaseUrl, "/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "P25 Google Start Owner",
+        email: `mr.barton+p25-google-start-${Date.now()}@socialcuesapp.com`,
+        password: ownerPassword,
+        workspaceName: "P25 Google Start Owner Workspace"
+      })
+    });
+    const ownerToken = ownerSignup.body?.session?.token || "";
+    const foreignToken = foreignSignup.body?.session?.token || "";
+    const ownerUserId = ownerSignup.body?.session?.user?.id || ownerSignup.body?.user?.id || "";
+    const foreignUserId = foreignSignup.body?.session?.user?.id || foreignSignup.body?.user?.id || "";
+    const ownerWorkspaceId = ownerSignup.body?.workspace?.id || "";
+    const foreignWorkspaceId = foreignSignup.body?.workspace?.id || "";
+    if (ownerSignup.status !== 200 || foreignSignup.status !== 200 || !ownerToken || !foreignToken
+      || !ownerUserId || !foreignUserId || !ownerWorkspaceId || !foreignWorkspaceId
+      || ownerSignup.body.workspace?.ownerUserId !== ownerUserId
+      || foreignSignup.body.workspace?.ownerUserId !== foreignUserId) {
+      throw new Error("Google start fixture could not establish isolated authenticated workspaces");
+    }
+    privateMarkers.push(ownerToken, foreignToken);
+    const ownerAuth = auth(ownerToken);
+    const foreignAuth = auth(foreignToken);
+    const ownerBeforeDenials = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const foreignBeforeDenials = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    const modelBeforeDenials = await readFile(modelPath);
+    const requestsBeforeDenials = await shopifyScenarioExternalAttempts(requestLogPath);
+    const mocksBeforeDenials = await shopifyScenarioExternalAttempts(providerMockLogPath);
+
+    const anonymous = await shopifyScenarioResponse(scenarioBaseUrl, "/api/oauth/youtube/start");
+    const invalidSession = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      "/api/oauth/youtube/start?service=business",
+      auth("p25-google-start-invalid-session")
+    );
+    for (const [label, response] of [["anonymous", anonymous], ["invalid session", invalidSession]]) {
+      if (response.status !== 401
+        || !/sign in required/iu.test(response.text)
+        || response.location
+        || response.headers["set-cookie"]
+        || /workspace_writer_unclassified|commitStatus/iu.test(response.text)) {
+        throw new Error(`Google start fixture did not return a sanitized sign-in requirement for ${label}`);
+      }
+    }
+    const ownerAfterDenials = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const foreignAfterDenials = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    if (Buffer.compare(modelBeforeDenials, await readFile(modelPath)) !== 0
+      || revision(ownerBeforeDenials) !== revision(ownerAfterDenials)
+      || revision(foreignBeforeDenials) !== revision(foreignAfterDenials)) {
+      throw new Error("Google start fixture changed storage or a workspace revision before authentication");
+    }
+    if (JSON.stringify(await shopifyScenarioExternalAttempts(requestLogPath)) !== JSON.stringify(requestsBeforeDenials)
+      || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(mocksBeforeDenials)) {
+      throw new Error("Google start fixture attempted provider traffic before authentication");
+    }
+
+    const youtubeStart = await shopifyScenarioResponse(scenarioBaseUrl, "/api/oauth/youtube/start", ownerAuth);
+    const youtube = parseStart(youtubeStart, "youtube", expectedYouTubeScopes);
+    const ownerAfterYouTube = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const businessStart = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      "/api/oauth/youtube/start?service=business",
+      ownerAuth
+    );
+    const business = parseStart(businessStart, "google_business", expectedBusinessScopes);
+    const ownerAfterBusiness = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const foreignAfterStarts = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    if (youtube.state === business.state
+      || revision(ownerAfterDenials) === revision(ownerAfterYouTube)
+      || revision(ownerAfterYouTube) === revision(ownerAfterBusiness)
+      || revision(foreignAfterDenials) !== revision(foreignAfterStarts)) {
+      throw new Error("Google start fixture did not isolate two durable owner revisions from the foreign workspace");
+    }
+    for (const entry of [youtube, business]) {
+      if (entry.signedPayload.ownerUserId !== ownerUserId
+        || entry.signedPayload.userId !== ownerUserId
+        || entry.signedPayload.workspaceId !== ownerWorkspaceId) {
+        throw new Error("Google start fixture did not bind signed state to the authenticated owner workspace");
+      }
+    }
+
+    const rawModelSource = await readFile(modelPath, "utf8");
+    const rawModel = JSON.parse(rawModelSource);
+    const googleStates = (rawModel.shared?.oauthStates || []).filter(record => record.provider === "youtube");
+    const youtubeRecord = googleStates.find(record => record.state === youtube.state);
+    const businessRecord = googleStates.find(record => record.state === business.state);
+    const recordMatches = (record, platform, scopes) => record?.platform === platform
+      && record.ownerUserId === ownerUserId
+      && record.userId === ownerUserId
+      && record.workspaceId === ownerWorkspaceId
+      && JSON.stringify(record.requestedScopes) === JSON.stringify(scopes);
+    if (googleStates.length !== 2
+      || !recordMatches(youtubeRecord, "youtube", expectedYouTubeScopes)
+      || !recordMatches(businessRecord, "google_business", expectedBusinessScopes)
+      || googleStates.some(record => record.ownerUserId === foreignUserId || record.workspaceId === foreignWorkspaceId)
+      || rawModel.shared?.workspaces?.find(workspace => workspace.id === ownerWorkspaceId)?.ownerUserId !== ownerUserId) {
+      throw new Error("Google start fixture did not durably isolate both OAuth states to the owner workspace");
+    }
+
+    const oauthDebug = await shopifyScenarioResponse(scenarioBaseUrl, "/api/oauth/debug-log", ownerAuth);
+    if (oauthDebug.status !== 200
+      || !oauthDebug.body?.rows?.filter(row => row.provider === "youtube" && row.event === "state_issued").length) {
+      throw new Error("Google start fixture could not read the sanitized owner OAuth audit");
+    }
+    const publicModels = [ownerBeforeDenials, foreignBeforeDenials, ownerAfterDenials, foreignAfterDenials,
+      ownerAfterYouTube, ownerAfterBusiness, foreignAfterStarts];
+    if (publicModels.some(response => /"oauthStates"|"oauthEvents"/u.test(JSON.stringify(response.body)))) {
+      throw new Error("Google start fixture exposed a private OAuth ledger through the public model");
+    }
+    const rawStates = [youtube.state, business.state];
+    issuedStates = rawStates;
+    const stateSensitiveEvidence = [
+      ...publicModels.map(response => response.body),
+      anonymous.text,
+      invalidSession.text,
+      oauthDebug.body,
+      stdout,
+      stderr,
+      await shopifyScenarioExternalAttempts(requestLogPath),
+      await shopifyScenarioExternalAttempts(providerMockLogPath)
+    ];
+    assertGoogleStartPrivateMarkersAbsent(stateSensitiveEvidence, rawStates, "public responses or logs");
+    assertGoogleStartPrivateMarkersAbsent(
+      [anonymous.text, invalidSession.text, youtubeStart.location, businessStart.location,
+        ...publicModels.map(response => response.body), oauthDebug.body, stdout, stderr, rawModelSource],
+      privateMarkers,
+      "HTTP, logs, or persistence"
+    );
+    if ((rawModel.shared?.oauthEvents || []).some(event => rawStates.some(state => JSON.stringify(event).includes(state)))) {
+      throw new Error("Google start fixture retained a raw OAuth state in the durable audit log");
+    }
+    const finalRequests = await shopifyScenarioExternalAttempts(requestLogPath);
+    const finalMocks = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    if (finalRequests.length !== 0 || finalMocks.length !== 0) {
+      throw new Error("Google start fixture attempted a provider request");
+    }
+    result = {
+      anonymousStatus: anonymous.status,
+      invalidSessionStatus: invalidSession.status,
+      unauthenticatedMutation: false,
+      youtubeStatus: youtubeStart.status,
+      businessStatus: businessStart.status,
+      youtubeScopes: youtube.scopes,
+      businessScopes: business.scopes,
+      signedStates: true,
+      distinctStates: true,
+      revisionsAdvanced: true,
+      ownerWorkspaceBound: true,
+      foreignWorkspaceIsolated: true,
+      rawStateRedactedFromPublicEvidence: true,
+      externalRequests: finalRequests.length,
+      mockedProviderRequests: finalMocks.length
+    };
+  } catch (error) {
+    scenarioFailure = error;
+  } finally {
+    await stopShopifyScenarioServer(child);
+    childStopped = child.exitCode !== null || child.signalCode !== null;
+  }
+
+  let postFailure = scenarioFailure;
+  let cleanupComplete = false;
+  try {
+    assertGoogleStartPrivateMarkersAbsent(`${stdout}\n${stderr}`, [...privateMarkers, ...issuedStates], "stdout or stderr");
+    if ((await shopifyScenarioExternalAttempts(requestLogPath)).length !== 0
+      || (await shopifyScenarioExternalAttempts(providerMockLogPath)).length !== 0) {
+      throw new Error("Google start fixture recorded provider traffic");
+    }
+    if (!childStopped) throw new Error("Google start fixture did not stop its child process");
+    try {
+      await access(workspaceLockPath);
+      throw new Error("Google start fixture retained the workspace lock after shutdown");
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    if (JSON.stringify(Object.entries(process.env)) !== parentBefore) {
+      throw new Error("Google start fixture mutated the parent process environment");
+    }
+  } catch (error) {
+    if (!postFailure) postFailure = error;
+  } finally {
+    await rm(scenarioDataDir, { recursive: true, force: true });
+    try {
+      await access(scenarioDataDir);
+    } catch (error) {
+      if (error?.code === "ENOENT") cleanupComplete = true;
+      else if (!postFailure) postFailure = error;
+    }
+  }
+  if (!cleanupComplete && !postFailure) postFailure = new Error("Google start fixture cleanup was incomplete");
+  if (postFailure) throw postFailure;
+  return { ...result, cleanupComplete };
+}
+
+async function seedXAccountWorkspaceFixture({ dataDir, encryptionKey, user, workspaceId }) {
+  const seedSource = await readFile(new URL("./social-cues-model-seed.json", import.meta.url), "utf8");
+  const seed = JSON.parse(seedSource.replace(/^\uFEFF/, ""));
+  const owner = { ...user, id: String(user?.id || ""), workspaceId: String(workspaceId || "") };
+  if (!owner.id || !owner.workspaceId) throw new Error("X account fixture is missing its canonical owner identity");
+  const unavailable = () => { throw new Error("X account fixture must not invoke a browser merge callback"); };
+  const store = await openLocalWorkspacePersistence({ dataDir, seed, mergeClient: unavailable, recoverClient: unavailable });
+  try {
+    const sharedModel = await store.load();
+    const model = store.view(sharedModel, owner.workspaceId);
+    model.connectedAccounts = (model.connectedAccounts || []).filter(account => account.platform !== "x");
+    model.connectedAccounts.push({
+      id: `acct-x-p26-${owner.id}`,
+      platform: "x",
+      name: "X",
+      displayName: "P26 X Owner",
+      handle: "@p26_x_owner",
+      status: "connected",
+      connectedAt: new Date().toISOString(),
+      oauthProvider: "x",
+      providerAccountId: SYNTHETIC_X_ACCOUNT_PROVIDER_ID,
+      credential: encryptedShopifyFixtureToken(SYNTHETIC_X_ACCOUNT_ACCESS_TOKEN, encryptionKey),
+      tokenType: "Bearer",
+      scopes: [...X_ACCOUNT_WRITE_SCOPES],
+      requestedScopes: [...X_ACCOUNT_WRITE_SCOPES],
+      ownerUserId: owner.id,
+      workspaceId: owner.workspaceId
+    });
+    await store.save(model, owner);
+  } finally {
+    await store.close();
+  }
+}
+
+async function runXAccountBoundaryScenario() {
+  const parentBefore = JSON.stringify(Object.entries(process.env));
+  const scenarioPort = await availableLoopbackPort();
+  const scenarioBaseUrl = `http://127.0.0.1:${scenarioPort}`;
+  const scenarioDataDir = path.join(process.cwd(), ".tmp", `x-account-p26-${Date.now()}`);
+  const modelPath = path.join(scenarioDataDir, "model.json");
+  const requestLogPath = path.join(scenarioDataDir, "external-http-requests.ndjson");
+  const providerMockLogPath = path.join(scenarioDataDir, "provider-mocks.ndjson");
+  const workspaceLockPath = path.join(scenarioDataDir, ".workspace-content.lock");
+  const ownerPassword = "p26-x-owner-password-2026";
+  const foreignPassword = "p26-x-foreign-password-2026";
+  const privateMarkers = [
+    SYNTHETIC_X_ACCOUNT_CLIENT_ID,
+    SYNTHETIC_X_ACCOUNT_CLIENT_SECRET,
+    SYNTHETIC_X_ACCOUNT_AUTH_SECRET,
+    SYNTHETIC_X_ACCOUNT_ENCRYPTION_KEY,
+    SYNTHETIC_X_ACCOUNT_ACCESS_TOKEN,
+    ownerPassword,
+    foreignPassword
+  ];
+  await mkdir(scenarioDataDir, { recursive: true });
+  const childEnv = xAccountScenarioEnv({
+    baseEnv: {
+      ...process.env,
+      ...Object.fromEntries(X_ACCOUNT_ENV_NAMES.map((name, index) => [name, `p26-inherited-x-${index}`])),
+      x_CliEnT_iD: "p26-inherited-mixed-case-id",
+      X_cLiEnT_sEcReT: "p26-inherited-mixed-case-secret"
+    },
+    overrides: {
+      PORT: String(scenarioPort),
+      HOST: "127.0.0.1",
+      AUTH_PROVIDER: "alpha-local",
+      SUPABASE_ENABLED: "false",
+      SENTRY_DSN: "",
+      PUBLIC_APP_URL: "https://socialcuesapp.com",
+      X_PUBLIC_APP_URL: "https://socialcuesapp.com",
+      X_CLIENT_ID: SYNTHETIC_X_ACCOUNT_CLIENT_ID,
+      X_CLIENT_SECRET: SYNTHETIC_X_ACCOUNT_CLIENT_SECRET,
+      X_OAUTH_SCOPES: X_ACCOUNT_READ_SCOPES.join(" "),
+      X_OAUTH_WRITE_SCOPES: X_ACCOUNT_WRITE_SCOPES.join(" "),
+      AUTH_SESSION_SECRET: SYNTHETIC_X_ACCOUNT_AUTH_SECRET,
+      OAUTH_TOKEN_ENCRYPTION_KEY: SYNTHETIC_X_ACCOUNT_ENCRYPTION_KEY,
+      SOCIAL_CUES_DATA_DIR: scenarioDataDir,
+      SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
+      SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath,
+      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
+        { code: SYNTHETIC_X_ACCOUNT_OWNER_PROMO, label: "P26 X owner", days: 1, active: true },
+        { code: SYNTHETIC_X_ACCOUNT_FOREIGN_PROMO, label: "P26 X foreign", days: 1, active: true }
+      ])
+    }
+  });
+  const retainedXNames = Object.keys(childEnv)
+    .filter(name => X_ACCOUNT_ENV_KEYS.has(name.toLowerCase()))
+    .sort();
+  if (JSON.stringify(retainedXNames) !== JSON.stringify([
+    "X_CLIENT_ID",
+    "X_CLIENT_SECRET",
+    "X_OAUTH_SCOPES",
+    "X_OAUTH_WRITE_SCOPES",
+    "X_PUBLIC_APP_URL"
+  ])) {
+    throw new Error("X account fixture retained inherited X configuration");
+  }
+
+  let stdout = "";
+  let stderr = "";
+  let child = null;
+  let startedChildren = 0;
+  let stoppedChildren = 0;
+  let result;
+  let scenarioFailure;
+  const auth = token => ({ headers: { Authorization: `Bearer ${token}` } });
+  const revision = response => response.body?.persistence?.revision || null;
+  const sameRevision = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  const revisionAdvancedOnce = (before, after) => Boolean(
+    before?.epoch
+    && before.epoch === after?.epoch
+    && BigInt(after.revision) === BigInt(before.revision) + 1n
+  );
+  const fileBytes = async () => readFile(modelPath);
+  const startChild = async label => {
+    child = spawn(process.execPath, [`--import=${pathToFileURL(externalRequestGuardPath).href}`, "server.mjs"], {
+      cwd: new URL(".", import.meta.url),
+      env: childEnv,
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
+    });
+    startedChildren += 1;
+    child.stdout.on("data", chunk => { stdout += chunk; });
+    child.stderr.on("data", chunk => { stderr += chunk; });
+    await waitForShopifyScenarioServer(child, scenarioBaseUrl, label);
+  };
+  const stopChild = async () => {
+    if (!child) return;
+    const current = child;
+    await stopShopifyScenarioServer(current);
+    if (current.exitCode === null && current.signalCode === null) {
+      throw new Error("X account fixture did not stop its child process");
+    }
+    stoppedChildren += 1;
+    child = null;
+  };
+  const assertNoWorkspaceLock = async label => {
+    try {
+      await access(workspaceLockPath);
+      throw new Error(`X account fixture retained the workspace lock ${label}`);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  };
+  const assertSanitizedAccessDenial = (label, response) => {
+    const keys = Object.keys(response.body || {}).sort();
+    const expectedKeys = ["accessRequired", "checkoutPath", "error", "ok", "portalPath"].sort();
+    if (response.status !== 402
+      || response.body?.ok !== false
+      || response.body?.accessRequired !== true
+      || response.body?.checkoutPath !== "/api/billing/checkout"
+      || response.body?.portalPath !== "/portal"
+      || response.body?.error !== "Buy Social Cues or use an active approved promo entitlement before using the app."
+      || JSON.stringify(keys) !== JSON.stringify(expectedKeys)
+      || response.location
+      || response.headers["set-cookie"]
+      || /workspace_writer_unclassified|commitStatus/iu.test(response.text)
+      || containsXAccountCredentialField(response.body)) {
+      throw new Error(`X account fixture did not return the exact sanitized access denial for ${label}`);
+    }
+  };
+
+  try {
+    await startChild("P26 X account workspace setup");
+    const signup = input => shopifyScenarioResponse(scenarioBaseUrl, "/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input)
+    });
+    const ownerSignup = await signup({
+      name: "P26 X Owner",
+      email: `p26-x-owner-${Date.now()}@example.test`,
+      password: ownerPassword,
+      promoCode: SYNTHETIC_X_ACCOUNT_OWNER_PROMO,
+      workspaceName: "P26 X Owner Workspace"
+    });
+    const foreignSignup = await signup({
+      name: "P26 X Foreign",
+      email: `p26-x-foreign-${Date.now()}@example.test`,
+      password: foreignPassword,
+      promoCode: SYNTHETIC_X_ACCOUNT_FOREIGN_PROMO,
+      workspaceName: "P26 X Foreign Workspace"
+    });
+    const ownerToken = ownerSignup.body?.session?.token || "";
+    const foreignToken = foreignSignup.body?.session?.token || "";
+    const ownerUser = ownerSignup.body?.user || ownerSignup.body?.session?.user || null;
+    const foreignUser = foreignSignup.body?.user || foreignSignup.body?.session?.user || null;
+    const ownerWorkspaceId = ownerSignup.body?.workspace?.id || "";
+    const foreignWorkspaceId = foreignSignup.body?.workspace?.id || "";
+    if (ownerSignup.status !== 200 || foreignSignup.status !== 200
+      || !ownerToken || !foreignToken || !ownerUser?.id || !foreignUser?.id
+      || !ownerWorkspaceId || !foreignWorkspaceId || ownerWorkspaceId === foreignWorkspaceId
+      || ownerSignup.body?.workspace?.ownerUserId !== ownerUser.id
+      || foreignSignup.body?.workspace?.ownerUserId !== foreignUser.id) {
+      throw new Error("X account fixture could not establish isolated entitled workspaces");
+    }
+    privateMarkers.push(ownerToken, foreignToken);
+
+    await stopChild();
+    await assertNoWorkspaceLock("before canonical seeding");
+    await seedXAccountWorkspaceFixture({
+      dataDir: scenarioDataDir,
+      encryptionKey: SYNTHETIC_X_ACCOUNT_ENCRYPTION_KEY,
+      user: ownerUser,
+      workspaceId: ownerWorkspaceId
+    });
+    await startChild("P26 X account authenticated boundary");
+
+    const ownerAuth = auth(ownerToken);
+    const foreignAuth = auth(foreignToken);
+    const ownerBeforeDenials = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const foreignBeforeDenials = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    const bytesBeforeDenials = await fileBytes();
+    const externalBeforeDenials = await shopifyScenarioExternalAttempts(requestLogPath);
+    const mocksBeforeDenials = await shopifyScenarioExternalAttempts(providerMockLogPath);
+
+    const anonymous = await shopifyScenarioResponse(scenarioBaseUrl, "/api/x/account");
+    const invalidSession = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      "/api/x/account",
+      auth("p26-invalid-x-session")
+    );
+    assertSanitizedAccessDenial("anonymous request", anonymous);
+    assertSanitizedAccessDenial("invalid session", invalidSession);
+    const ownerAfterDenials = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const foreignAfterDenials = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    if (Buffer.compare(bytesBeforeDenials, await fileBytes()) !== 0
+      || !sameRevision(revision(ownerBeforeDenials), revision(ownerAfterDenials))
+      || !sameRevision(revision(foreignBeforeDenials), revision(foreignAfterDenials))) {
+      throw new Error("X account fixture changed storage or a workspace revision before authentication");
+    }
+    if (JSON.stringify(await shopifyScenarioExternalAttempts(requestLogPath)) !== JSON.stringify(externalBeforeDenials)
+      || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(mocksBeforeDenials)) {
+      throw new Error("X account fixture attempted provider traffic before authentication");
+    }
+
+    const ownerAccount = await shopifyScenarioResponse(scenarioBaseUrl, "/api/x/account", ownerAuth);
+    const ownerAfterAccount = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const expectedResponseKeys = [
+      "account", "capabilityLanes", "configured", "connectRoute", "connectionState", "defaultScopes",
+      "ok", "postingReady", "postingStatus", "ready", "redirectUri", "refreshError", "refreshed", "repaired",
+      "requestableScopes", "scopes", "verified", "writeConnectRoute", "writeScopes"
+    ].sort();
+    const lane = id => ownerAccount.body?.capabilityLanes?.find(item => item.id === id);
+    if (ownerAccount.status !== 200 || ownerAccount.body?.ok !== true
+      || JSON.stringify(Object.keys(ownerAccount.body || {}).sort()) !== JSON.stringify(expectedResponseKeys)
+      || ownerAccount.body?.configured !== true
+      || ownerAccount.body?.ready !== true
+      || ownerAccount.body?.verified !== true
+      || ownerAccount.body?.postingReady !== true
+      || ownerAccount.body?.repaired !== false
+      || ownerAccount.body?.refreshed !== false
+      || ownerAccount.body?.refreshError !== null
+      || ownerAccount.body?.redirectUri !== "https://socialcuesapp.com/api/oauth/x/callback"
+      || ownerAccount.body?.connectRoute !== "/api/oauth/x/start"
+      || ownerAccount.body?.writeConnectRoute !== "/api/oauth/x/start?mode=write"
+      || JSON.stringify(ownerAccount.body?.scopes) !== JSON.stringify(X_ACCOUNT_READ_SCOPES)
+      || JSON.stringify(ownerAccount.body?.defaultScopes) !== JSON.stringify(X_ACCOUNT_READ_SCOPES)
+      || JSON.stringify(ownerAccount.body?.writeScopes) !== JSON.stringify(X_ACCOUNT_WRITE_SCOPES)
+      || JSON.stringify(ownerAccount.body?.requestableScopes) !== JSON.stringify(["tweet.read", "users.read", "offline.access", "tweet.write"])
+      || ownerAccount.body?.account?.providerAccountId !== SYNTHETIC_X_ACCOUNT_PROVIDER_ID
+      || ownerAccount.body?.account?.ownerUserId !== ownerUser.id
+      || ownerAccount.body?.account?.workspaceId !== ownerWorkspaceId
+      || ownerAccount.body?.account?.connected !== true
+      || ownerAccount.body?.account?.tokenStored !== true
+      || ownerAccount.body?.account?.identityVerified !== true
+      || JSON.stringify(ownerAccount.body?.account?.grantedScopes) !== JSON.stringify(X_ACCOUNT_WRITE_SCOPES)
+      || ownerAccount.body?.connectionState?.connected !== true
+      || ownerAccount.body?.connectionState?.reason !== "connected"
+      || ownerAccount.body?.postingStatus?.state !== "oauth-ready"
+      || lane("identity")?.status !== "available"
+      || lane("post-create")?.status !== "available"
+      || lane("post-read")?.status !== "available") {
+      throw new Error("Authenticated X account fixture changed owner account, readiness, or scope truth");
+    }
+    if (!revisionAdvancedOnce(revision(ownerAfterDenials), revision(ownerAfterAccount))) {
+      throw new Error("Authenticated X account validation did not advance the owner revision exactly once");
+    }
+    if (containsXAccountCredentialField(ownerAccount.body)) {
+      throw new Error("Authenticated X account response exposed a credential-like field");
+    }
+    const rawAfterOwnerSource = await readFile(modelPath, "utf8");
+    const rawAfterOwner = JSON.parse(rawAfterOwnerSource);
+    const storedOwnerAccount = (rawAfterOwner.workspaces?.[ownerWorkspaceId]?.content?.connectedAccounts || [])
+      .find(account => account.platform === "x" && account.providerAccountId === SYNTHETIC_X_ACCOUNT_PROVIDER_ID);
+    if (storedOwnerAccount?.ownerUserId !== ownerUser.id
+      || storedOwnerAccount?.workspaceId !== ownerWorkspaceId
+      || storedOwnerAccount?.credential?.alg !== "aes-256-gcm"
+      || storedOwnerAccount?.connectionEvidence !== "X local regression token accepted without provider network validation.") {
+      throw new Error("Authenticated X account validation did not retain encrypted owner-scoped evidence");
+    }
+    assertXAccountPrivateMarkersAbsent(rawAfterOwnerSource, privateMarkers, "durable persistence");
+
+    const bytesBeforeForeign = await fileBytes();
+    const ownerRevisionBeforeForeign = revision(ownerAfterAccount);
+    const foreignRevisionBefore = revision(foreignAfterDenials);
+    const foreignAccount = await shopifyScenarioResponse(scenarioBaseUrl, "/api/x/account", foreignAuth);
+    const ownerAfterForeign = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const foreignAfterAccount = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    if (foreignAccount.status !== 200 || foreignAccount.body?.ok !== true
+      || foreignAccount.body?.configured !== true
+      || foreignAccount.body?.ready !== false
+      || foreignAccount.body?.verified !== false
+      || foreignAccount.body?.account !== null
+      || foreignAccount.body?.connectionState?.connected !== false
+      || foreignAccount.body?.connectionState?.reason !== "missing-token"
+      || JSON.stringify(foreignAccount.body).includes(ownerUser.id)
+      || JSON.stringify(foreignAccount.body).includes(ownerWorkspaceId)
+      || JSON.stringify(foreignAccount.body).includes(SYNTHETIC_X_ACCOUNT_PROVIDER_ID)
+      || containsXAccountCredentialField(foreignAccount.body)) {
+      throw new Error("X account fixture exposed owner provider state to a foreign workspace");
+    }
+    if (Buffer.compare(bytesBeforeForeign, await fileBytes()) !== 0
+      || !sameRevision(ownerRevisionBeforeForeign, revision(ownerAfterForeign))
+      || !sameRevision(foreignRevisionBefore, revision(foreignAfterAccount))) {
+      throw new Error("Foreign X account inspection changed durable workspace state");
+    }
+    const externalAttempts = await shopifyScenarioExternalAttempts(requestLogPath);
+    const providerMocks = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    if (externalAttempts.length !== 0 || providerMocks.length !== 0) {
+      throw new Error("X account fixture attempted provider traffic");
+    }
+    assertXAccountPrivateMarkersAbsent(
+      [anonymous.body, invalidSession.body, ownerAccount.body, foreignAccount.body, stdout, stderr, externalAttempts, providerMocks],
+      privateMarkers,
+      "HTTP, request logs, stdout, or stderr"
+    );
+    result = {
+      anonymousStatus: anonymous.status,
+      invalidSessionStatus: invalidSession.status,
+      denialStorageUnchanged: true,
+      denialRevisionsUnchanged: true,
+      ownerStatus: ownerAccount.status,
+      ownerReady: ownerAccount.body.ready,
+      ownerVerified: ownerAccount.body.verified,
+      ownerRevisionAdvancedExactlyOnce: true,
+      foreignStatus: foreignAccount.status,
+      foreignReady: foreignAccount.body.ready,
+      foreignWorkspaceIsolated: true,
+      encryptedCredentialRetained: true,
+      externalRequests: externalAttempts.length,
+      mockedProviderRequests: providerMocks.length
+    };
+  } catch (error) {
+    scenarioFailure = error;
+  } finally {
+    try {
+      await stopChild();
+    } catch (error) {
+      if (!scenarioFailure) scenarioFailure = error;
+    }
+  }
+
+  let postFailure = scenarioFailure;
+  let cleanupComplete = false;
+  try {
+    assertXAccountPrivateMarkersAbsent(`${stdout}\n${stderr}`, privateMarkers, "stdout or stderr");
+    if ((await shopifyScenarioExternalAttempts(requestLogPath)).length !== 0
+      || (await shopifyScenarioExternalAttempts(providerMockLogPath)).length !== 0) {
+      throw new Error("X account fixture recorded provider traffic");
+    }
+    if (startedChildren !== 2 || stoppedChildren !== 2) {
+      throw new Error("X account fixture did not verify both child-server shutdowns");
+    }
+    await assertNoWorkspaceLock("after shutdown");
+    if (JSON.stringify(Object.entries(process.env)) !== parentBefore) {
+      throw new Error("X account fixture mutated the parent process environment");
+    }
+  } catch (error) {
+    if (!postFailure) postFailure = error;
+  } finally {
+    await rm(scenarioDataDir, { recursive: true, force: true });
+    try {
+      await access(scenarioDataDir);
+    } catch (error) {
+      if (error?.code === "ENOENT") cleanupComplete = true;
+      else if (!postFailure) postFailure = error;
+    }
+  }
+  if (!cleanupComplete && !postFailure) postFailure = new Error("X account fixture cleanup was incomplete");
+  if (postFailure) throw postFailure;
+  return { ...result, cleanupComplete };
+}
+
+async function seedDiscordCommunityWorkspaceFixture({ dataDir, encryptionKey, user, workspaceId }) {
+  const seedSource = await readFile(new URL("./social-cues-model-seed.json", import.meta.url), "utf8");
+  const seed = JSON.parse(seedSource.replace(/^\uFEFF/, ""));
+  const owner = { ...user, id: String(user?.id || ""), workspaceId: String(workspaceId || "") };
+  if (!owner.id || !owner.workspaceId) throw new Error("Discord community fixture is missing its canonical owner identity");
+  const unavailable = () => { throw new Error("Discord community fixture must not invoke a browser merge callback"); };
+  const store = await openLocalWorkspacePersistence({ dataDir, seed, mergeClient: unavailable, recoverClient: unavailable });
+  try {
+    const sharedModel = await store.load();
+    const model = store.view(sharedModel, owner.workspaceId);
+    model.connectedAccounts = (model.connectedAccounts || []).filter(account => account.platform !== "discord");
+    model.connectedAccounts.push({
+      id: `acct-discord-p28-${owner.id}`,
+      platform: "discord",
+      name: "Discord",
+      displayName: "P28 Discord Owner",
+      handle: "@p28_discord_owner",
+      status: "connected",
+      connectedAt: new Date().toISOString(),
+      oauthProvider: "discord",
+      providerAccountId: SYNTHETIC_DISCORD_COMMUNITY_PROVIDER_ID,
+      credential: encryptedShopifyFixtureToken(SYNTHETIC_DISCORD_COMMUNITY_ACCESS_TOKEN, encryptionKey),
+      tokenType: "Bearer",
+      tokenExpiresAt: "2099-01-01T00:00:00.000Z",
+      scopes: [...DISCORD_COMMUNITY_SCOPES],
+      requestedScopes: [...DISCORD_COMMUNITY_SCOPES],
+      ownerUserId: owner.id,
+      workspaceId: owner.workspaceId
+    });
+    await store.save(model, owner);
+  } finally {
+    await store.close();
+  }
+}
+
+async function runDiscordCommunityBoundaryScenario() {
+  const parentBefore = JSON.stringify(Object.entries(process.env));
+  const scenarioPort = await availableLoopbackPort();
+  const scenarioBaseUrl = `http://127.0.0.1:${scenarioPort}`;
+  const scenarioDataDir = path.join(process.cwd(), ".tmp", `discord-community-p28-${Date.now()}`);
+  const modelPath = path.join(scenarioDataDir, "model.json");
+  const requestLogPath = path.join(scenarioDataDir, "external-http-requests.ndjson");
+  const providerMockLogPath = path.join(scenarioDataDir, "provider-mocks.ndjson");
+  const workspaceLockPath = path.join(scenarioDataDir, ".workspace-content.lock");
+  const ownerPassword = "p28-discord-owner-password-2026";
+  const foreignPassword = "p28-discord-foreign-password-2026";
+  const privateMarkers = [
+    SYNTHETIC_DISCORD_COMMUNITY_CLIENT_SECRET,
+    SYNTHETIC_DISCORD_PUBLIC_KEY,
+    SYNTHETIC_DISCORD_COMMUNITY_AUTH_SECRET,
+    SYNTHETIC_DISCORD_COMMUNITY_ENCRYPTION_KEY,
+    SYNTHETIC_DISCORD_COMMUNITY_ACCESS_TOKEN,
+    ownerPassword,
+    foreignPassword
+  ];
+  await mkdir(scenarioDataDir, { recursive: true });
+  const childEnv = discordScenarioEnv({
+    baseEnv: {
+      ...process.env,
+      ...Object.fromEntries(DISCORD_SCENARIO_ENV_NAMES.map((name, index) => [name, `p28-inherited-discord-${index}`])),
+      dIsCoRd_CliEnT_iD: "p28-inherited-mixed-case-id",
+      DiScOrD_CliEnT_sEcReT: "p28-inherited-mixed-case-secret"
+    },
+    overrides: {
+      PORT: String(scenarioPort),
+      HOST: "127.0.0.1",
+      AUTH_PROVIDER: "alpha-local",
+      SUPABASE_ENABLED: "false",
+      SENTRY_DSN: "",
+      PUBLIC_APP_URL: "https://socialcuesapp.com",
+      DISCORD_PUBLIC_APP_URL: "https://socialcuesapp.com",
+      DISCORD_CLIENT_ID: SYNTHETIC_DISCORD_COMMUNITY_APPLICATION_ID,
+      DISCORD_CLIENT_SECRET: SYNTHETIC_DISCORD_COMMUNITY_CLIENT_SECRET,
+      DISCORD_PUBLIC_KEY: SYNTHETIC_DISCORD_PUBLIC_KEY,
+      AUTH_SESSION_SECRET: SYNTHETIC_DISCORD_COMMUNITY_AUTH_SECRET,
+      OAUTH_TOKEN_ENCRYPTION_KEY: SYNTHETIC_DISCORD_COMMUNITY_ENCRYPTION_KEY,
+      SOCIAL_CUES_DATA_DIR: scenarioDataDir,
+      SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
+      SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath,
+      SOCIAL_CUES_TEST_MOCK_DISCORD_COMMUNITY: "true",
+      SOCIAL_CUES_TEST_DISCORD_ACCESS_TOKEN: SYNTHETIC_DISCORD_COMMUNITY_ACCESS_TOKEN,
+      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
+        { code: SYNTHETIC_DISCORD_COMMUNITY_OWNER_PROMO, label: "P28 Discord owner", days: 1, active: true },
+        { code: SYNTHETIC_DISCORD_COMMUNITY_FOREIGN_PROMO, label: "P28 Discord foreign", days: 1, active: true }
+      ])
+    }
+  });
+  const retainedDiscordNames = Object.keys(childEnv)
+    .filter(name => DISCORD_SCENARIO_ENV_KEYS.has(name.toLowerCase()))
+    .sort();
+  if (JSON.stringify(retainedDiscordNames) !== JSON.stringify([
+    "DISCORD_CLIENT_ID",
+    "DISCORD_CLIENT_SECRET",
+    "DISCORD_PUBLIC_APP_URL",
+    "DISCORD_PUBLIC_KEY"
+  ])) {
+    throw new Error("Discord community fixture retained inherited Discord configuration");
+  }
+
+  let stdout = "";
+  let stderr = "";
+  let child = null;
+  let startedChildren = 0;
+  let stoppedChildren = 0;
+  let result;
+  let scenarioFailure;
+  const auth = token => ({ headers: { Authorization: `Bearer ${token}` } });
+  const revision = response => response.body?.persistence?.revision || null;
+  const sameRevision = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  const revisionAdvancedOnce = (before, after) => Boolean(
+    before?.epoch
+    && before.epoch === after?.epoch
+    && BigInt(after.revision) === BigInt(before.revision) + 1n
+  );
+  const fileBytes = async () => readFile(modelPath);
+  const startChild = async label => {
+    child = spawn(process.execPath, [`--import=${pathToFileURL(externalRequestGuardPath).href}`, "server.mjs"], {
+      cwd: new URL(".", import.meta.url),
+      env: childEnv,
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
+    });
+    startedChildren += 1;
+    child.stdout.on("data", chunk => { stdout += chunk; });
+    child.stderr.on("data", chunk => { stderr += chunk; });
+    await waitForShopifyScenarioServer(child, scenarioBaseUrl, label);
+  };
+  const stopChild = async () => {
+    if (!child) return;
+    const current = child;
+    await stopShopifyScenarioServer(current);
+    if (current.exitCode === null && current.signalCode === null) {
+      throw new Error("Discord community fixture did not stop its child process");
+    }
+    stoppedChildren += 1;
+    child = null;
+  };
+  const assertNoWorkspaceLock = async label => {
+    try {
+      await access(workspaceLockPath);
+      throw new Error(`Discord community fixture retained the workspace lock ${label}`);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  };
+  const assertSanitizedAccessDenial = (label, response) => {
+    const keys = Object.keys(response.body || {}).sort();
+    const expectedKeys = ["accessRequired", "checkoutPath", "error", "ok", "portalPath"].sort();
+    if (response.status !== 402
+      || response.body?.ok !== false
+      || response.body?.accessRequired !== true
+      || response.body?.checkoutPath !== "/api/billing/checkout"
+      || response.body?.portalPath !== "/portal"
+      || response.body?.error !== "Buy Social Cues or use an active approved promo entitlement before using the app."
+      || JSON.stringify(keys) !== JSON.stringify(expectedKeys)
+      || response.location
+      || response.headers["set-cookie"]
+      || /workspace_writer_unclassified|commitStatus/iu.test(response.text)
+      || containsDiscordCommunityCredentialField(response.body)) {
+      throw new Error(`Discord community fixture did not return the exact sanitized access denial for ${label}`);
+    }
+  };
+
+  try {
+    await startChild("P28 Discord community workspace setup");
+    const signup = input => shopifyScenarioResponse(scenarioBaseUrl, "/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input)
+    });
+    const ownerSignup = await signup({
+      name: "P28 Discord Owner",
+      email: `p28-discord-owner-${Date.now()}@example.test`,
+      password: ownerPassword,
+      promoCode: SYNTHETIC_DISCORD_COMMUNITY_OWNER_PROMO,
+      workspaceName: "P28 Discord Owner Workspace"
+    });
+    const foreignSignup = await signup({
+      name: "P28 Discord Foreign",
+      email: `p28-discord-foreign-${Date.now()}@example.test`,
+      password: foreignPassword,
+      promoCode: SYNTHETIC_DISCORD_COMMUNITY_FOREIGN_PROMO,
+      workspaceName: "P28 Discord Foreign Workspace"
+    });
+    const ownerToken = ownerSignup.body?.session?.token || "";
+    const foreignToken = foreignSignup.body?.session?.token || "";
+    const ownerUser = ownerSignup.body?.user || ownerSignup.body?.session?.user || null;
+    const foreignUser = foreignSignup.body?.user || foreignSignup.body?.session?.user || null;
+    const ownerWorkspaceId = ownerSignup.body?.workspace?.id || "";
+    const foreignWorkspaceId = foreignSignup.body?.workspace?.id || "";
+    if (ownerSignup.status !== 200 || foreignSignup.status !== 200
+      || !ownerToken || !foreignToken || !ownerUser?.id || !foreignUser?.id
+      || !ownerWorkspaceId || !foreignWorkspaceId || ownerWorkspaceId === foreignWorkspaceId
+      || ownerSignup.body?.workspace?.ownerUserId !== ownerUser.id
+      || foreignSignup.body?.workspace?.ownerUserId !== foreignUser.id) {
+      throw new Error("Discord community fixture could not establish isolated entitled workspaces");
+    }
+    privateMarkers.push(ownerToken, foreignToken);
+
+    await stopChild();
+    await assertNoWorkspaceLock("before canonical seeding");
+    await seedDiscordCommunityWorkspaceFixture({
+      dataDir: scenarioDataDir,
+      encryptionKey: SYNTHETIC_DISCORD_COMMUNITY_ENCRYPTION_KEY,
+      user: ownerUser,
+      workspaceId: ownerWorkspaceId
+    });
+    await startChild("P28 Discord community authenticated boundary");
+
+    const ownerAuth = auth(ownerToken);
+    const foreignAuth = auth(foreignToken);
+    const ownerBeforeDenials = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const foreignBeforeDenials = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    const bytesBeforeDenials = await fileBytes();
+    const externalBeforeDenials = await shopifyScenarioExternalAttempts(requestLogPath);
+    const mocksBeforeDenials = await shopifyScenarioExternalAttempts(providerMockLogPath);
+
+    const anonymous = await shopifyScenarioResponse(scenarioBaseUrl, "/api/discord/community");
+    const invalidSession = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      "/api/discord/community",
+      auth("p28-invalid-discord-session")
+    );
+    assertSanitizedAccessDenial("anonymous request", anonymous);
+    assertSanitizedAccessDenial("invalid session", invalidSession);
+    const ownerAfterDenials = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const foreignAfterDenials = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    if (Buffer.compare(bytesBeforeDenials, await fileBytes()) !== 0
+      || !sameRevision(revision(ownerBeforeDenials), revision(ownerAfterDenials))
+      || !sameRevision(revision(foreignBeforeDenials), revision(foreignAfterDenials))) {
+      throw new Error("Discord community fixture changed storage or a workspace revision before authentication");
+    }
+    if (JSON.stringify(await shopifyScenarioExternalAttempts(requestLogPath)) !== JSON.stringify(externalBeforeDenials)
+      || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(mocksBeforeDenials)) {
+      throw new Error("Discord community fixture attempted provider traffic before authentication");
+    }
+
+    const bytesBeforeForeign = await fileBytes();
+    const foreignNoAccount = await shopifyScenarioResponse(scenarioBaseUrl, "/api/discord/community", foreignAuth);
+    const ownerAfterForeign = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const foreignAfterNoAccount = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    if (foreignNoAccount.status !== 409
+      || foreignNoAccount.body?.ok !== false
+      || foreignNoAccount.body?.error !== "Connect Discord OAuth before Social Cues can read community/server signal."
+      || foreignNoAccount.body?.connectRoute !== "/api/oauth/discord/start"
+      || JSON.stringify(foreignNoAccount.body?.requiredScopes) !== JSON.stringify(DISCORD_COMMUNITY_SCOPES)
+      || JSON.stringify(Object.keys(foreignNoAccount.body || {}).sort()) !== JSON.stringify(["connectRoute", "error", "ok", "requiredScopes"])
+      || JSON.stringify(foreignNoAccount.body).includes(ownerUser.id)
+      || JSON.stringify(foreignNoAccount.body).includes(ownerWorkspaceId)
+      || JSON.stringify(foreignNoAccount.body).includes(SYNTHETIC_DISCORD_COMMUNITY_PROVIDER_ID)
+      || containsDiscordCommunityCredentialField(foreignNoAccount.body)) {
+      throw new Error("Discord community fixture exposed owner account state to a foreign no-account workspace");
+    }
+    if (Buffer.compare(bytesBeforeForeign, await fileBytes()) !== 0
+      || !sameRevision(revision(ownerAfterDenials), revision(ownerAfterForeign))
+      || !sameRevision(revision(foreignAfterDenials), revision(foreignAfterNoAccount))) {
+      throw new Error("Foreign Discord community inspection changed durable workspace state");
+    }
+    if (JSON.stringify(await shopifyScenarioExternalAttempts(requestLogPath)) !== JSON.stringify(externalBeforeDenials)
+      || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(mocksBeforeDenials)) {
+      throw new Error("Foreign Discord community inspection attempted provider traffic");
+    }
+
+    const ownerCommunity = await shopifyScenarioResponse(scenarioBaseUrl, "/api/discord/community", ownerAuth);
+    const ownerAfterCommunity = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const foreignAfterCommunity = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    const expectedResponseKeys = [
+      "account", "allowedUse", "channels", "configuredTargets", "gates", "guilds",
+      "install", "member", "ok", "selectedTarget", "user", "warnings"
+    ].sort();
+    if (ownerCommunity.status !== 200
+      || ownerCommunity.body?.ok !== true
+      || JSON.stringify(Object.keys(ownerCommunity.body || {}).sort()) !== JSON.stringify(expectedResponseKeys)
+      || ownerCommunity.body?.account?.connected !== true
+      || ownerCommunity.body?.account?.tokenStored !== true
+      || ownerCommunity.body?.account?.ownerUserId !== ownerUser.id
+      || ownerCommunity.body?.account?.workspaceId !== ownerWorkspaceId
+      || ownerCommunity.body?.user?.id !== SYNTHETIC_DISCORD_COMMUNITY_PROVIDER_ID
+      || ownerCommunity.body?.guilds?.length !== 1
+      || ownerCommunity.body.guilds[0]?.id !== SYNTHETIC_DISCORD_COMMUNITY_GUILD_ID
+      || ownerCommunity.body.guilds[0]?.authority?.administrator !== true
+      || ownerCommunity.body?.channels?.length !== 0
+      || ownerCommunity.body?.member !== null
+      || ownerCommunity.body?.selectedTarget?.guildId !== null
+      || ownerCommunity.body?.selectedTarget?.channelId !== null
+      || ownerCommunity.body?.configuredTargets?.botReady !== false
+      || ownerCommunity.body?.gates?.memberScopeReady !== false
+      || ownerCommunity.body?.gates?.botReady !== false
+      || ownerCommunity.body?.gates?.channelReady !== false
+      || containsDiscordCommunityCredentialField(ownerCommunity.body)) {
+      throw new Error("Authenticated Discord community fixture changed the public owner response contract");
+    }
+    if (!revisionAdvancedOnce(revision(ownerAfterForeign), revision(ownerAfterCommunity))
+      || !sameRevision(revision(foreignAfterNoAccount), revision(foreignAfterCommunity))) {
+      throw new Error("Authenticated Discord community refresh did not advance only the owner revision exactly once");
+    }
+    const rawAfterOwnerSource = await readFile(modelPath, "utf8");
+    const rawAfterOwner = JSON.parse(rawAfterOwnerSource);
+    const storedOwnerAccount = (rawAfterOwner.workspaces?.[ownerWorkspaceId]?.content?.connectedAccounts || [])
+      .find(account => account.platform === "discord" && account.providerAccountId === SYNTHETIC_DISCORD_COMMUNITY_PROVIDER_ID);
+    if (storedOwnerAccount?.ownerUserId !== ownerUser.id
+      || storedOwnerAccount?.workspaceId !== ownerWorkspaceId
+      || storedOwnerAccount?.credential?.alg !== "aes-256-gcm"
+      || storedOwnerAccount?.profile?.user?.id !== SYNTHETIC_DISCORD_COMMUNITY_PROVIDER_ID
+      || storedOwnerAccount?.profile?.guildCount !== 1
+      || storedOwnerAccount?.profile?.guilds?.[0]?.id !== SYNTHETIC_DISCORD_COMMUNITY_GUILD_ID) {
+      throw new Error("Authenticated Discord community refresh did not retain encrypted owner-scoped evidence");
+    }
+    assertDiscordCommunityPrivateMarkersAbsent(rawAfterOwnerSource, privateMarkers, "durable persistence");
+
+    const externalAttempts = await shopifyScenarioExternalAttempts(requestLogPath);
+    const providerMocks = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const providerSequenceEvidence = {
+      externalRequests: externalAttempts.length,
+      mocks: providerMocks.map(entry => ({
+        kind: entry.kind,
+        method: entry.method,
+        bearerPresent: entry.bearerPresent,
+        accessTokenMatches: entry.accessTokenMatches,
+        boundedLimit: entry.boundedLimit,
+        countsRequested: entry.countsRequested
+      }))
+    };
+    if (externalAttempts.length !== 0
+      || JSON.stringify(providerMocks.map(entry => entry.kind)) !== JSON.stringify([
+        "discord-community-user-mock",
+        "discord-community-guilds-mock"
+      ])
+      || providerMocks.some(entry => entry.method !== "GET" || !entry.bearerPresent || !entry.accessTokenMatches)
+      || providerMocks[1]?.boundedLimit !== true
+      || providerMocks[1]?.countsRequested !== true) {
+      throw new Error(`Discord community fixture did not use the exact guarded provider sequence: ${JSON.stringify(providerSequenceEvidence)}`);
+    }
+    assertDiscordCommunityPrivateMarkersAbsent(
+      [anonymous.body, invalidSession.body, foreignNoAccount.body, ownerCommunity.body, stdout, stderr, externalAttempts, providerMocks],
+      privateMarkers,
+      "HTTP, request logs, mock evidence, stdout, or stderr"
+    );
+    result = {
+      anonymousStatus: anonymous.status,
+      invalidSessionStatus: invalidSession.status,
+      denialStorageUnchanged: true,
+      denialRevisionsUnchanged: true,
+      foreignStatus: foreignNoAccount.status,
+      foreignWorkspaceIsolated: true,
+      ownerStatus: ownerCommunity.status,
+      ownerPublicShapeSafe: true,
+      ownerRevisionAdvancedExactlyOnce: true,
+      encryptedCredentialRetained: true,
+      externalRequests: externalAttempts.length,
+      mockedProviderRequests: providerMocks.length
+    };
+  } catch (error) {
+    scenarioFailure = error;
+  } finally {
+    try {
+      await stopChild();
+    } catch (error) {
+      if (!scenarioFailure) scenarioFailure = error;
+    }
+  }
+
+  let postFailure = scenarioFailure;
+  let cleanupComplete = false;
+  try {
+    assertDiscordCommunityPrivateMarkersAbsent(`${stdout}\n${stderr}`, privateMarkers, "stdout or stderr");
+    if ((await shopifyScenarioExternalAttempts(requestLogPath)).length !== 0
+      || (await shopifyScenarioExternalAttempts(providerMockLogPath)).length !== 2) {
+      throw new Error("Discord community fixture recorded an unexpected provider request count");
+    }
+    if (startedChildren !== 2 || stoppedChildren !== 2) {
+      throw new Error("Discord community fixture did not verify both child-server shutdowns");
+    }
+    await assertNoWorkspaceLock("after shutdown");
+    if (JSON.stringify(Object.entries(process.env)) !== parentBefore) {
+      throw new Error("Discord community fixture mutated the parent process environment");
+    }
+  } catch (error) {
+    if (!postFailure) postFailure = error;
+  } finally {
+    await rm(scenarioDataDir, { recursive: true, force: true });
+    try {
+      await access(scenarioDataDir);
+    } catch (error) {
+      if (error?.code === "ENOENT") cleanupComplete = true;
+      else if (!postFailure) postFailure = error;
+    }
+  }
+  if (!cleanupComplete && !postFailure) postFailure = new Error("Discord community fixture cleanup was incomplete");
+  if (postFailure) throw postFailure;
+  return { ...result, cleanupComplete };
+}
+
+async function seedMetaAssetsWorkspaceFixture({ dataDir, encryptionKey, user, workspaceId }) {
+  const seedSource = await readFile(new URL("./social-cues-model-seed.json", import.meta.url), "utf8");
+  const seed = JSON.parse(seedSource.replace(/^\uFEFF/, ""));
+  const owner = { ...user, id: String(user?.id || ""), workspaceId: String(workspaceId || "") };
+  if (!owner.id || !owner.workspaceId) throw new Error("Meta assets fixture is missing its canonical owner identity");
+  const unavailable = () => { throw new Error("Meta assets fixture must not invoke a browser merge callback"); };
+  const store = await openLocalWorkspacePersistence({ dataDir, seed, mergeClient: unavailable, recoverClient: unavailable });
+  try {
+    const sharedModel = await store.load();
+    const model = store.view(sharedModel, owner.workspaceId);
+    model.connectedAccounts = Array.isArray(model.connectedAccounts) ? model.connectedAccounts : [];
+    model.connectedAccounts.push({
+      id: `acct-meta-assets-${owner.id}`,
+      platform: "meta",
+      name: "P22 Meta User",
+      handle: "P22 Meta User",
+      status: "asset returned",
+      connectedAt: null,
+      oauthProvider: "meta",
+      providerAccountId: SYNTHETIC_META_ASSETS_USER_ID,
+      credential: encryptedShopifyFixtureToken(SYNTHETIC_META_ASSETS_USER_TOKEN, encryptionKey),
+      tokenType: "bearer",
+      scopes: META_ASSETS_GRANTED_SCOPES,
+      loginNote: "Meta login is present, but token-backed asset status needs server repair.",
+      ownerUserId: owner.id,
+      workspaceId: owner.workspaceId
+    });
+    await store.save(model, owner);
+  } finally {
+    await store.close();
+  }
+}
+
+async function runMetaAssetsScenario() {
+  const parentBefore = JSON.stringify(Object.entries(process.env));
+  const scenarioPort = await availableLoopbackPort();
+  const scenarioBaseUrl = `http://127.0.0.1:${scenarioPort}`;
+  const scenarioDataDir = path.join(process.cwd(), ".tmp", `meta-assets-p22-${Date.now()}`);
+  const modelPath = path.join(scenarioDataDir, "model.json");
+  const requestLogPath = path.join(scenarioDataDir, "external-http-requests.ndjson");
+  const providerMockLogPath = path.join(scenarioDataDir, "provider-mocks.ndjson");
+  const workspaceLockPath = path.join(scenarioDataDir, ".workspace-content.lock");
+  const ownerPassword = "p22-meta-assets-owner-password";
+  const foreignPassword = "p22-meta-assets-foreign-password";
+  const privateMarkers = [
+    SYNTHETIC_META_ASSETS_APP_SECRET,
+    SYNTHETIC_META_ASSETS_USER_TOKEN,
+    SYNTHETIC_META_ASSETS_PAGE_TOKEN,
+    SYNTHETIC_META_ASSETS_AUTH_SECRET,
+    SYNTHETIC_META_ASSETS_ENCRYPTION_KEY,
+    ownerPassword,
+    foreignPassword
+  ];
+  await mkdir(scenarioDataDir, { recursive: true });
+  const inheritedMetaCredentials = Object.fromEntries(
+    META_START_CREDENTIAL_ENV_NAMES.map((name, index) => [name, `p22-inherited-meta-${index}`])
+  );
+  const childEnv = metaStartScenarioEnv({
+    baseEnv: {
+      ...process.env,
+      ...inheritedMetaCredentials,
+      MeTa_App_Id: "p22-inherited-mixed-case-id",
+      mEtA_aPp_SeCrEt: "p22-inherited-mixed-case-secret"
+    },
+    overrides: {
+      PORT: String(scenarioPort),
+      HOST: "127.0.0.1",
+      AUTH_PROVIDER: "alpha-local",
+      SUPABASE_ENABLED: "false",
+      SENTRY_DSN: "",
+      PUBLIC_APP_URL: "https://socialcuesapp.com",
+      META_PUBLIC_APP_URL: "https://socialcuesapp.com",
+      META_APP_ID: SYNTHETIC_META_ASSETS_APP_ID,
+      META_APP_SECRET: SYNTHETIC_META_ASSETS_APP_SECRET,
+      AUTH_SESSION_SECRET: SYNTHETIC_META_ASSETS_AUTH_SECRET,
+      OAUTH_TOKEN_ENCRYPTION_KEY: SYNTHETIC_META_ASSETS_ENCRYPTION_KEY,
+      SOCIAL_CUES_DATA_DIR: scenarioDataDir,
+      SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
+      SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath,
+      SOCIAL_CUES_TEST_MOCK_META_ASSETS: "true",
+      SOCIAL_CUES_TEST_META_USER_ID: SYNTHETIC_META_ASSETS_USER_ID,
+      SOCIAL_CUES_TEST_META_USER_TOKEN: SYNTHETIC_META_ASSETS_USER_TOKEN,
+      SOCIAL_CUES_TEST_META_PAGE_ID: SYNTHETIC_META_ASSETS_PAGE_ID,
+      SOCIAL_CUES_TEST_META_PAGE_TOKEN: SYNTHETIC_META_ASSETS_PAGE_TOKEN,
+      SOCIAL_CUES_TEST_META_INSTAGRAM_ID: SYNTHETIC_META_ASSETS_INSTAGRAM_ID,
+      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
+        { code: SYNTHETIC_META_ASSETS_OWNER_PROMO, label: "P22 Meta assets owner", days: 1, active: true },
+        { code: SYNTHETIC_META_ASSETS_FOREIGN_PROMO, label: "P22 Meta assets foreign", days: 1, active: true }
+      ])
+    }
+  });
+  const retainedCredentialNames = Object.keys(childEnv)
+    .filter(name => META_START_CREDENTIAL_ENV_KEYS.has(name.toLowerCase()))
+    .sort();
+  if (JSON.stringify(retainedCredentialNames) !== JSON.stringify(["META_APP_ID", "META_APP_SECRET"])) {
+    throw new Error("Meta assets fixture retained inherited application credentials");
+  }
+
+  let stdout = "";
+  let stderr = "";
+  let child = null;
+  let startedChildren = 0;
+  let stoppedChildren = 0;
+  let result;
+  let scenarioFailure;
+  const fileBytes = async () => {
+    try {
+      return await readFile(modelPath);
+    } catch (error) {
+      if (error?.code === "ENOENT") return Buffer.alloc(0);
+      throw error;
+    }
+  };
+  const readDocument = async () => JSON.parse(await readFile(modelPath, "utf8"));
+  const contentHash = value => createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
+  const receiptKeys = (document, workspaceId) => Object.keys(document.workspaces?.[workspaceId]?.receipts || {}).sort();
+  const revision = response => response.body?.persistence?.revision || null;
+  const auth = token => ({ headers: { Authorization: `Bearer ${token}` } });
+  const startChild = async label => {
+    child = spawn(process.execPath, [`--import=${pathToFileURL(externalRequestGuardPath).href}`, "server.mjs"], {
+      cwd: new URL(".", import.meta.url),
+      env: childEnv,
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
+    });
+    startedChildren += 1;
+    child.stdout.on("data", chunk => { stdout += chunk; });
+    child.stderr.on("data", chunk => { stderr += chunk; });
+    await waitForShopifyScenarioServer(child, scenarioBaseUrl, label);
+  };
+  const stopChild = async () => {
+    if (!child) return;
+    const current = child;
+    await stopShopifyScenarioServer(current);
+    if (current.exitCode === null && current.signalCode === null) {
+      throw new Error("Meta assets fixture did not stop its child process");
+    }
+    stoppedChildren += 1;
+    child = null;
+  };
+  const assertSanitizedDenial = (label, response) => {
+    if (response.status !== 401
+      || response.body?.ok !== false
+      || response.body?.error !== "Sign in to Social Cues before using this API."
+      || Object.keys(response.body || {}).sort().join(",") !== "error,ok"
+      || response.location
+      || /workspace_writer_unclassified|commitStatus/iu.test(response.text)) {
+      throw new Error(`Meta assets fixture did not return an exact sanitized denial for ${label}`);
+    }
+  };
+
+  try {
+    await startChild("P22 Meta assets pre-authentication");
+    const bytesBeforeStatic = await fileBytes();
+    const externalBeforeStatic = await shopifyScenarioExternalAttempts(requestLogPath);
+    const mocksBeforeStatic = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const useCases = await shopifyScenarioResponse(scenarioBaseUrl, "/api/meta/use-cases");
+    const capabilities = await shopifyScenarioResponse(scenarioBaseUrl, "/api/meta/capabilities");
+    if (useCases.status !== 200 || useCases.body?.ok !== true || !Array.isArray(useCases.body?.useCases)
+      || capabilities.status !== 200 || capabilities.body?.ok !== true || !Array.isArray(capabilities.body?.capabilities)) {
+      throw new Error("Meta assets fixture changed neighboring anonymous Meta capability routes");
+    }
+    if (Buffer.compare(await fileBytes(), bytesBeforeStatic) !== 0
+      || JSON.stringify(await shopifyScenarioExternalAttempts(requestLogPath)) !== JSON.stringify(externalBeforeStatic)
+      || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(mocksBeforeStatic)) {
+      throw new Error("Anonymous Meta capability discovery mutated state or attempted provider traffic");
+    }
+
+    const bytesBeforeAnonymous = await fileBytes();
+    const externalBeforeAnonymous = await shopifyScenarioExternalAttempts(requestLogPath);
+    const mocksBeforeAnonymous = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const anonymous = await shopifyScenarioResponse(scenarioBaseUrl, "/api/meta/assets");
+    const invalidSession = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      "/api/meta/assets",
+      auth("p22-invalid-session")
+    );
+    assertSanitizedDenial("anonymous request", anonymous);
+    assertSanitizedDenial("invalid session", invalidSession);
+    if (Buffer.compare(await fileBytes(), bytesBeforeAnonymous) !== 0) {
+      throw new Error("Unauthenticated Meta assets denial changed durable model bytes");
+    }
+    if (JSON.stringify(await shopifyScenarioExternalAttempts(requestLogPath)) !== JSON.stringify(externalBeforeAnonymous)
+      || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(mocksBeforeAnonymous)) {
+      throw new Error("Unauthenticated Meta assets denial attempted provider traffic");
+    }
+
+    const signup = async ({ name, email, password, promoCode, workspaceName }) => shopifyScenarioResponse(
+      scenarioBaseUrl,
+      "/api/auth/signup",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, password, promoCode, workspaceName })
+      }
+    );
+    const ownerSignup = await signup({
+      name: "P22 Meta Assets Owner",
+      email: `p22-meta-owner-${Date.now()}@example.test`,
+      password: ownerPassword,
+      promoCode: SYNTHETIC_META_ASSETS_OWNER_PROMO,
+      workspaceName: "P22 Meta Assets Workspace"
+    });
+    const foreignSignup = await signup({
+      name: "P22 Meta Assets Foreign",
+      email: `p22-meta-foreign-${Date.now()}@example.test`,
+      password: foreignPassword,
+      promoCode: SYNTHETIC_META_ASSETS_FOREIGN_PROMO,
+      workspaceName: "P22 Foreign Workspace"
+    });
+    const ownerToken = ownerSignup.body?.session?.token || "";
+    const ownerUser = ownerSignup.body?.user || null;
+    const ownerWorkspaceId = ownerSignup.body?.workspace?.id || "";
+    const foreignToken = foreignSignup.body?.session?.token || "";
+    const foreignUser = foreignSignup.body?.user || null;
+    const foreignWorkspaceId = foreignSignup.body?.workspace?.id || "";
+    privateMarkers.push(ownerToken, foreignToken);
+    if (ownerSignup.status !== 200 || !ownerToken || !ownerUser?.id || !ownerWorkspaceId
+      || ownerSignup.body.workspace?.ownerUserId !== ownerUser.id
+      || foreignSignup.status !== 200 || !foreignToken || !foreignUser?.id || !foreignWorkspaceId
+      || foreignSignup.body.workspace?.ownerUserId !== foreignUser.id
+      || ownerWorkspaceId === foreignWorkspaceId) {
+      throw new Error("Meta assets fixture could not establish two distinct owner workspaces");
+    }
+
+    await stopChild();
+    await seedMetaAssetsWorkspaceFixture({
+      dataDir: scenarioDataDir,
+      encryptionKey: SYNTHETIC_META_ASSETS_ENCRYPTION_KEY,
+      user: ownerUser,
+      workspaceId: ownerWorkspaceId
+    });
+    await startChild("P22 Meta assets authenticated repair");
+
+    const ownerAuth = auth(ownerToken);
+    const foreignAuth = auth(foreignToken);
+    const ownerModelBefore = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const ownerRevisionBefore = revision(ownerModelBefore);
+    const rawBeforeOwner = await readDocument();
+    const ownerReceiptsBefore = receiptKeys(rawBeforeOwner, ownerWorkspaceId);
+    const providerMocksBeforeOwner = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const externalBeforeOwner = await shopifyScenarioExternalAttempts(requestLogPath);
+    const ownerAssets = await shopifyScenarioResponse(scenarioBaseUrl, "/api/meta/assets", ownerAuth);
+    const ownerModelAfter = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const ownerRevisionAfter = revision(ownerModelAfter);
+    const rawAfterOwner = await readDocument();
+    const providerMocksAfterOwner = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const ownerMockDelta = providerMocksAfterOwner.slice(providerMocksBeforeOwner.length);
+    const expectedMockKinds = [
+      "meta-debug-token-mock",
+      "meta-permissions-mock",
+      "meta-accounts-mock",
+      "meta-businesses-mock"
+    ];
+    if (ownerAssets.status !== 200 || ownerAssets.body?.ok !== true
+      || !Array.isArray(ownerAssets.body.accounts) || ownerAssets.body.accounts.length !== 3
+      || !Array.isArray(ownerAssets.body.capabilities) || ownerAssets.body.capabilities.length < 35
+      || ownerAssets.body.metaConnection?.pageCount !== 1
+      || ownerAssets.body.metaConnection?.instagramCount !== 1
+      || ownerAssets.body.metaHealth?.tokenHealth?.valid !== true
+      || ownerAssets.body.metaHealth?.tokenHealth?.appIdMatches !== true
+      || ownerAssets.body.selectedProviderAccounts?.facebook !== SYNTHETIC_META_ASSETS_PAGE_ID
+      || ownerAssets.body.selectedProviderAccounts?.instagram !== SYNTHETIC_META_ASSETS_INSTAGRAM_ID
+      || !ownerAssets.body.capabilities.some(item => item.id === "facebook_pages_publish" && item.ready === true)) {
+      throw new Error(`Authenticated Meta assets fixture did not return repaired owner-scoped assets and capability truth: ${JSON.stringify({
+        status: ownerAssets.status,
+        ok: ownerAssets.body?.ok,
+        accountCount: ownerAssets.body?.accounts?.length ?? null,
+        capabilityCount: ownerAssets.body?.capabilities?.length ?? null,
+        pageCount: ownerAssets.body?.metaConnection?.pageCount ?? null,
+        instagramCount: ownerAssets.body?.metaConnection?.instagramCount ?? null,
+        tokenValid: ownerAssets.body?.metaHealth?.tokenHealth?.valid ?? null,
+        appIdMatches: ownerAssets.body?.metaHealth?.tokenHealth?.appIdMatches ?? null,
+        facebookSelected: ownerAssets.body?.selectedProviderAccounts?.facebook === SYNTHETIC_META_ASSETS_PAGE_ID,
+        instagramSelected: ownerAssets.body?.selectedProviderAccounts?.instagram === SYNTHETIC_META_ASSETS_INSTAGRAM_ID,
+        facebookPublishReady: ownerAssets.body?.capabilities?.some(item => item.id === "facebook_pages_publish" && item.ready === true) === true,
+        ownerModelAccountCount: ownerModelAfter.body?.connectedAccounts?.length ?? null,
+        ownerRawAccountCount: rawAfterOwner.workspaces?.[ownerWorkspaceId]?.content?.connectedAccounts?.length ?? null,
+        ownerRawMetaAccounts: (rawAfterOwner.workspaces?.[ownerWorkspaceId]?.content?.connectedAccounts || [])
+          .filter(account => account.oauthProvider === "meta" || ["meta", "facebook", "instagram"].includes(account.platform))
+          .map(account => ({
+            platform: account.platform,
+            status: account.status,
+            ownerMatches: account.ownerUserId === ownerUser.id,
+            workspaceMatches: account.workspaceId === ownerWorkspaceId,
+            providerAccountIdPresent: Boolean(account.providerAccountId),
+            credentialPresent: Boolean(account.credential)
+          })),
+        providerMockKinds: ownerMockDelta.map(entry => entry.kind),
+        providerMockChecksPassed: ownerMockDelta[0]?.inputTokenMatches === true
+          && ownerMockDelta[0]?.appAccessTokenMatches === true
+          && ownerMockDelta[1]?.userTokenMatches === true
+          && ownerMockDelta[2]?.userTokenMatches === true
+          && ownerMockDelta[2]?.fieldsPresent === true
+          && ownerMockDelta[3]?.userTokenMatches === true
+          && ownerMockDelta[3]?.fieldsPresent === true
+      })}`);
+    }
+    if (!metaAssetsPublicShapeIsSafe(ownerAssets.body)
+      || ownerAssets.body.accounts.some(account => Object.hasOwn(account, "ownerUserId") || Object.hasOwn(account, "workspaceId"))) {
+      throw new Error("Authenticated Meta assets response exposed a private account field");
+    }
+    if (!ownerRevisionBefore || !ownerRevisionAfter
+      || ownerRevisionBefore.epoch !== ownerRevisionAfter.epoch
+      || BigInt(ownerRevisionAfter.revision) !== BigInt(ownerRevisionBefore.revision) + 1n) {
+      throw new Error("Authenticated Meta assets repair did not advance the owner workspace revision exactly once");
+    }
+    if (JSON.stringify(receiptKeys(rawAfterOwner, ownerWorkspaceId)) !== JSON.stringify(ownerReceiptsBefore)) {
+      throw new Error("Authenticated Meta assets server repair minted a client operation receipt");
+    }
+    if (JSON.stringify(ownerMockDelta.map(entry => entry.kind)) !== JSON.stringify(expectedMockKinds)
+      || ownerMockDelta.some(entry => entry.method !== "GET")
+      || ownerMockDelta[0]?.inputTokenMatches !== true
+      || ownerMockDelta[0]?.appAccessTokenMatches !== true
+      || ownerMockDelta[1]?.userTokenMatches !== true
+      || ownerMockDelta[2]?.userTokenMatches !== true
+      || ownerMockDelta[2]?.fieldsPresent !== true
+      || ownerMockDelta[3]?.userTokenMatches !== true
+      || ownerMockDelta[3]?.fieldsPresent !== true) {
+      throw new Error("Authenticated Meta assets repair did not use the exact guarded Graph fixture sequence");
+    }
+    if (JSON.stringify(await shopifyScenarioExternalAttempts(requestLogPath)) !== JSON.stringify(externalBeforeOwner)) {
+      throw new Error("Authenticated Meta assets repair attempted an unguarded external provider request");
+    }
+    const rawOwnerAccounts = (rawAfterOwner.workspaces?.[ownerWorkspaceId]?.content?.connectedAccounts || [])
+      .filter(account => account.oauthProvider === "meta" || ["meta", "facebook", "instagram"].includes(account.platform));
+    if (rawOwnerAccounts.length !== 3
+      || rawOwnerAccounts.some(account => account.ownerUserId !== ownerUser.id || account.workspaceId !== ownerWorkspaceId)
+      || !rawOwnerAccounts.every(account => account.status === "connected" && account.credential)) {
+      throw new Error("Meta assets repair did not durably bind all repaired assets to the authenticated owner workspace");
+    }
+    const rawAfterOwnerSource = JSON.stringify(rawAfterOwner);
+    assertMetaAssetsPrivateMarkersAbsent(rawAfterOwnerSource, privateMarkers, "durable persistence");
+
+    const foreignModelBefore = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    const foreignRevisionBefore = revision(foreignModelBefore);
+    const rawBeforeForeign = await readDocument();
+    const bytesBeforeForeign = await fileBytes();
+    const ownerContentHashBeforeForeign = contentHash(rawBeforeForeign.workspaces?.[ownerWorkspaceId]?.content);
+    const allReceiptsBeforeForeign = Object.fromEntries(
+      Object.entries(rawBeforeForeign.workspaces || {}).map(([workspaceId, entry]) => [workspaceId, Object.keys(entry.receipts || {}).sort()])
+    );
+    const providerMocksBeforeForeign = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const externalBeforeForeign = await shopifyScenarioExternalAttempts(requestLogPath);
+    const foreignAssets = await shopifyScenarioResponse(scenarioBaseUrl, "/api/meta/assets", foreignAuth);
+    const foreignModelAfter = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    const rawAfterForeign = await readDocument();
+    const foreignRevisionAfter = revision(foreignModelAfter);
+    if (foreignAssets.status !== 200 || foreignAssets.body?.ok !== true
+      || foreignAssets.body.accounts?.length !== 0
+      || foreignAssets.body.metaConnection !== null
+      || foreignAssets.body.metaHealth?.hasMetaUserToken !== false
+      || foreignAssets.body.diagnostic?.snapshot?.reason !== "META_TOKEN_NOT_VALID"
+      || foreignAssets.body.selectedProviderAccounts?.facebook !== null
+      || foreignAssets.body.selectedProviderAccounts?.instagram !== null
+      || !Array.isArray(foreignAssets.body.capabilities)
+      || foreignAssets.body.capabilities.some(item => item.connectedAccountCount !== 0)
+      || !ownerAssets.body.capabilities.some(item => item.connectedAccountCount > 0)) {
+      throw new Error("Meta assets fixture exposed owner provider truth to a foreign workspace");
+    }
+    if (!metaAssetsPublicShapeIsSafe(foreignAssets.body)) {
+      throw new Error("Foreign Meta assets response exposed a private field");
+    }
+    if (JSON.stringify(foreignRevisionAfter) !== JSON.stringify(foreignRevisionBefore)
+      || Buffer.compare(await fileBytes(), bytesBeforeForeign) !== 0
+      || contentHash(rawAfterForeign.workspaces?.[ownerWorkspaceId]?.content) !== ownerContentHashBeforeForeign
+      || JSON.stringify(Object.fromEntries(
+        Object.entries(rawAfterForeign.workspaces || {}).map(([workspaceId, entry]) => [workspaceId, Object.keys(entry.receipts || {}).sort()])
+      )) !== JSON.stringify(allReceiptsBeforeForeign)) {
+      throw new Error("Foreign Meta assets inspection changed durable workspace state or receipts");
+    }
+    if (JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(providerMocksBeforeForeign)
+      || JSON.stringify(await shopifyScenarioExternalAttempts(requestLogPath)) !== JSON.stringify(externalBeforeForeign)) {
+      throw new Error("Foreign Meta assets inspection attempted provider traffic");
+    }
+    assertMetaAssetsPrivateMarkersAbsent(
+      [anonymous.body, invalidSession.body, ownerAssets.body, foreignAssets.body, providerMocksAfterOwner],
+      privateMarkers,
+      "HTTP or provider-mock evidence"
+    );
+    result = {
+      anonymousStatus: anonymous.status,
+      invalidSessionStatus: invalidSession.status,
+      staticRoutesRemainAnonymous: true,
+      ownerStatus: ownerAssets.status,
+      ownerAccountCount: ownerAssets.body.accounts.length,
+      ownerCapabilityCount: ownerAssets.body.capabilities.length,
+      ownerRevisionAdvancedExactlyOnce: true,
+      clientReceiptsUnchanged: true,
+      foreignStatus: foreignAssets.status,
+      foreignAccountCount: foreignAssets.body.accounts.length,
+      foreignRevisionUnchanged: true,
+      foreignWorkspaceIsolated: true,
+      providerMockKinds: expectedMockKinds,
+      externalRequests: 0
+    };
+  } catch (error) {
+    scenarioFailure = error;
+  } finally {
+    try {
+      await stopChild();
+    } catch (error) {
+      if (!scenarioFailure) scenarioFailure = error;
+    }
+  }
+
+  let postFailure = scenarioFailure;
+  let cleanupComplete = false;
+  try {
+    assertMetaAssetsPrivateMarkersAbsent(`${stdout}\n${stderr}`, privateMarkers, "stdout or stderr");
+    const externalAttempts = await shopifyScenarioExternalAttempts(requestLogPath);
+    if (externalAttempts.length !== 0) throw new Error("Meta assets fixture recorded an external request");
+    const providerMocks = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    if (JSON.stringify(providerMocks.map(entry => entry.kind)) !== JSON.stringify([
+      "meta-debug-token-mock",
+      "meta-permissions-mock",
+      "meta-accounts-mock",
+      "meta-businesses-mock"
+    ])) throw new Error("Meta assets fixture recorded an unexpected provider mock sequence");
+    if (startedChildren !== 2 || stoppedChildren !== 2) {
+      throw new Error("Meta assets fixture did not verify both child-server shutdowns");
+    }
+    try {
+      await access(workspaceLockPath);
+      throw new Error("Meta assets fixture retained the workspace lock after shutdown");
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    if (JSON.stringify(Object.entries(process.env)) !== parentBefore) {
+      throw new Error("Meta assets fixture mutated the parent process environment");
+    }
+  } catch (error) {
+    if (!postFailure) postFailure = error;
+  } finally {
+    await rm(scenarioDataDir, { recursive: true, force: true });
+    try {
+      await access(scenarioDataDir);
+    } catch (error) {
+      if (error?.code === "ENOENT") cleanupComplete = true;
+      else if (!postFailure) postFailure = error;
+    }
+  }
+  if (!cleanupComplete && !postFailure) postFailure = new Error("Meta assets fixture cleanup was incomplete");
+  if (postFailure) throw postFailure;
+  return { ...result, cleanupComplete };
+}
+
+async function runMetaCallbackRejectionScenario() {
+  const parentBefore = JSON.stringify(Object.entries(process.env));
+  const scenarioPort = await availableLoopbackPort();
+  const scenarioBaseUrl = `http://127.0.0.1:${scenarioPort}`;
+  const scenarioDataDir = path.join(process.cwd(), ".tmp", `meta-callback-p23-${Date.now()}`);
+  const modelPath = path.join(scenarioDataDir, "model.json");
+  const requestLogPath = path.join(scenarioDataDir, "external-http-requests.ndjson");
+  const providerMockLogPath = path.join(scenarioDataDir, "provider-mocks.ndjson");
+  const workspaceLockPath = path.join(scenarioDataDir, ".workspace-content.lock");
+  const ownerPassword = "p23-meta-callback-owner-password";
+  const foreignPassword = "p23-meta-callback-foreign-password";
+  const privateMarkers = [
+    SYNTHETIC_META_CALLBACK_APP_SECRET,
+    SYNTHETIC_META_CALLBACK_AUTH_SECRET,
+    SYNTHETIC_META_CALLBACK_ENCRYPTION_KEY,
+    SYNTHETIC_META_CALLBACK_FAILURE_CODE,
+    ownerPassword,
+    foreignPassword
+  ];
+  await mkdir(scenarioDataDir, { recursive: true });
+  const childEnv = metaStartScenarioEnv({
+    overrides: {
+      PORT: String(scenarioPort),
+      HOST: "127.0.0.1",
+      AUTH_PROVIDER: "alpha-local",
+      SUPABASE_ENABLED: "false",
+      SENTRY_DSN: "",
+      PUBLIC_APP_URL: "https://socialcuesapp.com",
+      META_PUBLIC_APP_URL: "https://socialcuesapp.com",
+      META_APP_ID: SYNTHETIC_META_CALLBACK_APP_ID,
+      META_APP_SECRET: SYNTHETIC_META_CALLBACK_APP_SECRET,
+      AUTH_SESSION_SECRET: SYNTHETIC_META_CALLBACK_AUTH_SECRET,
+      OAUTH_TOKEN_ENCRYPTION_KEY: SYNTHETIC_META_CALLBACK_ENCRYPTION_KEY,
+      SOCIAL_CUES_DATA_DIR: scenarioDataDir,
+      SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
+      SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath,
+      SOCIAL_CUES_TEST_MOCK_META_CALLBACK: "true",
+      SOCIAL_CUES_TEST_MOCK_META_ASSETS: "",
+      SOCIAL_CUES_TEST_META_FAILURE_CODE: SYNTHETIC_META_CALLBACK_FAILURE_CODE,
+      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
+        { code: SYNTHETIC_META_CALLBACK_OWNER_PROMO, label: "P23 Meta callback owner", days: 1, active: true },
+        { code: SYNTHETIC_META_CALLBACK_FOREIGN_PROMO, label: "P23 Meta callback foreign", days: 1, active: true }
+      ])
+    }
+  });
+  const retainedCredentialNames = Object.keys(childEnv)
+    .filter(name => META_START_CREDENTIAL_ENV_KEYS.has(name.toLowerCase()))
+    .sort();
+  if (JSON.stringify(retainedCredentialNames) !== JSON.stringify(["META_APP_ID", "META_APP_SECRET"])) {
+    throw new Error("Meta callback fixture retained inherited application credentials");
+  }
+
+  let stdout = "";
+  let stderr = "";
+  let result;
+  let scenarioFailure;
+  let childStopped = false;
+  const child = spawn(process.execPath, [`--import=${pathToFileURL(externalRequestGuardPath).href}`, "server.mjs"], {
+    cwd: new URL(".", import.meta.url),
+    env: childEnv,
+    stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  child.stdout.on("data", chunk => { stdout += chunk; });
+  child.stderr.on("data", chunk => { stderr += chunk; });
+  const auth = token => ({ headers: { Authorization: `Bearer ${token}` } });
+  const durableSnapshot = async () => {
+    const bytes = await readFile(modelPath);
+    const document = JSON.parse(bytes.toString("utf8"));
+    const revisions = Object.fromEntries(Object.entries(document.workspaces || {}).map(([workspaceId, entry]) => [
+      workspaceId,
+      { epoch: entry.epoch, revision: entry.revision }
+    ]));
+    const receipts = Object.fromEntries(Object.entries(document.workspaces || {}).map(([workspaceId, entry]) => [
+      workspaceId,
+      Object.keys(entry.receipts || {}).sort()
+    ]));
+    return { bytes, document, revisions, receipts };
+  };
+  const assertDurableUnchanged = async (before, label) => {
+    const after = await durableSnapshot();
+    if (Buffer.compare(after.bytes, before.bytes) !== 0) {
+      throw new Error(`Meta callback rejection changed durable bytes for ${label}`);
+    }
+    if (JSON.stringify(after.revisions) !== JSON.stringify(before.revisions)) {
+      throw new Error(`Meta callback rejection changed a workspace revision for ${label}`);
+    }
+    if (JSON.stringify(after.receipts) !== JSON.stringify(before.receipts)) {
+      throw new Error(`Meta callback rejection changed a client receipt for ${label}`);
+    }
+  };
+  const trafficSnapshot = async () => ({
+    providerMocks: await shopifyScenarioExternalAttempts(providerMockLogPath),
+    external: await shopifyScenarioExternalAttempts(requestLogPath)
+  });
+  const assertTrafficUnchanged = async (before, label) => {
+    const after = await trafficSnapshot();
+    if (JSON.stringify(after) !== JSON.stringify(before)) {
+      throw new Error(`Meta callback rejection attempted provider traffic for ${label}`);
+    }
+  };
+  const rejectionResults = [];
+  const assertRejected = async (label, route, options, expectedError) => {
+    const durableBefore = await durableSnapshot();
+    const trafficBefore = await trafficSnapshot();
+    const response = await shopifyScenarioResponse(scenarioBaseUrl, route, options);
+    if (response.status !== 400
+      || !response.text.includes("<h1>Meta OAuth state rejected</h1>")
+      || !response.text.includes(`<p>${expectedError}</p>`)
+      || !String(response.headers["content-type"] || "").startsWith("text/html")
+      || response.headers["set-cookie"]
+      || response.location
+      || /workspace_writer_unclassified|commitStatus/iu.test(response.text)) {
+      throw new Error(`Meta callback fixture did not return the exact sanitized 400 for ${label}: ${response.status}`);
+    }
+    assertMetaCallbackPrivateMarkersAbsent(response.text, privateMarkers, `${label} response`);
+    await assertDurableUnchanged(durableBefore, label);
+    await assertTrafficUnchanged(trafficBefore, label);
+    rejectionResults.push({ label, status: response.status });
+    return response;
+  };
+
+  try {
+    await waitForShopifyScenarioServer(child, scenarioBaseUrl, "P23 Meta callback");
+    const signup = async ({ name, promoCode, password, workspaceName }) => shopifyScenarioResponse(
+      scenarioBaseUrl,
+      "/api/auth/signup",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          email: `p23-meta-${name.toLowerCase()}-${Date.now()}-${randomBytes(4).toString("hex")}@example.test`,
+          password,
+          promoCode,
+          workspaceName
+        })
+      }
+    );
+    const ownerSignup = await signup({
+      name: "Owner",
+      password: ownerPassword,
+      promoCode: SYNTHETIC_META_CALLBACK_OWNER_PROMO,
+      workspaceName: "P23 Meta Owner Workspace"
+    });
+    const foreignSignup = await signup({
+      name: "Foreign",
+      password: foreignPassword,
+      promoCode: SYNTHETIC_META_CALLBACK_FOREIGN_PROMO,
+      workspaceName: "P23 Meta Foreign Workspace"
+    });
+    const ownerToken = ownerSignup.body?.session?.token || "";
+    const ownerUserId = ownerSignup.body?.user?.id || "";
+    const ownerWorkspaceId = ownerSignup.body?.workspace?.id || "";
+    const foreignToken = foreignSignup.body?.session?.token || "";
+    const foreignUserId = foreignSignup.body?.user?.id || "";
+    const foreignWorkspaceId = foreignSignup.body?.workspace?.id || "";
+    privateMarkers.push(ownerToken, foreignToken);
+    if (ownerSignup.status !== 200 || !ownerToken || !ownerUserId || !ownerWorkspaceId
+      || foreignSignup.status !== 200 || !foreignToken || !foreignUserId || !foreignWorkspaceId
+      || ownerWorkspaceId === foreignWorkspaceId) {
+      throw new Error("Meta callback fixture could not establish two distinct owner workspaces");
+    }
+    const ownerAuth = auth(ownerToken);
+    const foreignAuth = auth(foreignToken);
+    const start = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      "/api/oauth/meta/start?platform=facebook",
+      ownerAuth
+    );
+    if (start.status !== 302 || !start.location) throw new Error("Meta callback fixture could not issue an owner-bound state");
+    const providerRedirect = new URL(start.location);
+    const ownerState = providerRedirect.searchParams.get("state") || "";
+    if (!ownerState) throw new Error("Meta callback fixture start omitted state");
+    const publicModel = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    if (publicModel.status !== 200
+      || /"oauthStates"|"oauthEvents"/u.test(JSON.stringify(publicModel.body))
+      || JSON.stringify(publicModel.body).includes(ownerState)) {
+      throw new Error("Meta callback fixture exposed the private OAuth ledger through the public model");
+    }
+    const afterStart = await durableSnapshot();
+    const ownerStateRecord = (afterStart.document.shared?.oauthStates || [])
+      .find(record => record.provider === "meta" && record.state === ownerState);
+    if (ownerStateRecord?.ownerUserId !== ownerUserId
+      || ownerStateRecord?.userId !== ownerUserId
+      || ownerStateRecord?.workspaceId !== ownerWorkspaceId) {
+      throw new Error("Meta callback fixture state was not bound to the initiating owner workspace");
+    }
+
+    const malformedState = "p23-malformed-meta-state";
+    const unissuedState = signedMetaCallbackState(ownerState, { nonce: "p23-unissued-meta-nonce" }, SYNTHETIC_META_CALLBACK_AUTH_SECRET);
+    const wrongProviderState = signedMetaCallbackState(ownerState, { provider: "youtube" }, SYNTHETIC_META_CALLBACK_AUTH_SECRET);
+    const decodedState = JSON.parse(Buffer.from(ownerState, "base64url").toString("utf8"));
+    const replacement = String(decodedState.sig || "").startsWith("A") ? "B" : "A";
+    const tamperedState = Buffer.from(JSON.stringify({
+      ...decodedState,
+      sig: `${replacement}${String(decodedState.sig || "").slice(1)}`
+    })).toString("base64url");
+    privateMarkers.push(ownerState, malformedState, unissuedState, wrongProviderState, tamperedState);
+    const codeQuery = `code=${encodeURIComponent(SYNTHETIC_META_CALLBACK_FAILURE_CODE)}`;
+    await assertRejected("missing state", `/api/oauth/meta/callback?${codeQuery}`, {}, META_CALLBACK_UNISSUED_ERROR);
+    await assertRejected("malformed state", `/api/oauth/meta/callback?${codeQuery}&state=${encodeURIComponent(malformedState)}`, {}, META_CALLBACK_UNISSUED_ERROR);
+    await assertRejected("tampered state", `/api/oauth/meta/callback?${codeQuery}&state=${encodeURIComponent(tamperedState)}`, {}, META_CALLBACK_UNISSUED_ERROR);
+    await assertRejected("signed but unissued state", `/api/oauth/meta/callback?${codeQuery}&state=${encodeURIComponent(unissuedState)}`, {}, META_CALLBACK_UNISSUED_ERROR);
+    await assertRejected("wrong-provider state", `/api/oauth/meta/callback?${codeQuery}&state=${encodeURIComponent(wrongProviderState)}`, {}, META_CALLBACK_UNISSUED_ERROR);
+    await assertRejected("missing owner session", `/api/oauth/meta/callback?${codeQuery}&state=${encodeURIComponent(ownerState)}`, {}, META_CALLBACK_OWNER_REQUIRED_ERROR);
+    await assertRejected("foreign owner session", `/api/oauth/meta/callback?${codeQuery}&state=${encodeURIComponent(ownerState)}`, foreignAuth, META_CALLBACK_OWNER_MISMATCH_ERROR);
+
+    const rawBeforeValid = await readFile(modelPath, "utf8");
+    assertMetaCallbackPrivateMarkersAbsent(
+      rawBeforeValid,
+      [malformedState, unissuedState, wrongProviderState, tamperedState, SYNTHETIC_META_CALLBACK_FAILURE_CODE, ownerToken, foreignToken],
+      "rejected-state persistence"
+    );
+    const beforeValid = await durableSnapshot();
+    const trafficBeforeValid = await trafficSnapshot();
+    const validControl = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      `/api/oauth/meta/callback?${codeQuery}&state=${encodeURIComponent(ownerState)}`,
+      ownerAuth
+    );
+    const trafficAfterValid = await trafficSnapshot();
+    const mockDelta = trafficAfterValid.providerMocks.slice(trafficBeforeValid.providerMocks.length);
+    if (JSON.stringify(mockDelta.map(entry => entry.kind)) !== JSON.stringify(["meta-token-exchange-failure-mock"])
+      || mockDelta[0]?.method !== "GET"
+      || mockDelta[0]?.clientIdMatches !== true
+      || mockDelta[0]?.clientSecretMatches !== true
+      || mockDelta[0]?.redirectMatches !== true
+      || mockDelta[0]?.codeMatches !== true
+      || JSON.stringify(trafficAfterValid.external) !== JSON.stringify(trafficBeforeValid.external)) {
+      throw new Error("Meta callback valid control did not reach the exact guarded token exchange");
+    }
+    const validCookieRenewed = String(validControl.headers["set-cookie"] || "").includes("sc_session=");
+    let nextAtomicSaveDefect = false;
+    let nextAtomicSaveDefectCode = null;
+    if (validControl.status === 409) {
+      nextAtomicSaveDefect = validControl.body?.code === "workspace_shared_state_conflict"
+        && validControl.body?.commitStatus === "not_committed";
+      nextAtomicSaveDefectCode = validControl.body?.code || null;
+      if (!nextAtomicSaveDefect) {
+        throw new Error(`Meta callback valid control failed for an unexpected persistence reason: ${JSON.stringify({
+          status: validControl.status,
+          code: validControl.body?.code || null,
+          error: validControl.body?.error || null,
+          commitStatus: validControl.body?.commitStatus || null
+        })}`);
+      }
+    } else if (validControl.status !== 200
+      || !validControl.text.includes("Meta returned an authorization code")
+      || !validControl.text.includes("Synthetic Meta token exchange rejected.")) {
+      throw new Error(`Meta callback valid control returned an unexpected result: ${validControl.status}`);
+    }
+    if (!validCookieRenewed
+      || /Meta OAuth state rejected|workspace_writer_unclassified/iu.test(validControl.text)) {
+      throw new Error("Meta callback valid control did not preserve the authenticated callback boundary");
+    }
+    assertMetaCallbackPrivateMarkersAbsent(validControl.text, privateMarkers, "valid control response");
+    const afterValid = await durableSnapshot();
+    if (Buffer.compare(afterValid.bytes, beforeValid.bytes) === 0) {
+      throw new Error("Meta callback valid control did not durably consume its state");
+    }
+    if (JSON.stringify(afterValid.revisions[foreignWorkspaceId]) !== JSON.stringify(beforeValid.revisions[foreignWorkspaceId])
+      || JSON.stringify(afterValid.receipts[foreignWorkspaceId]) !== JSON.stringify(beforeValid.receipts[foreignWorkspaceId])) {
+      throw new Error("Meta callback valid control changed the foreign workspace");
+    }
+    const rawAfterValid = await readFile(modelPath, "utf8");
+    const documentAfterValid = JSON.parse(rawAfterValid);
+    if ((documentAfterValid.shared?.oauthStates || []).some(record => record.state === ownerState)) {
+      throw new Error("Meta callback valid control left the consumed state active");
+    }
+    assertMetaCallbackPrivateMarkersAbsent(rawAfterValid, privateMarkers, "post-control persistence and audit");
+    assertMetaCallbackPrivateMarkersAbsent(mockDelta, privateMarkers, "provider mock evidence");
+
+    const replay = await assertRejected(
+      "replayed owner state",
+      `/api/oauth/meta/callback?${codeQuery}&state=${encodeURIComponent(ownerState)}`,
+      ownerAuth,
+      META_CALLBACK_UNISSUED_ERROR
+    );
+    result = {
+      rejectionStatuses: Object.fromEntries(rejectionResults.map(item => [item.label, item.status])),
+      rejectedWrites: 0,
+      validControlStatus: validControl.status,
+      validControlReachedProviderMock: true,
+      validControlCookieRenewed: validCookieRenewed,
+      nextAtomicSaveDefect,
+      nextAtomicSaveDefectCode,
+      replayStatus: replay.status,
+      providerMocks: mockDelta.length,
+      externalRequests: trafficAfterValid.external.length
+    };
+  } catch (error) {
+    scenarioFailure = error;
+  } finally {
+    await stopShopifyScenarioServer(child);
+    childStopped = child.exitCode !== null || child.signalCode !== null;
+  }
+
+  let postFailure = scenarioFailure;
+  let cleanupComplete = false;
+  try {
+    assertMetaCallbackPrivateMarkersAbsent(`${stdout}\n${stderr}`, privateMarkers, "stdout or stderr");
+    const finalExternal = await shopifyScenarioExternalAttempts(requestLogPath);
+    const finalMocks = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    if (finalExternal.length !== 0) throw new Error("Meta callback fixture recorded a non-loopback request");
+    if (JSON.stringify(finalMocks.map(entry => entry.kind)) !== JSON.stringify(["meta-token-exchange-failure-mock"])) {
+      throw new Error("Meta callback fixture recorded an unexpected provider mock sequence");
+    }
+    if (!childStopped) throw new Error("Meta callback fixture did not stop its child process");
+    try {
+      await access(workspaceLockPath);
+      throw new Error("Meta callback fixture retained the workspace lock after shutdown");
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    if (JSON.stringify(Object.entries(process.env)) !== parentBefore) {
+      throw new Error("Meta callback fixture mutated the parent process environment");
+    }
+  } catch (error) {
+    if (!postFailure) postFailure = error;
+  } finally {
+    await rm(scenarioDataDir, { recursive: true, force: true });
+    try {
+      await access(scenarioDataDir);
+    } catch (error) {
+      if (error?.code === "ENOENT") cleanupComplete = true;
+      else if (!postFailure) postFailure = error;
+    }
+  }
+  if (!cleanupComplete && !postFailure) postFailure = new Error("Meta callback fixture cleanup was incomplete");
+  if (postFailure) throw postFailure;
+  return { ...result, cleanupComplete };
+}
+
+async function runMetaCallbackAtomicPersistenceScenario() {
+  const parentBefore = JSON.stringify(Object.entries(process.env));
+  const scenarioPort = await availableLoopbackPort();
+  const scenarioBaseUrl = `http://127.0.0.1:${scenarioPort}`;
+  const scenarioDataDir = path.join(process.cwd(), ".tmp", `meta-callback-p24-${Date.now()}`);
+  const modelPath = path.join(scenarioDataDir, "model.json");
+  const requestLogPath = path.join(scenarioDataDir, "external-http-requests.ndjson");
+  const providerMockLogPath = path.join(scenarioDataDir, "provider-mocks.ndjson");
+  const workspaceLockPath = path.join(scenarioDataDir, ".workspace-content.lock");
+  const ownerPassword = "p24-meta-callback-owner-password";
+  const foreignPassword = "p24-meta-callback-foreign-password";
+  const privateMarkers = [
+    SYNTHETIC_META_ATOMIC_APP_SECRET,
+    SYNTHETIC_META_ATOMIC_AUTH_SECRET,
+    SYNTHETIC_META_ATOMIC_ENCRYPTION_KEY,
+    SYNTHETIC_META_ATOMIC_FAILURE_CODE,
+    SYNTHETIC_META_ATOMIC_SUCCESS_CODE,
+    SYNTHETIC_META_ATOMIC_SHORT_TOKEN,
+    SYNTHETIC_META_ATOMIC_USER_TOKEN,
+    SYNTHETIC_META_ATOMIC_PAGE_TOKEN,
+    ownerPassword,
+    foreignPassword
+  ];
+  await mkdir(scenarioDataDir, { recursive: true });
+  const childEnv = metaStartScenarioEnv({
+    baseEnv: {
+      ...process.env,
+      ...Object.fromEntries(META_START_CREDENTIAL_ENV_NAMES.map((name, index) => [name, `p24-inherited-meta-${index}`])),
+      MeTa_ApP_Id: "p24-inherited-mixed-case-id",
+      mEtA_aPp_SeCrEt: "p24-inherited-mixed-case-secret"
+    },
+    overrides: {
+      PORT: String(scenarioPort),
+      HOST: "127.0.0.1",
+      AUTH_PROVIDER: "alpha-local",
+      SUPABASE_ENABLED: "false",
+      SENTRY_DSN: "",
+      PUBLIC_APP_URL: "https://socialcuesapp.com",
+      META_PUBLIC_APP_URL: "https://socialcuesapp.com",
+      META_APP_ID: SYNTHETIC_META_ATOMIC_APP_ID,
+      META_APP_SECRET: SYNTHETIC_META_ATOMIC_APP_SECRET,
+      AUTH_SESSION_SECRET: SYNTHETIC_META_ATOMIC_AUTH_SECRET,
+      OAUTH_TOKEN_ENCRYPTION_KEY: SYNTHETIC_META_ATOMIC_ENCRYPTION_KEY,
+      SOCIAL_CUES_DATA_DIR: scenarioDataDir,
+      SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
+      SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath,
+      SOCIAL_CUES_TEST_MOCK_META_CALLBACK: "",
+      SOCIAL_CUES_TEST_MOCK_META_ASSETS: "",
+      SOCIAL_CUES_TEST_MOCK_META_CALLBACK_ATOMIC: "true",
+      SOCIAL_CUES_TEST_META_ATOMIC_FAILURE_CODE: SYNTHETIC_META_ATOMIC_FAILURE_CODE,
+      SOCIAL_CUES_TEST_META_ATOMIC_SUCCESS_CODE: SYNTHETIC_META_ATOMIC_SUCCESS_CODE,
+      SOCIAL_CUES_TEST_META_ATOMIC_SHORT_TOKEN: SYNTHETIC_META_ATOMIC_SHORT_TOKEN,
+      SOCIAL_CUES_TEST_META_ATOMIC_USER_TOKEN: SYNTHETIC_META_ATOMIC_USER_TOKEN,
+      SOCIAL_CUES_TEST_META_ATOMIC_PAGE_TOKEN: SYNTHETIC_META_ATOMIC_PAGE_TOKEN,
+      SOCIAL_CUES_TEST_META_ATOMIC_USER_ID: SYNTHETIC_META_ATOMIC_USER_ID,
+      SOCIAL_CUES_TEST_META_ATOMIC_PAGE_ID: SYNTHETIC_META_ATOMIC_PAGE_ID,
+      SOCIAL_CUES_TEST_META_ATOMIC_INSTAGRAM_ID: SYNTHETIC_META_ATOMIC_INSTAGRAM_ID,
+      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
+        { code: SYNTHETIC_META_ATOMIC_OWNER_PROMO, label: "P24 Meta callback owner", days: 1, active: true },
+        { code: SYNTHETIC_META_ATOMIC_FOREIGN_PROMO, label: "P24 Meta callback foreign", days: 1, active: true }
+      ])
+    }
+  });
+  const retainedCredentialNames = Object.keys(childEnv)
+    .filter(name => META_START_CREDENTIAL_ENV_KEYS.has(name.toLowerCase()))
+    .sort();
+  if (JSON.stringify(retainedCredentialNames) !== JSON.stringify(["META_APP_ID", "META_APP_SECRET"])) {
+    throw new Error("Meta callback atomic fixture retained inherited application credentials");
+  }
+
+  let stdout = "";
+  let stderr = "";
+  let result;
+  let scenarioFailure;
+  let child = null;
+  const children = [];
+  const publicBodies = [];
+  const startScenarioServer = () => {
+    const nextChild = spawn(process.execPath, [`--import=${pathToFileURL(externalRequestGuardPath).href}`, "server.mjs"], {
+      cwd: new URL(".", import.meta.url),
+      env: childEnv,
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
+    });
+    children.push(nextChild);
+    nextChild.stdout.on("data", chunk => { stdout += chunk; });
+    nextChild.stderr.on("data", chunk => { stderr += chunk; });
+    return nextChild;
+  };
+  const stopScenarioServer = async scenarioChild => {
+    if (!scenarioChild || scenarioChild.exitCode !== null || scenarioChild.signalCode !== null) return;
+    await stopShopifyScenarioServer(scenarioChild);
+  };
+  const auth = token => ({ headers: { Authorization: `Bearer ${token}` } });
+  const callbackAuth = token => ({ headers: { Cookie: `sc_session=${encodeURIComponent(token)}` } });
+  const readDocument = async () => JSON.parse(await readFile(modelPath, "utf8"));
+  const stateFromStart = response => {
+    if (response.status !== 302 || !response.location) {
+      throw new Error("Meta callback atomic fixture did not receive an OAuth redirect");
+    }
+    const location = new URL(response.location);
+    const state = location.searchParams.get("state") || "";
+    if (location.origin !== "https://www.facebook.com"
+      || !/\/dialog\/oauth$/u.test(location.pathname)
+      || location.searchParams.get("client_id") !== SYNTHETIC_META_ATOMIC_APP_ID
+      || location.searchParams.get("redirect_uri") !== "https://socialcuesapp.com/api/oauth/meta/callback"
+      || !state) {
+      throw new Error("Meta callback atomic fixture start used the wrong provider, app id, callback, or state");
+    }
+    return state;
+  };
+  const assertRenewedOwnerSession = async (response, ownerToken, ownerUserId, ownerWorkspaceId, label) => {
+    const cookie = String(response.headers["set-cookie"] || "");
+    if (!cookie.startsWith(`sc_session=${encodeURIComponent(ownerToken)};`)
+      || !/(?:^|;)\s*HttpOnly(?:;|$)/iu.test(cookie)) {
+      throw new Error(`Meta callback atomic fixture did not renew the initiating session for ${label}`);
+    }
+    const sessionModel = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", callbackAuth(ownerToken));
+    publicBodies.push(sessionModel.text);
+    if (sessionModel.status !== 200
+      || sessionModel.body?.workspace?.ownerUserId !== ownerUserId
+      || sessionModel.body?.workspace?.id !== ownerWorkspaceId) {
+      throw new Error(`Meta callback atomic fixture changed the validated owner session for ${label}`);
+    }
+  };
+  const assertReplayRejectedWithoutEffects = async ({ route, ownerToken, state, label }) => {
+    const beforeSource = await readFile(modelPath, "utf8");
+    const beforeMocks = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const beforeExternal = await shopifyScenarioExternalAttempts(requestLogPath);
+    const replay = await shopifyScenarioResponse(scenarioBaseUrl, route, callbackAuth(ownerToken));
+    publicBodies.push(replay.text);
+    const afterSource = await readFile(modelPath, "utf8");
+    if (replay.status !== 400
+      || !replay.text.includes("<h1>Meta OAuth state rejected</h1>")
+      || !replay.text.includes(META_CALLBACK_UNISSUED_ERROR)
+      || replay.headers["set-cookie"]
+      || beforeSource !== afterSource
+      || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(beforeMocks)
+      || JSON.stringify(await shopifyScenarioExternalAttempts(requestLogPath)) !== JSON.stringify(beforeExternal)) {
+      throw new Error(`Meta callback atomic fixture replay was not rejected before provider traffic for ${label}`);
+    }
+    assertMetaCallbackPrivateMarkersAbsent(replay.text, [state, ...privateMarkers], `${label} replay response`);
+  };
+
+  child = startScenarioServer();
+  try {
+    await waitForShopifyScenarioServer(child, scenarioBaseUrl, "P24 Meta callback atomic persistence");
+    const signup = async ({ name, password, promoCode, workspaceName }) => shopifyScenarioResponse(
+      scenarioBaseUrl,
+      "/api/auth/signup",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          email: `p24-meta-${name.toLowerCase()}-${Date.now()}-${randomBytes(4).toString("hex")}@example.test`,
+          password,
+          promoCode,
+          workspaceName
+        })
+      }
+    );
+    const ownerSignup = await signup({
+      name: "Owner",
+      password: ownerPassword,
+      promoCode: SYNTHETIC_META_ATOMIC_OWNER_PROMO,
+      workspaceName: "P24 Meta Owner Workspace"
+    });
+    const foreignSignup = await signup({
+      name: "Foreign",
+      password: foreignPassword,
+      promoCode: SYNTHETIC_META_ATOMIC_FOREIGN_PROMO,
+      workspaceName: "P24 Meta Foreign Workspace"
+    });
+    const ownerToken = ownerSignup.body?.session?.token || "";
+    const ownerUserId = ownerSignup.body?.user?.id || "";
+    const ownerWorkspaceId = ownerSignup.body?.workspace?.id || "";
+    const foreignToken = foreignSignup.body?.session?.token || "";
+    const foreignWorkspaceId = foreignSignup.body?.workspace?.id || "";
+    privateMarkers.push(ownerToken, foreignToken);
+    if (ownerSignup.status !== 200 || !ownerToken || !ownerUserId || !ownerWorkspaceId
+      || foreignSignup.status !== 200 || !foreignToken || !foreignWorkspaceId
+      || ownerWorkspaceId === foreignWorkspaceId) {
+      throw new Error("Meta callback atomic fixture could not establish isolated owner workspaces");
+    }
+    const ownerAuth = auth(ownerToken);
+    const foreignAuth = auth(foreignToken);
+
+    const failedStart = await shopifyScenarioResponse(scenarioBaseUrl, "/api/oauth/meta/start?platform=facebook", ownerAuth);
+    const failedState = stateFromStart(failedStart);
+    privateMarkers.push(failedState);
+    const beforeFailure = await readDocument();
+    const beforeFailureAccounts = JSON.stringify(beforeFailure.workspaces?.[ownerWorkspaceId]?.content?.connectedAccounts || []);
+    const beforeFailureForeign = JSON.stringify(beforeFailure.workspaces?.[foreignWorkspaceId]);
+    const beforeFailureEventIds = new Set((beforeFailure.shared?.oauthEvents || []).map(event => event.id));
+    const mocksBeforeFailure = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const failedCallback = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      `/api/oauth/meta/callback?code=${encodeURIComponent(SYNTHETIC_META_ATOMIC_FAILURE_CODE)}&state=${encodeURIComponent(failedState)}`,
+      callbackAuth(ownerToken)
+    );
+    publicBodies.push(failedCallback.text);
+    const afterFailure = await readDocument();
+    const ownerAfterFailure = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    publicBodies.push(ownerAfterFailure.text);
+    const failureMockDelta = (await shopifyScenarioExternalAttempts(providerMockLogPath)).slice(mocksBeforeFailure.length);
+    const failureEvents = (afterFailure.shared?.oauthEvents || []).filter(event => !beforeFailureEventIds.has(event.id));
+    if (failedCallback.status !== 200
+      || !failedCallback.text.includes("Meta returned an authorization code")
+      || !failedCallback.text.includes("Synthetic P24 Meta token exchange rejected.")
+      || /workspace_shared_state_conflict|workspace_writer_unclassified/iu.test(failedCallback.text)
+      || ownerAfterFailure.status !== 200
+      || ownerAfterFailure.body?.workspace?.id !== ownerWorkspaceId
+      || afterFailure.shared?.metaConnection?.status !== "oauth-code-only"
+      || !String(ownerAfterFailure.body?.integrations?.meta || "").includes("Synthetic P24 Meta token exchange rejected.")
+      || JSON.stringify(afterFailure.workspaces?.[ownerWorkspaceId]?.content?.connectedAccounts || []) !== beforeFailureAccounts
+      || JSON.stringify(afterFailure.workspaces?.[foreignWorkspaceId]) !== beforeFailureForeign
+      || (afterFailure.shared?.oauthStates || []).some(record => record.state === failedState)
+      || failureEvents.filter(event => event.provider === "meta" && event.event === "token_exchange_result" && event.outcome === "failed").length !== 1
+      || JSON.stringify(failureMockDelta.map(entry => entry.kind)) !== JSON.stringify(["meta-token-exchange-failure-mock-p24"])
+      || failureMockDelta[0]?.method !== "GET"
+      || failureMockDelta[0]?.clientIdMatches !== true
+      || failureMockDelta[0]?.clientSecretMatches !== true
+      || failureMockDelta[0]?.redirectMatches !== true
+      || failureMockDelta[0]?.codeMatches !== true
+      || failureMockDelta[0]?.grantTypeAbsent !== true) {
+      throw new Error(`Meta callback atomic fixture did not commit one safe failed-exchange result: ${JSON.stringify({
+        callbackStatus: failedCallback.status,
+        callbackTitle: failedCallback.text.includes("Meta returned an authorization code"),
+        callbackEvidence: failedCallback.text.includes("Synthetic P24 Meta token exchange rejected."),
+        callbackConflictFree: !/workspace_shared_state_conflict|workspace_writer_unclassified/iu.test(failedCallback.text),
+        ownerModelStatus: ownerAfterFailure.status,
+        ownerWorkspaceMatches: ownerAfterFailure.body?.workspace?.id === ownerWorkspaceId,
+        connectionStatus: afterFailure.shared?.metaConnection?.status || null,
+        integrationEvidence: String(ownerAfterFailure.body?.integrations?.meta || "").includes("Synthetic P24 Meta token exchange rejected."),
+        accountsUnchanged: JSON.stringify(afterFailure.workspaces?.[ownerWorkspaceId]?.content?.connectedAccounts || []) === beforeFailureAccounts,
+        foreignWorkspaceUnchanged: JSON.stringify(afterFailure.workspaces?.[foreignWorkspaceId]) === beforeFailureForeign,
+        stateConsumed: !(afterFailure.shared?.oauthStates || []).some(record => record.state === failedState),
+        failedAuditCount: failureEvents.filter(event => event.provider === "meta" && event.event === "token_exchange_result" && event.outcome === "failed").length,
+        mockKinds: failureMockDelta.map(entry => entry.kind),
+        mockChecksPassed: failureMockDelta[0]?.method === "GET"
+          && failureMockDelta[0]?.clientIdMatches === true
+          && failureMockDelta[0]?.clientSecretMatches === true
+          && failureMockDelta[0]?.redirectMatches === true
+          && failureMockDelta[0]?.codeMatches === true
+          && failureMockDelta[0]?.grantTypeAbsent === true
+      })}`);
+    }
+    await assertRenewedOwnerSession(failedCallback, ownerToken, ownerUserId, ownerWorkspaceId, "failed exchange");
+    await assertReplayRejectedWithoutEffects({
+      route: `/api/oauth/meta/callback?code=${encodeURIComponent(SYNTHETIC_META_ATOMIC_FAILURE_CODE)}&state=${encodeURIComponent(failedState)}`,
+      ownerToken,
+      state: failedState,
+      label: "failed exchange"
+    });
+
+    const successStart = await shopifyScenarioResponse(scenarioBaseUrl, "/api/oauth/meta/start?platform=facebook", ownerAuth);
+    const successState = stateFromStart(successStart);
+    privateMarkers.push(successState);
+    const beforeSuccess = await readDocument();
+    const beforeSuccessForeign = JSON.stringify(beforeSuccess.workspaces?.[foreignWorkspaceId]);
+    const beforeSuccessEventIds = new Set((beforeSuccess.shared?.oauthEvents || []).map(event => event.id));
+    const mocksBeforeSuccess = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const successCallback = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      `/api/oauth/meta/callback?code=${encodeURIComponent(SYNTHETIC_META_ATOMIC_SUCCESS_CODE)}&state=${encodeURIComponent(successState)}`,
+      callbackAuth(ownerToken)
+    );
+    publicBodies.push(successCallback.text);
+    const afterSuccess = await readDocument();
+    const ownerAfterSuccess = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const foreignAfterSuccess = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    publicBodies.push(ownerAfterSuccess.text, foreignAfterSuccess.text);
+    const successMockDelta = (await shopifyScenarioExternalAttempts(providerMockLogPath)).slice(mocksBeforeSuccess.length);
+    const expectedSuccessMockKinds = [
+      "meta-short-token-mock-p24",
+      "meta-long-token-mock-p24",
+      "meta-user-mock-p24",
+      "meta-debug-token-mock-p24",
+      "meta-permissions-mock-p24",
+      "meta-accounts-mock-p24",
+      "meta-businesses-mock-p24"
+    ];
+    const successAccounts = (ownerAfterSuccess.body?.connectedAccounts || []).filter(account => [
+      SYNTHETIC_META_ATOMIC_USER_ID,
+      SYNTHETIC_META_ATOMIC_PAGE_ID,
+      SYNTHETIC_META_ATOMIC_INSTAGRAM_ID
+    ].includes(String(account.providerAccountId || "")));
+    const successEvents = (afterSuccess.shared?.oauthEvents || []).filter(event => !beforeSuccessEventIds.has(event.id));
+    if (successCallback.status !== 200
+      || !successCallback.text.includes("Meta connected")
+      || !successCallback.text.includes("P24 Meta User")
+      || !successCallback.text.includes("P24 Facebook Page")
+      || !successCallback.text.includes("P24 Instagram")
+      || /workspace_shared_state_conflict|workspace_writer_unclassified/iu.test(successCallback.text)
+      || ownerAfterSuccess.status !== 200
+      || ownerAfterSuccess.body?.workspace?.id !== ownerWorkspaceId
+      || successAccounts.length !== 3
+      || successAccounts.some(account => account.connected !== true || account.tokenStored !== true)
+      || successAccounts.some(account => account.ownerUserId !== ownerUserId || account.workspaceId !== ownerWorkspaceId)
+      || successAccounts.some(account => !metaAssetsPublicShapeIsSafe(account))
+      || JSON.stringify(afterSuccess.workspaces?.[foreignWorkspaceId]) !== beforeSuccessForeign
+      || (foreignAfterSuccess.body?.connectedAccounts || []).some(account => [
+        SYNTHETIC_META_ATOMIC_USER_ID,
+        SYNTHETIC_META_ATOMIC_PAGE_ID,
+        SYNTHETIC_META_ATOMIC_INSTAGRAM_ID
+      ].includes(String(account.providerAccountId || "")))
+      || (afterSuccess.shared?.oauthStates || []).some(record => record.state === successState)
+      || successEvents.filter(event => event.provider === "meta" && event.event === "token_exchange_result" && event.outcome === "stored").length !== 1
+      || JSON.stringify(successMockDelta.map(entry => entry.kind)) !== JSON.stringify(expectedSuccessMockKinds)
+      || successMockDelta.some(entry => Object.entries(entry)
+        .filter(([key]) => key !== "kind" && key !== "method")
+        .some(([, value]) => value !== true))) {
+      throw new Error("Meta callback atomic fixture did not persist the exact owner-scoped success result");
+    }
+    await assertRenewedOwnerSession(successCallback, ownerToken, ownerUserId, ownerWorkspaceId, "successful exchange");
+    await assertReplayRejectedWithoutEffects({
+      route: `/api/oauth/meta/callback?code=${encodeURIComponent(SYNTHETIC_META_ATOMIC_SUCCESS_CODE)}&state=${encodeURIComponent(successState)}`,
+      ownerToken,
+      state: successState,
+      label: "successful exchange"
+    });
+
+    const mocksBeforeSelection = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const selectedAssets = await shopifyScenarioResponse(scenarioBaseUrl, "/api/meta/assets", ownerAuth);
+    publicBodies.push(selectedAssets.text);
+    const selectionMockDelta = (await shopifyScenarioExternalAttempts(providerMockLogPath)).slice(mocksBeforeSelection.length);
+    const ownerAfterSelection = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    publicBodies.push(ownerAfterSelection.text);
+    const selectedAccounts = (ownerAfterSelection.body?.connectedAccounts || []).filter(account => [
+      SYNTHETIC_META_ATOMIC_USER_ID,
+      SYNTHETIC_META_ATOMIC_PAGE_ID,
+      SYNTHETIC_META_ATOMIC_INSTAGRAM_ID
+    ].includes(String(account.providerAccountId || "")));
+    if (selectedAssets.status !== 200
+      || selectedAssets.body?.ok !== true
+      || selectedAssets.body?.selectedProviderAccounts?.facebook !== SYNTHETIC_META_ATOMIC_PAGE_ID
+      || selectedAssets.body?.selectedProviderAccounts?.instagram !== SYNTHETIC_META_ATOMIC_INSTAGRAM_ID
+      || selectedAccounts.length !== 3
+      || JSON.stringify(selectionMockDelta.map(entry => entry.kind)) !== JSON.stringify([
+        "meta-debug-token-mock-p24",
+        "meta-permissions-mock-p24",
+        "meta-accounts-mock-p24",
+        "meta-businesses-mock-p24"
+      ])
+      || selectionMockDelta.some(entry => Object.entries(entry)
+        .filter(([key]) => key !== "kind" && key !== "method")
+        .some(([, value]) => value !== true))
+      || !metaAssetsPublicShapeIsSafe(selectedAssets.body)) {
+      throw new Error("Meta callback atomic fixture did not preserve selection and deduplication behavior");
+    }
+
+    await stopScenarioServer(child);
+    if (child.exitCode === null && child.signalCode === null) {
+      throw new Error("Meta callback atomic fixture could not stop before restart verification");
+    }
+    try {
+      await access(workspaceLockPath);
+      throw new Error("Meta callback atomic fixture retained the workspace lock before restart");
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    child = startScenarioServer();
+    await waitForShopifyScenarioServer(child, scenarioBaseUrl, "P24 Meta callback restart");
+    const restartedOwner = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const restartedForeign = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    const restartedSession = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", callbackAuth(ownerToken));
+    publicBodies.push(restartedOwner.text, restartedForeign.text, restartedSession.text);
+    const restartedAccounts = (restartedOwner.body?.connectedAccounts || []).filter(account => [
+      SYNTHETIC_META_ATOMIC_USER_ID,
+      SYNTHETIC_META_ATOMIC_PAGE_ID,
+      SYNTHETIC_META_ATOMIC_INSTAGRAM_ID
+    ].includes(String(account.providerAccountId || "")));
+    if (restartedOwner.status !== 200
+      || restartedOwner.body?.workspace?.id !== ownerWorkspaceId
+      || restartedAccounts.length !== 3
+      || restartedAccounts.some(account => account.connected !== true || account.tokenStored !== true)
+      || (restartedForeign.body?.connectedAccounts || []).some(account => [
+        SYNTHETIC_META_ATOMIC_USER_ID,
+        SYNTHETIC_META_ATOMIC_PAGE_ID,
+        SYNTHETIC_META_ATOMIC_INSTAGRAM_ID
+      ].includes(String(account.providerAccountId || "")))
+      || restartedSession.status !== 200
+      || restartedSession.body?.workspace?.ownerUserId !== ownerUserId
+      || restartedSession.body?.workspace?.id !== ownerWorkspaceId) {
+      throw new Error("Meta callback atomic fixture did not preserve owner state and isolation across restart");
+    }
+
+    const rawModelSource = await readFile(modelPath, "utf8");
+    const rawModel = JSON.parse(rawModelSource);
+    const rawOwnerAccounts = rawModel.workspaces?.[ownerWorkspaceId]?.content?.connectedAccounts || [];
+    const rawConnected = rawOwnerAccounts.filter(account => [
+      SYNTHETIC_META_ATOMIC_USER_ID,
+      SYNTHETIC_META_ATOMIC_PAGE_ID,
+      SYNTHETIC_META_ATOMIC_INSTAGRAM_ID
+    ].includes(String(account.providerAccountId || "")));
+    const oauthResults = (rawModel.shared?.oauthEvents || []).filter(event => event.provider === "meta" && event.event === "token_exchange_result");
+    if (rawConnected.length !== 3
+      || rawConnected.some(account => account.ownerUserId !== ownerUserId || account.workspaceId !== ownerWorkspaceId)
+      || rawConnected.some(account => account.credential?.alg !== "aes-256-gcm")
+      || (rawModel.shared?.oauthStates || []).some(record => [failedState, successState].includes(record.state))
+      || !oauthResults.some(event => event.outcome === "failed")
+      || !oauthResults.some(event => event.outcome === "stored")) {
+      throw new Error("Meta callback atomic fixture did not retain encrypted accounts and sanitized audit evidence");
+    }
+    assertMetaCallbackPrivateMarkersAbsent(rawModelSource, privateMarkers, "durable workspace and OAuth audit");
+    const providerMocks = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const expectedMockKinds = [
+      "meta-token-exchange-failure-mock-p24",
+      ...expectedSuccessMockKinds,
+      "meta-debug-token-mock-p24",
+      "meta-permissions-mock-p24",
+      "meta-accounts-mock-p24",
+      "meta-businesses-mock-p24"
+    ];
+    if (JSON.stringify(providerMocks.map(entry => entry.kind)) !== JSON.stringify(expectedMockKinds)) {
+      throw new Error("Meta callback atomic fixture recorded an unexpected provider mock sequence");
+    }
+    assertMetaCallbackPrivateMarkersAbsent(publicBodies, privateMarkers, "public response bodies");
+    assertMetaCallbackPrivateMarkersAbsent(providerMocks, privateMarkers, "provider mock evidence");
+    result = {
+      failedExchangeCommitted: true,
+      successfulExchangeCommitted: true,
+      ownerSessionPreserved: true,
+      stateConsumed: true,
+      replayRejectedBeforeProvider: true,
+      connectedAccounts: rawConnected.length,
+      selectedAccountsPreserved: true,
+      encryptedAtRest: true,
+      foreignWorkspaceIsolated: true,
+      restartPersistence: true,
+      providerMockKinds: providerMocks.map(entry => entry.kind),
+      mockedProviderRequests: providerMocks.length,
+      externalRequests: 0
+    };
+  } catch (error) {
+    scenarioFailure = error;
+  } finally {
+    for (const scenarioChild of children) {
+      if (scenarioChild.exitCode === null && scenarioChild.signalCode === null) await stopScenarioServer(scenarioChild);
+    }
+  }
+
+  let postFailure = scenarioFailure;
+  let cleanupComplete = false;
+  try {
+    assertMetaCallbackPrivateMarkersAbsent(`${stdout}\n${stderr}`, [SYNTHETIC_META_ATOMIC_APP_ID, ...privateMarkers], "stdout or stderr");
+    const finalExternal = await shopifyScenarioExternalAttempts(requestLogPath);
+    if (finalExternal.length !== 0) throw new Error("Meta callback atomic fixture attempted a non-loopback request");
+    if (!children.length || children.some(scenarioChild => scenarioChild.exitCode === null && scenarioChild.signalCode === null)) {
+      throw new Error("Meta callback atomic fixture did not stop every child process");
+    }
+    try {
+      await access(workspaceLockPath);
+      throw new Error("Meta callback atomic fixture retained the workspace lock after shutdown");
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    if (JSON.stringify(Object.entries(process.env)) !== parentBefore) {
+      throw new Error("Meta callback atomic fixture mutated the parent process environment");
+    }
+  } catch (error) {
+    if (!postFailure) postFailure = error;
+  } finally {
+    await rm(scenarioDataDir, { recursive: true, force: true });
+    try {
+      await access(scenarioDataDir);
+    } catch (error) {
+      if (error?.code === "ENOENT") cleanupComplete = true;
+      else if (!postFailure) postFailure = error;
+    }
+  }
+  if (!cleanupComplete && !postFailure) postFailure = new Error("Meta callback atomic fixture cleanup was incomplete");
+  if (postFailure) throw postFailure;
+  return { ...result, cleanupComplete };
+}
+
+async function runGoogleCallbackPersistenceScenario() {
+  const parentBefore = JSON.stringify(Object.entries(process.env));
+  const scenarioPort = await availableLoopbackPort();
+  const scenarioBaseUrl = `http://127.0.0.1:${scenarioPort}`;
+  const scenarioDataDir = path.join(process.cwd(), ".tmp", `google-callback-p20-${Date.now()}`);
+  const providerMockLogPath = path.join(scenarioDataDir, "provider-mocks.ndjson");
+  const workspaceLockPath = path.join(scenarioDataDir, ".workspace-content.lock");
+  await mkdir(scenarioDataDir, { recursive: true });
+  const childEnv = googleCallbackScenarioEnv({
+    baseEnv: {
+      ...process.env,
+      ...Object.fromEntries(GOOGLE_CALLBACK_CREDENTIAL_ENV_NAMES.map((name, index) => [name, `inherited-google-${index}`])),
+      GoOgLe_ClIeNt_Id: "inherited-google-mixed-case-id",
+      gOoGlE_cLiEnT_sEcReT: "inherited-google-mixed-case-secret"
+    },
+    overrides: {
+      PORT: String(scenarioPort),
+      HOST: "127.0.0.1",
+      AUTH_PROVIDER: "alpha-local",
+      SUPABASE_ENABLED: "false",
+      SENTRY_DSN: "",
+      PUBLIC_APP_URL: "https://socialcuesapp.com",
+      GOOGLE_PUBLIC_APP_URL: "https://socialcuesapp.com",
+      SOCIAL_CUES_DATA_DIR: scenarioDataDir,
+      SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: externalRequestLogPath,
+      SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath,
+      SOCIAL_CUES_TEST_MOCK_GOOGLE_CALLBACK: "true",
+      SOCIAL_CUES_TEST_GOOGLE_FAILURE_CODE: SYNTHETIC_GOOGLE_FAILURE_CODE,
+      SOCIAL_CUES_TEST_GOOGLE_BUSINESS_SUCCESS_CODE: SYNTHETIC_GOOGLE_BUSINESS_SUCCESS_CODE,
+      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
+        { code: SYNTHETIC_GOOGLE_OWNER_PROMO_CODE, label: "P20 Google owner", days: 1, active: true },
+        { code: SYNTHETIC_GOOGLE_FOREIGN_PROMO_CODE, label: "P20 Google foreign", days: 1, active: true }
+      ]),
+      AUTH_SESSION_SECRET: "p20-google-session-secret",
+      OAUTH_TOKEN_ENCRYPTION_KEY: SYNTHETIC_GOOGLE_TOKEN_ENCRYPTION_KEY,
+      GOOGLE_CLIENT_ID: SYNTHETIC_GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET: SYNTHETIC_GOOGLE_CLIENT_SECRET
+    }
+  });
+  const retainedCredentialNames = Object.keys(childEnv)
+    .filter(name => GOOGLE_CALLBACK_CREDENTIAL_ENV_KEYS.has(name.toLowerCase()))
+    .sort();
+  if (JSON.stringify(retainedCredentialNames) !== JSON.stringify(["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"])) {
+    throw new Error("Google callback fixture retained inherited application credentials");
+  }
+
+  let stdout = "";
+  let stderr = "";
+  let result;
+  let scenarioFailure;
+  let providerMocks = [];
+  let externalAttemptsBefore = [];
+  let childStopped = false;
+  const children = [];
+  const capturedResponses = [];
+  const privateMarkers = [
+    SYNTHETIC_GOOGLE_CLIENT_SECRET,
+    SYNTHETIC_GOOGLE_ACCESS_TOKEN,
+    SYNTHETIC_GOOGLE_REFRESH_TOKEN,
+    SYNTHETIC_GOOGLE_FAILURE_CODE,
+    SYNTHETIC_YOUTUBE_SUCCESS_CODE,
+    SYNTHETIC_GOOGLE_BUSINESS_SUCCESS_CODE,
+    SYNTHETIC_GOOGLE_TOKEN_ENCRYPTION_KEY
+  ];
+  const startScenarioServer = () => {
+    const nextChild = spawn(process.execPath, [`--import=${pathToFileURL(externalRequestGuardPath).href}`, "server.mjs"], {
+      cwd: new URL(".", import.meta.url),
+      env: childEnv,
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
+    });
+    children.push(nextChild);
+    nextChild.stdout.on("data", chunk => { stdout += chunk; });
+    nextChild.stderr.on("data", chunk => { stderr += chunk; });
+    return nextChild;
+  };
+  const stopScenarioServer = async scenarioChild => {
+    if (scenarioChild.exitCode !== null || scenarioChild.signalCode !== null) return;
+    await stopShopifyScenarioServer(scenarioChild);
+  };
+  const callbackOptions = token => ({ headers: { Cookie: `sc_session=${encodeURIComponent(token)}` } });
+  const authenticatedOptions = token => ({ headers: { Authorization: `Bearer ${token}` } });
+  const stateFromStart = response => {
+    if (response.status !== 302 || !response.location) throw new Error("Google callback fixture did not receive an OAuth redirect");
+    const location = new URL(response.location);
+    const state = location.searchParams.get("state") || "";
+    if (location.origin !== "https://accounts.google.com"
+      || location.pathname !== "/o/oauth2/v2/auth"
+      || location.searchParams.get("client_id") !== SYNTHETIC_GOOGLE_CLIENT_ID
+      || location.searchParams.get("redirect_uri") !== "https://socialcuesapp.com/api/oauth/youtube/callback"
+      || !state) {
+      throw new Error("Google callback fixture OAuth start used the wrong provider, application id, callback, or state");
+    }
+    return { location, state };
+  };
+  let child = startScenarioServer();
+
+  try {
+    await waitForShopifyScenarioServer(child, scenarioBaseUrl, "P20 Google callback");
+    externalAttemptsBefore = await shopifyScenarioExternalAttempts(externalRequestLogPath);
+    const foreignSignup = await shopifyScenarioResponse(scenarioBaseUrl, "/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "P20 Google Foreign",
+        email: `p20-google-foreign-${Date.now()}@example.test`,
+        password: "p20-google-foreign-password-2026",
+        promoCode: SYNTHETIC_GOOGLE_FOREIGN_PROMO_CODE,
+        workspaceName: "P20 Google Foreign Workspace"
+      })
+    });
+    const ownerSignup = await shopifyScenarioResponse(scenarioBaseUrl, "/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "P20 Google Owner",
+        email: `p20-google-owner-${Date.now()}@example.test`,
+        password: "p20-google-owner-password-2026",
+        promoCode: SYNTHETIC_GOOGLE_OWNER_PROMO_CODE,
+        workspaceName: "P20 Google Owner Workspace"
+      })
+    });
+    if (foreignSignup.status !== 200 || !foreignSignup.body?.session?.token || !foreignSignup.body?.workspace?.id
+      || ownerSignup.status !== 200 || !ownerSignup.body?.session?.token || !ownerSignup.body?.workspace?.id) {
+      throw new Error("Google callback fixture could not create isolated authenticated workspaces");
+    }
+    const ownerToken = ownerSignup.body.session.token;
+    const foreignToken = foreignSignup.body.session.token;
+    const ownerUserId = ownerSignup.body.session.user?.id || ownerSignup.body.workspace.ownerUserId;
+    const ownerWorkspaceId = ownerSignup.body.workspace.id;
+    const ownerAuth = authenticatedOptions(ownerToken);
+    const foreignAuth = authenticatedOptions(foreignToken);
+    const modelBefore = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    capturedResponses.push(modelBefore);
+
+    const failedStart = await shopifyScenarioResponse(scenarioBaseUrl, "/api/oauth/youtube/start", ownerAuth);
+    const failedStartState = stateFromStart(failedStart).state;
+    capturedResponses.push(failedStart);
+    const tamperIndex = Math.max(1, Math.floor(failedStartState.length / 2));
+    const tamperedState = `${failedStartState.slice(0, tamperIndex)}${failedStartState[tamperIndex] === "A" ? "B" : "A"}${failedStartState.slice(tamperIndex + 1)}`;
+    const mocksBeforeTamper = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const tamperedCallback = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      `/api/oauth/youtube/callback?code=${encodeURIComponent(SYNTHETIC_GOOGLE_FAILURE_CODE)}&state=${encodeURIComponent(tamperedState)}`,
+      callbackOptions(ownerToken)
+    );
+    if (tamperedCallback.status !== 400
+      || !/YouTube OAuth state rejected/iu.test(tamperedCallback.text)
+      || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(mocksBeforeTamper)) {
+      throw new Error("Google callback fixture did not reject tampered state before provider exchange");
+    }
+
+    const failedCallback = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      `/api/oauth/youtube/callback?code=${encodeURIComponent(SYNTHETIC_GOOGLE_FAILURE_CODE)}&state=${encodeURIComponent(failedStartState)}`,
+      callbackOptions(ownerToken)
+    );
+    const modelAfterFailure = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const failureAccount = modelAfterFailure.body?.connectedAccounts?.find(account => account.platform === "youtube");
+    const failedCookie = failedCallback.headers["set-cookie"] || "";
+    capturedResponses.push(tamperedCallback, failedCallback, modelAfterFailure);
+    if (failedCallback.status !== 200
+      || !/YouTube token exchange failed: Synthetic Google token exchange rejected\./iu.test(failedCallback.text)
+      || modelAfterFailure.status !== 200
+      || modelAfterFailure.body?.workspace?.id !== ownerWorkspaceId
+      || failureAccount?.connected === true
+      || failureAccount?.tokenStored === true
+      || !String(modelAfterFailure.body?.integrations?.youtube || "").includes("Synthetic Google token exchange rejected.")
+      || JSON.stringify(modelBefore.body?.persistence?.revision) === JSON.stringify(modelAfterFailure.body?.persistence?.revision)
+      || !failedCookie.startsWith(`sc_session=${encodeURIComponent(ownerToken)};`)
+      || !/(?:^|;)\s*HttpOnly(?:;|$)/iu.test(failedCookie)) {
+      throw new Error("Google callback fixture did not atomically persist its owner-scoped failure and renew the existing session");
+    }
+    const mocksBeforeFailureReplay = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const failedReplay = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      `/api/oauth/youtube/callback?code=${encodeURIComponent(SYNTHETIC_GOOGLE_FAILURE_CODE)}&state=${encodeURIComponent(failedStartState)}`,
+      callbackOptions(ownerToken)
+    );
+    if (failedReplay.status !== 400
+      || !/already used/iu.test(failedReplay.text)
+      || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(mocksBeforeFailureReplay)) {
+      throw new Error("Google callback fixture allowed a consumed failed state to reach provider exchange again");
+    }
+
+    const youtubeStart = await shopifyScenarioResponse(scenarioBaseUrl, "/api/oauth/youtube/start", ownerAuth);
+    const youtubeStartResult = stateFromStart(youtubeStart);
+    capturedResponses.push(youtubeStart);
+    if (!youtubeStartResult.location.searchParams.get("scope")?.includes("youtube.upload")) {
+      throw new Error("Google callback fixture YouTube start omitted the upload/read scope contract");
+    }
+    const youtubeCallback = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      `/api/oauth/youtube/callback?code=${encodeURIComponent(SYNTHETIC_YOUTUBE_SUCCESS_CODE)}&state=${encodeURIComponent(youtubeStartResult.state)}`,
+      callbackOptions(ownerToken)
+    );
+    const modelAfterYoutube = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const youtubeAccount = modelAfterYoutube.body?.connectedAccounts?.find(account => account.platform === "youtube" && account.providerAccountId === "test-p20-youtube-channel");
+    const youtubeCookie = youtubeCallback.headers["set-cookie"] || "";
+    capturedResponses.push(failedReplay, youtubeCallback, modelAfterYoutube);
+    if (youtubeCallback.status !== 200) throw new Error("Google callback fixture YouTube success did not return 200");
+    if (!/P20 YouTube Channel connected and selected for YouTube/iu.test(youtubeCallback.text)) throw new Error("Google callback fixture YouTube success response was not truthful");
+    if (!youtubeAccount?.connected || !youtubeAccount?.tokenStored) throw new Error("Google callback fixture YouTube account was not connected with a stored token");
+    if (youtubeAccount.ownerUserId !== ownerUserId || youtubeAccount.workspaceId !== ownerWorkspaceId) throw new Error("Google callback fixture YouTube account was not bound to the initiating owner workspace");
+    if (containsGoogleCallbackCredentialField(youtubeAccount)) throw new Error("Google callback fixture YouTube public account exposed a credential field");
+    if (!youtubeCookie.startsWith(`sc_session=${encodeURIComponent(ownerToken)};`) || !/(?:^|;)\s*HttpOnly(?:;|$)/iu.test(youtubeCookie)) {
+      throw new Error("Google callback fixture YouTube success did not renew the existing HttpOnly session");
+    }
+    const mocksBeforeYoutubeReplay = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const youtubeReplay = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      `/api/oauth/youtube/callback?code=${encodeURIComponent(SYNTHETIC_YOUTUBE_SUCCESS_CODE)}&state=${encodeURIComponent(youtubeStartResult.state)}`,
+      callbackOptions(ownerToken)
+    );
+    if (youtubeReplay.status !== 400
+      || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(mocksBeforeYoutubeReplay)) {
+      throw new Error("Google callback fixture allowed a consumed YouTube state to reach provider exchange again");
+    }
+
+    const businessStart = await shopifyScenarioResponse(scenarioBaseUrl, "/api/oauth/youtube/start?service=business", ownerAuth);
+    const businessStartResult = stateFromStart(businessStart);
+    capturedResponses.push(businessStart);
+    if (businessStartResult.location.searchParams.get("scope") !== "https://www.googleapis.com/auth/business.manage") {
+      throw new Error("Google callback fixture Business start used the wrong scope contract");
+    }
+    const businessCallback = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      `/api/oauth/youtube/callback?code=${encodeURIComponent(SYNTHETIC_GOOGLE_BUSINESS_SUCCESS_CODE)}&state=${encodeURIComponent(businessStartResult.state)}`,
+      callbackOptions(ownerToken)
+    );
+    const modelAfterBusiness = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const businessAuthAccount = modelAfterBusiness.body?.connectedAccounts?.find(account => account.platform === "google_business_auth");
+    const businessLocation = modelAfterBusiness.body?.connectedAccounts?.find(account => account.platform === "google_business" && account.providerAccountId === "locations/p20-location-1");
+    const businessCookie = businessCallback.headers["set-cookie"] || "";
+    capturedResponses.push(youtubeReplay, businessCallback, modelAfterBusiness);
+    if (businessCallback.status !== 200
+      || !/1 Google Business Profile location discovered/iu.test(businessCallback.text)
+      || !businessAuthAccount?.connected
+      || !businessAuthAccount?.tokenStored
+      || !businessLocation?.connected
+      || !businessLocation?.tokenStored
+      || [businessAuthAccount, businessLocation].some(account => account.ownerUserId !== ownerUserId || account.workspaceId !== ownerWorkspaceId)
+      || [businessAuthAccount, businessLocation].some(containsGoogleCallbackCredentialField)
+      || !businessCookie.startsWith(`sc_session=${encodeURIComponent(ownerToken)};`)
+      || !/(?:^|;)\s*HttpOnly(?:;|$)/iu.test(businessCookie)) {
+      throw new Error("Google callback fixture did not atomically persist the owner-scoped Business authorization and location");
+    }
+
+    const foreignModel = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    capturedResponses.push(foreignModel);
+    if (foreignModel.status !== 200
+      || foreignModel.body?.workspace?.id !== foreignSignup.body.workspace.id
+      || (foreignModel.body?.connectedAccounts || []).some(account => ["youtube", "google_business", "google_business_auth"].includes(account.platform))) {
+      throw new Error("Google callback fixture exposed owner provider state to another workspace");
+    }
+
+    providerMocks = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const expectedMockKinds = [
+      "google-token-mock",
+      "google-token-mock",
+      "youtube-channels-mock",
+      "google-token-mock",
+      "google-business-accounts-mock",
+      "google-business-locations-mock"
+    ];
+    if (JSON.stringify(providerMocks.map(entry => entry.kind)) !== JSON.stringify(expectedMockKinds)
+      || providerMocks[0]?.outcome !== "failed"
+      || providerMocks.slice(0, 4).filter(entry => entry.kind === "google-token-mock").some(entry => !entry.clientIdMatches || !entry.clientSecretMatches || !entry.redirectMatches || entry.grantType !== "authorization_code")
+      || providerMocks.filter(entry => entry.kind !== "google-token-mock").some(entry => entry.bearerPresent !== true)) {
+      throw new Error("Google callback fixture escaped or violated its hermetic provider exchange contract");
+    }
+
+    await stopScenarioServer(child);
+    if (child.exitCode === null && child.signalCode === null) throw new Error("Google callback fixture could not stop before restart verification");
+    try {
+      await access(workspaceLockPath);
+      throw new Error("Google callback fixture retained the workspace lock after shutdown");
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    child = startScenarioServer();
+    await waitForShopifyScenarioServer(child, scenarioBaseUrl, "P20 Google callback restart");
+    const restartedOwnerModel = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
+    const restartedForeignModel = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignAuth);
+    capturedResponses.push(restartedOwnerModel, restartedForeignModel);
+    const restartedYoutube = restartedOwnerModel.body?.connectedAccounts?.find(account => account.platform === "youtube" && account.providerAccountId === "test-p20-youtube-channel");
+    const restartedBusiness = restartedOwnerModel.body?.connectedAccounts?.find(account => account.platform === "google_business" && account.providerAccountId === "locations/p20-location-1");
+    if (!restartedYoutube?.connected || !restartedYoutube?.tokenStored
+      || !restartedBusiness?.connected || !restartedBusiness?.tokenStored
+      || (restartedForeignModel.body?.connectedAccounts || []).some(account => ["youtube", "google_business", "google_business_auth"].includes(account.platform))
+      || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(providerMocks)) {
+      throw new Error("Google callback fixture did not preserve owner state and workspace isolation across restart");
+    }
+
+    const rawModelSource = await readFile(path.join(scenarioDataDir, "model.json"), "utf8");
+    const rawModel = JSON.parse(rawModelSource);
+    const rawAccounts = rawModel.workspaces?.[ownerWorkspaceId]?.content?.connectedAccounts || [];
+    const rawTokenAccounts = rawAccounts.filter(account => ["youtube", "google_business", "google_business_auth"].includes(account.platform) && account.status === "connected");
+    const oauthResults = (rawModel.shared?.oauthEvents || []).filter(event => event.provider === "youtube" && event.event === "token_exchange_result");
+    const rawForbiddenMarkers = [
+      ...privateMarkers,
+      ownerToken,
+      foreignToken,
+      failedStartState,
+      tamperedState,
+      youtubeStartResult.state,
+      businessStartResult.state
+    ];
+    if (rawTokenAccounts.length < 3
+      || rawTokenAccounts.some(account => account.credential?.alg !== "aes-256-gcm")
+      || rawForbiddenMarkers.some(marker => marker && rawModelSource.includes(marker))
+      || !oauthResults.some(event => event.platform === "youtube" && event.outcome === "failed")
+      || !oauthResults.some(event => event.platform === "youtube" && event.outcome === "stored")
+      || !oauthResults.some(event => event.platform === "google_business" && event.outcome === "stored")
+      || (rawModel.shared?.oauthStates || []).some(entry => entry.provider === "youtube")) {
+      throw new Error("Google callback fixture did not persist encrypted credentials and consumed OAuth audit state atomically");
+    }
+
+    assertGoogleCallbackSecretsAbsent(capturedResponses, privateMarkers, "public responses");
+    assertGoogleCallbackSecretsAbsent(providerMocks, privateMarkers, "provider mock audit");
+    if (capturedResponses.some(response => containsGoogleCallbackCredentialField(response.body))) {
+      throw new Error("Google callback fixture exposed a credential-shaped public response field");
+    }
+    result = {
+      tamperedStateRejected: true,
+      failedExchangeCommitted: true,
+      replayRejectedBeforeProvider: true,
+      youtubeConnected: true,
+      googleBusinessConnected: true,
+      ownerSessionPreserved: true,
+      ownerWorkspaceBound: true,
+      foreignWorkspaceIsolated: true,
+      encryptedAtRest: true,
+      restartPersistence: true,
+      providerMockKinds: providerMocks.map(entry => entry.kind),
+      mockedProviderRequests: providerMocks.length,
+      externalRequests: 0
+    };
+  } catch (error) {
+    scenarioFailure = error;
+  } finally {
+    for (const scenarioChild of children) {
+      if (scenarioChild.exitCode === null && scenarioChild.signalCode === null) await stopScenarioServer(scenarioChild);
+    }
+    childStopped = children.every(scenarioChild => scenarioChild.exitCode !== null || scenarioChild.signalCode !== null);
+  }
+
+  let postFailure = scenarioFailure;
+  let cleanupComplete = false;
+  try {
+    assertGoogleCallbackSecretsAbsent(`${stdout}\n${stderr}`, [SYNTHETIC_GOOGLE_CLIENT_ID, ...privateMarkers], "stdout or stderr");
+    const externalAttemptsAfter = await shopifyScenarioExternalAttempts(externalRequestLogPath);
+    if (JSON.stringify(externalAttemptsAfter) !== JSON.stringify(externalAttemptsBefore)) {
+      throw new Error("Google callback fixture attempted an external provider request");
+    }
+    if (!childStopped) throw new Error("Google callback fixture did not stop every child process");
+    try {
+      await access(workspaceLockPath);
+      throw new Error("Google callback fixture retained the workspace lock after final shutdown");
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    if (JSON.stringify(Object.entries(process.env)) !== parentBefore) throw new Error("Google callback fixture mutated the parent process environment");
+  } catch (error) {
+    if (!postFailure) postFailure = error;
+  } finally {
+    await rm(scenarioDataDir, { recursive: true, force: true });
+    try {
+      await access(scenarioDataDir);
+    } catch (error) {
+      if (error?.code === "ENOENT") cleanupComplete = true;
+      else if (!postFailure) postFailure = error;
+    }
+  }
+  if (!cleanupComplete && !postFailure) postFailure = new Error("Google callback fixture cleanup was incomplete");
+  if (postFailure) throw postFailure;
+  return { ...result, cleanupComplete };
+}
+
+async function runTwitchPortalCredentialScenario() {
+  const parentBefore = JSON.stringify(Object.entries(process.env));
+  assertTwitchScenarioEnvironmentHelper();
+  const committedServerSource = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
+  assertCommittedTwitchCredentialContract(committedServerSource);
+
+  const scenarioPort = await availableLoopbackPort();
+  const scenarioBaseUrl = `http://127.0.0.1:${scenarioPort}`;
+  const scenarioDataDir = path.join(process.cwd(), ".tmp", `twitch-portal-credential-${Date.now()}`);
+  const requestLogPath = path.join(scenarioDataDir, "external-http-requests.ndjson");
+  const providerMockLogPath = path.join(scenarioDataDir, "provider-mocks.ndjson");
+  await mkdir(scenarioDataDir, { recursive: true });
+  const childEnv = twitchScenarioEnv({
+    overrides: {
+      PORT: String(scenarioPort),
+      HOST: "127.0.0.1",
+      AUTH_PROVIDER: "alpha-local",
+      SUPABASE_ENABLED: "false",
+      SENTRY_DSN: "",
+      PUBLIC_APP_URL: "https://socialcuesapp.com",
+      TWITCH_PUBLIC_APP_URL: "https://socialcuesapp.com",
+      SOCIAL_CUES_DATA_DIR: scenarioDataDir,
+      SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
+      SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath,
+      SOCIAL_CUES_TEST_MOCK_TWITCH_CALLBACK: "true",
+      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
+        { code: SYNTHETIC_TWITCH_PROMO_CODE, label: "Twitch portal fixture", days: 1, active: true },
+        { code: SYNTHETIC_TWITCH_SECOND_PROMO_CODE, label: "Twitch foreign-workspace fixture", days: 1, active: true }
+      ]),
+      OAUTH_TOKEN_ENCRYPTION_KEY: SYNTHETIC_TWITCH_TOKEN_ENCRYPTION_KEY,
+      WORKER_SECRET: "twitch-portal-fixture-worker-secret",
+      TWITCH_APP_ID: SYNTHETIC_TWITCH_APP_ID,
+      TWITCH_APP_SECRET: SYNTHETIC_TWITCH_APP_SECRET
+    }
+  });
+  const retainedCredentialNames = Object.keys(childEnv)
+    .filter(name => TWITCH_APPLICATION_CREDENTIAL_ENV_KEYS.has(name.toLowerCase()))
+    .sort();
+  if (JSON.stringify(retainedCredentialNames) !== JSON.stringify(["TWITCH_APP_ID", "TWITCH_APP_SECRET"])) {
+    throw new Error("twitch portal credential scenario retained inherited application credentials");
+  }
+
+  let stdout = "";
+  let stderr = "";
+  let result;
+  let scenarioFailure;
+  let childStopped = false;
+  const children = [];
+  const startScenarioServer = () => {
+    const nextChild = spawn(process.execPath, [`--import=${pathToFileURL(externalRequestGuardPath).href}`, "server.mjs"], {
+      cwd: new URL(".", import.meta.url),
+      env: childEnv,
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
+    });
+    children.push(nextChild);
+    nextChild.stdout.on("data", chunk => { stdout += chunk; });
+    nextChild.stderr.on("data", chunk => { stderr += chunk; });
+    return nextChild;
+  };
+  const stopScenarioServer = async scenarioChild => {
+    if (scenarioChild.exitCode !== null || scenarioChild.signalCode !== null) return;
+    let exited = false;
+    const exit = new Promise(resolve => scenarioChild.once("exit", () => {
+      exited = true;
+      resolve();
+    }));
+    if (scenarioChild.connected) scenarioChild.send({ type: "social-cues-local-shutdown" });
+    else scenarioChild.kill();
+    await Promise.race([exit, delay(3000)]);
+    if (!exited && scenarioChild.exitCode === null && scenarioChild.signalCode === null) {
+      await stopShopifyScenarioServer(scenarioChild);
+    }
+  };
+  let child = startScenarioServer();
+
+  try {
+    await waitForTwitchScenarioServer(child, scenarioBaseUrl);
+    const globalPortal = await shopifyScenarioResponse(scenarioBaseUrl, "/api/dev-portal/audit");
+    const globalPortalRow = globalPortal.body?.rows?.find(row => row.id === "twitch");
+    if (globalPortal.status !== 200
+      || globalPortal.body?.ok !== true
+      || !globalPortalRow
+      || globalPortalRow.workspaceContext !== false
+      || /^(?:Connect|Reconnect) Twitch\b/iu.test(globalPortalRow.nextAction || "")) {
+      throw new Error("global Twitch portal audit claimed workspace connection state");
+    }
+
+    const foreignSignup = await shopifyScenarioResponse(scenarioBaseUrl, "/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Twitch Foreign Workspace Fixture",
+        email: `twitch-portal-foreign-${Date.now()}@example.test`,
+        password: "twitch-portal-foreign-password-2026",
+        promoCode: SYNTHETIC_TWITCH_SECOND_PROMO_CODE,
+        workspaceName: "Twitch Foreign Workspace"
+      })
+    });
+    if (foreignSignup.status !== 200 || !foreignSignup.body?.session?.token || !foreignSignup.body?.workspace?.id) {
+      throw new Error("Twitch portal fixture could not create its foreign workspace control");
+    }
+
+    const signup = await shopifyScenarioResponse(scenarioBaseUrl, "/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Twitch Portal Fixture",
+        email: `twitch-portal-${Date.now()}@example.test`,
+        password: "twitch-portal-fixture-password-2026",
+        promoCode: SYNTHETIC_TWITCH_PROMO_CODE,
+        workspaceName: "Twitch Portal Fixture Workspace"
+      })
+    });
+    if (signup.status !== 200 || signup.body?.ok !== true || !signup.body?.session?.token || !signup.body?.workspace?.id) {
+      throw new Error("Twitch portal fixture could not create its authenticated workspace");
+    }
+    const authenticatedOptions = { headers: { Authorization: `Bearer ${signup.body.session.token}` } };
+    const modelBefore = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", authenticatedOptions);
+    if (modelBefore.status !== 200
+      || modelBefore.body?.workspace?.id !== signup.body.workspace.id
+      || (modelBefore.body?.connectedAccounts || []).some(account => account.platform === "twitch")) {
+      throw new Error("Twitch portal fixture did not begin with a blank owned workspace");
+    }
+
+    const status = await shopifyScenarioResponse(scenarioBaseUrl, "/api/oauth/twitch/status", authenticatedOptions);
+    const readiness = await shopifyScenarioResponse(scenarioBaseUrl, "/api/twitch/readiness", authenticatedOptions);
+    const integrations = await shopifyScenarioResponse(scenarioBaseUrl, "/api/integrations/readiness", authenticatedOptions);
+    const portalAudit = await shopifyScenarioResponse(scenarioBaseUrl, "/api/dev-portal/audit", authenticatedOptions);
+    const providerTruth = await shopifyScenarioResponse(scenarioBaseUrl, "/api/provider/truth", authenticatedOptions);
+    const providerContracts = await shopifyScenarioResponse(scenarioBaseUrl, "/api/provider/contracts", authenticatedOptions);
+    const ownershipQueue = await shopifyScenarioResponse(scenarioBaseUrl, "/api/provider/ownership-queue", authenticatedOptions);
+    const providerService = integrations.body?.providerServices?.find(row => row.id === "twitch");
+    const portalRow = portalAudit.body?.rows?.find(row => row.id === "twitch");
+    const truthRow = providerTruth.body?.rows?.find(row => row.id === "twitch");
+    const contractRow = providerContracts.body?.rows?.find(row => row.id === "twitch");
+    const ownershipRow = ownershipQueue.body?.rows?.find(row => row.id === "twitch");
+    const contractResponsesBefore = [status, readiness, integrations, portalAudit, providerTruth, providerContracts, ownershipQueue];
+
+    if (contractResponsesBefore.some(response => response.status !== 200 || response.body?.ok !== true)) {
+      throw new Error("twitch configured-alias scenario could not read every local contract surface");
+    }
+    if (!providerService || !portalRow || !truthRow || !contractRow || !ownershipRow) throw new Error("twitch configured-alias scenario omitted a contract row");
+    if (JSON.stringify(status.body.acceptedEnv?.TWITCH_CLIENT_ID) !== JSON.stringify(TWITCH_CLIENT_ID_ENV_NAMES)
+      || JSON.stringify(status.body.acceptedEnv?.TWITCH_CLIENT_SECRET) !== JSON.stringify(TWITCH_CLIENT_SECRET_ENV_NAMES)
+      || JSON.stringify(providerService.acceptedEnv?.TWITCH_CLIENT_ID) !== JSON.stringify(TWITCH_CLIENT_ID_ENV_NAMES)
+      || JSON.stringify(providerService.acceptedEnv?.TWITCH_CLIENT_SECRET) !== JSON.stringify(TWITCH_CLIENT_SECRET_ENV_NAMES)) {
+      throw new Error("twitch configured-alias scenario observed an unexpected accepted environment inventory");
+    }
+    if (status.body.credentialSources?.clientId !== "TWITCH_APP_ID"
+      || status.body.credentialSources?.clientSecret !== "TWITCH_APP_SECRET"
+      || status.body.configured !== true
+      || status.body.clientIdPresent !== true
+      || status.body.clientSecretPresent !== true
+      || status.body.secureOAuthReady !== true
+      || (status.body.missingEnv || []).length !== 0
+      || readiness.body.configured !== true
+      || readiness.body.ready !== false
+      || readiness.body.connected !== false
+      || (readiness.body.missingEnv || []).length !== 0
+      || providerService.configured !== true
+      || truthRow.configured !== true
+      || truthRow.connected !== false
+      || contractRow.gates?.envReady !== true
+      || contractRow.gates?.oauthConnected !== false
+      || contractRow.owned !== false
+      || ownershipRow.executable !== false) {
+      throw new Error("twitch configured-alias scenario returned inconsistent readiness or workspace state");
+    }
+    const connectFixture = {
+      expectedDecision: "connect",
+      authenticated: true,
+      workspaceContext: portalRow.workspaceContext,
+      workspaceIdMatches: modelBefore.body.workspace.id === signup.body.workspace.id,
+      foreignMetadataPresent: false,
+      configured: status.body.configured,
+      readinessConfigured: readiness.body.configured,
+      envReady: contractRow.gates?.envReady,
+      missingEnv: status.body.missingEnv,
+      accountPresent: portalRow.accountPresent,
+      connected: portalRow.connected,
+      banked: portalRow.banked,
+      portal: portalRow,
+      executable: Boolean(contractRow.owned),
+      proofRunnable: Boolean(ownershipRow.executable),
+      requiredProviderGatesMissing: Boolean(contractRow.missing?.length),
+      externalRequests: 0,
+      publicPayload: { portal: portalRow }
+    };
+    if (!twitchPortalIntegrationStateIsTruthful(connectFixture)) {
+      throw new Error("Twitch portal audit did not recommend Connect for the authenticated no-account workspace");
+    }
+
+    const genericStart = await shopifyScenarioResponse(scenarioBaseUrl, "/api/oauth/connect-url?provider=twitch", authenticatedOptions);
+    const directStart = await shopifyScenarioResponse(scenarioBaseUrl, "/api/oauth/twitch/start", authenticatedOptions);
+    if (genericStart.status !== 200 || !genericStart.body?.url || directStart.status !== 302 || !directStart.location) {
+      throw new Error("generic and direct Twitch OAuth starts did not both accept the complete alias pair");
+    }
+    const genericLocation = new URL(genericStart.body.url);
+    const directLocation = new URL(directStart.location);
+    for (const [label, location] of [["generic", genericLocation], ["direct", directLocation]]) {
+      if (location.origin !== "https://id.twitch.tv"
+        || location.searchParams.get("client_id") !== SYNTHETIC_TWITCH_APP_ID
+        || location.searchParams.get("redirect_uri") !== "https://socialcuesapp.com/api/oauth/twitch/callback"
+        || !location.searchParams.get("state")) {
+        throw new Error(`${label} Twitch OAuth start resolved a different application id, callback, or state`);
+      }
+    }
+    if ((await shopifyScenarioExternalAttempts(providerMockLogPath)).length !== 0) {
+      throw new Error("Twitch OAuth start reached a provider-shaped mock before callback");
+    }
+
+    const callbackState = genericLocation.searchParams.get("state");
+    const tamperedState = `${callbackState.slice(0, -1)}${callbackState.endsWith("A") ? "B" : "A"}`;
+    const providerMocksBeforeRejectedState = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const rejectedCallback = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      `/api/oauth/twitch/callback?code=${encodeURIComponent(SYNTHETIC_TWITCH_CALLBACK_CODE)}&state=${encodeURIComponent(tamperedState)}`,
+      authenticatedOptions
+    );
+    const modelAfterRejectedState = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", authenticatedOptions);
+    if (rejectedCallback.status !== 400
+      || !/Twitch OAuth state rejected/iu.test(rejectedCallback.text)
+      || modelAfterRejectedState.status !== 200
+      || modelAfterRejectedState.body?.workspace?.id !== signup.body.workspace.id
+      || (modelAfterRejectedState.body?.connectedAccounts || []).some(account => account.platform === "twitch")
+      || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(providerMocksBeforeRejectedState)) {
+      throw new Error("Twitch portal fixture did not reject a tampered callback state before provider exchange or persistence");
+    }
+
+    const callback = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      `/api/oauth/twitch/callback?code=${encodeURIComponent(SYNTHETIC_TWITCH_CALLBACK_CODE)}&state=${encodeURIComponent(callbackState)}`,
+      authenticatedOptions
+    );
+    if (callback.status !== 200 || !/Twitch connected and token stored/iu.test(callback.text)) {
+      throw new Error("Twitch portal fixture callback did not store the synthetic workspace connection");
+    }
+
+    const statusAfter = await shopifyScenarioResponse(scenarioBaseUrl, "/api/oauth/twitch/status", authenticatedOptions);
+    const readinessAfter = await shopifyScenarioResponse(scenarioBaseUrl, "/api/twitch/readiness", authenticatedOptions);
+    const portalAfter = await shopifyScenarioResponse(scenarioBaseUrl, "/api/dev-portal/audit", authenticatedOptions);
+    const truthAfter = await shopifyScenarioResponse(scenarioBaseUrl, "/api/provider/truth", authenticatedOptions);
+    const contractsAfter = await shopifyScenarioResponse(scenarioBaseUrl, "/api/provider/contracts", authenticatedOptions);
+    const ownershipAfter = await shopifyScenarioResponse(scenarioBaseUrl, "/api/provider/ownership-queue", authenticatedOptions);
+    const modelAfter = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", authenticatedOptions);
+    const portalAfterRow = portalAfter.body?.rows?.find(row => row.id === "twitch");
+    const truthAfterRow = truthAfter.body?.rows?.find(row => row.id === "twitch");
+    const contractAfterRow = contractsAfter.body?.rows?.find(row => row.id === "twitch");
+    const ownershipAfterRow = ownershipAfter.body?.rows?.find(row => row.id === "twitch");
+    const publicAccount = modelAfter.body?.connectedAccounts?.find(account => account.platform === "twitch");
+    const bankedFixture = {
+      expectedDecision: "developer-approval",
+      authenticated: true,
+      workspaceContext: portalAfterRow?.workspaceContext,
+      workspaceIdMatches: publicAccount?.workspaceId === signup.body.workspace.id,
+      foreignMetadataPresent: false,
+      configured: statusAfter.body?.configured,
+      readinessConfigured: readinessAfter.body?.configured,
+      envReady: contractAfterRow?.gates?.envReady,
+      missingEnv: statusAfter.body?.missingEnv,
+      accountPresent: portalAfterRow?.accountPresent,
+      connected: portalAfterRow?.connected,
+      banked: portalAfterRow?.banked,
+      portal: portalAfterRow,
+      executable: Boolean(contractAfterRow?.owned),
+      proofRunnable: Boolean(ownershipAfterRow?.executable),
+      requiredProviderGatesMissing: Boolean(contractAfterRow?.missing?.length),
+      externalRequests: 0,
+      publicPayload: { portal: portalAfterRow, account: publicAccount }
+    };
+    if (statusAfter.status !== 200
+      || readinessAfter.status !== 200
+      || portalAfter.status !== 200
+      || truthAfter.status !== 200
+      || contractsAfter.status !== 200
+      || ownershipAfter.status !== 200
+      || modelAfter.status !== 200
+      || statusAfter.body?.connected !== true
+      || readinessAfter.body?.connected !== true
+      || truthAfterRow?.connected !== true
+      || truthAfterRow?.tokenStored !== true
+      || contractAfterRow?.gates?.oauthConnected !== true
+      || contractAfterRow?.owned !== false
+      || ownershipAfterRow?.executable !== true
+      || !publicAccount?.connected
+      || !publicAccount?.tokenStored
+      || ["credential", "refreshCredential", "token", "accessToken", "refreshToken", "encryptedCredential"].some(name => Object.prototype.hasOwnProperty.call(publicAccount, name))
+      || !twitchPortalIntegrationStateIsTruthful(bankedFixture)) {
+      throw new Error("Twitch callback did not advance the workspace portal audit to the next truthful provider gate");
+    }
+
+    const foreignOptions = { headers: { Authorization: `Bearer ${foreignSignup.body.session.token}` } };
+    const foreignModel = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignOptions);
+    const forgedPortal = await shopifyScenarioResponse(
+      scenarioBaseUrl,
+      `/api/dev-portal/audit?workspaceId=${encodeURIComponent(signup.body.workspace.id)}&providerAccountId=123456789`,
+      foreignOptions
+    );
+    const primaryTruthAfterForeign = await shopifyScenarioResponse(scenarioBaseUrl, "/api/provider/truth", authenticatedOptions);
+    const forgedPortalRow = forgedPortal.body?.rows?.find(row => row.id === "twitch");
+    const primaryTruthAfterForeignRow = primaryTruthAfterForeign.body?.rows?.find(row => row.id === "twitch");
+    const foreignOutput = JSON.stringify({ model: foreignModel.body, portal: forgedPortal.body });
+    const foreignFixture = {
+      expectedDecision: "connect",
+      authenticated: true,
+      workspaceContext: forgedPortalRow?.workspaceContext,
+      workspaceIdMatches: foreignModel.body?.workspace?.id === foreignSignup.body.workspace.id,
+      foreignMetadataPresent: ["123456789", "Synthetic Portal Fixture", "synthetic_portal_fixture"].some(marker => foreignOutput.includes(marker)),
+      configured: true,
+      readinessConfigured: true,
+      envReady: true,
+      missingEnv: [],
+      accountPresent: forgedPortalRow?.accountPresent,
+      connected: forgedPortalRow?.connected,
+      banked: forgedPortalRow?.banked,
+      portal: forgedPortalRow,
+      executable: false,
+      requiredProviderGatesMissing: true,
+      externalRequests: 0,
+      publicPayload: { portal: forgedPortalRow }
+    };
+    if (foreignModel.status !== 200
+      || forgedPortal.status !== 200
+      || primaryTruthAfterForeign.status !== 200
+      || (foreignModel.body?.connectedAccounts || []).some(account => account.platform === "twitch")
+      || primaryTruthAfterForeignRow?.connected !== true
+      || primaryTruthAfterForeignRow?.tokenStored !== true
+      || !twitchPortalIntegrationStateIsTruthful(foreignFixture)) {
+      throw new Error("Twitch portal selectors exposed or reused another workspace's account state");
+    }
+
+    const providerMocksBeforeRestart = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    await stopScenarioServer(child);
+    if (child.exitCode === null && child.signalCode === null) {
+      throw new Error("Twitch portal fixture could not stop the initial server before restart verification");
+    }
+    child = startScenarioServer();
+    await waitForTwitchScenarioServer(child, scenarioBaseUrl);
+
+    const restartedPrimaryModel = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", authenticatedOptions);
+    const restartedForeignModel = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", foreignOptions);
+    const restartedTruth = await shopifyScenarioResponse(scenarioBaseUrl, "/api/provider/truth", authenticatedOptions);
+    const restartedPortal = await shopifyScenarioResponse(scenarioBaseUrl, "/api/dev-portal/audit", authenticatedOptions);
+    const restartedPrimaryAccount = restartedPrimaryModel.body?.connectedAccounts?.find(account => account.platform === "twitch");
+    const restartedTruthRow = restartedTruth.body?.rows?.find(row => row.id === "twitch");
+    const restartedPortalRow = restartedPortal.body?.rows?.find(row => row.id === "twitch");
+    if (restartedPrimaryModel.status !== 200
+      || restartedPrimaryModel.body?.workspace?.id !== signup.body.workspace.id
+      || !restartedPrimaryAccount?.connected
+      || !restartedPrimaryAccount?.tokenStored
+      || restartedPrimaryAccount?.workspaceId !== signup.body.workspace.id
+      || restartedPrimaryAccount?.ownerUserId !== signup.body.workspace.ownerUserId
+      || restartedPrimaryAccount?.providerAccountId !== "123456789"
+      || ["credential", "refreshCredential", "token", "accessToken", "refreshToken", "encryptedCredential"].some(name => Object.prototype.hasOwnProperty.call(restartedPrimaryAccount || {}, name))
+      || restartedForeignModel.status !== 200
+      || restartedForeignModel.body?.workspace?.id !== foreignSignup.body.workspace.id
+      || (restartedForeignModel.body?.connectedAccounts || []).some(account => account.platform === "twitch")
+      || restartedTruth.status !== 200
+      || restartedTruthRow?.connected !== true
+      || restartedTruthRow?.tokenStored !== true
+      || restartedPortal.status !== 200
+      || restartedPortalRow?.workspaceContext !== true
+      || restartedPortalRow?.connected !== true
+      || restartedPortalRow?.banked !== true
+      || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(providerMocksBeforeRestart)) {
+      throw new Error("Twitch portal fixture did not preserve its owner-scoped account across a clean server restart");
+    }
+
+    const beforeResponses = [globalPortal, status, readiness, integrations, portalAudit, providerTruth, providerContracts, ownershipQueue, rejectedCallback, modelAfterRejectedState];
+    const afterResponses = [statusAfter, readinessAfter, portalAfter, truthAfter, contractsAfter, ownershipAfter, modelAfter, foreignModel, forgedPortal, primaryTruthAfterForeign, restartedPrimaryModel, restartedForeignModel, restartedTruth, restartedPortal];
+    const privateMarkers = [
+      SYNTHETIC_TWITCH_APP_SECRET,
+      SYNTHETIC_TWITCH_CALLBACK_ACCESS_TOKEN,
+      SYNTHETIC_TWITCH_CALLBACK_REFRESH_TOKEN,
+      SYNTHETIC_TWITCH_TOKEN_ENCRYPTION_KEY
+    ];
+    assertTwitchCredentialValuesAbsent([...beforeResponses, ...afterResponses], [SYNTHETIC_TWITCH_APP_ID, ...privateMarkers], "readiness, workspace, portal, truth, or contract responses");
+    assertTwitchCredentialValuesAbsent([genericStart, directStart, callback], privateMarkers, "OAuth start or callback response");
+    if (callback.text.includes(SYNTHETIC_TWITCH_CALLBACK_CODE)) throw new Error("Twitch callback response exposed its raw callback code");
+
+    const providerMocks = await shopifyScenarioExternalAttempts(providerMockLogPath);
+    const providerMockKinds = providerMocks.map(entry => entry.kind);
+    if (JSON.stringify(providerMockKinds) !== JSON.stringify([
+      "twitch-token-mock",
+      "twitch-users-mock",
+      "twitch-validate-mock",
+      "twitch-validate-mock"
+    ])
+      || providerMocks[0]?.clientIdMatches !== true
+      || providerMocks[0]?.clientSecretMatches !== true
+      || providerMocks[0]?.grantType !== "authorization_code"
+      || providerMocks[1]?.clientIdMatches !== true
+      || providerMocks[1]?.bearerPresent !== true
+      || providerMocks.slice(2).some(entry => entry.bearerPresent !== true)) {
+      throw new Error("Twitch callback did not remain inside the expected hermetic provider mocks");
+    }
+    result = {
+      configured: true,
+      resolvedIdSource: status.body.credentialSources.clientId,
+      resolvedSecretSource: status.body.credentialSources.clientSecret,
+      beforeCallback: connectFixture,
+      afterCallback: bankedFixture,
+      foreignWorkspace: foreignFixture,
+      readinessReady: false,
+      workspaceAccountConnected: true,
+      callbackStateBinding: true,
+      restartPersistence: true,
+      foreignWorkspaceIsolatedAfterRestart: true,
+      proofRunnableAfterCallback: true,
+      oauthClientIdMatched: true,
+      tokenExchangeSourceContractMatched: true,
+      providerMockKinds,
+      secretAbsent: true,
+      mockedProviderRequests: providerMocks.length,
+      serverStarts: children.length,
+      externalRequests: 0
+    };
+  } catch (error) {
+    scenarioFailure = error;
+  } finally {
+    for (const scenarioChild of children) {
+      if (scenarioChild.exitCode === null && scenarioChild.signalCode === null) {
+        await stopScenarioServer(scenarioChild);
+      }
+    }
+    childStopped = children.every(scenarioChild => scenarioChild.exitCode !== null || scenarioChild.signalCode !== null);
+  }
+
+  let postFailure;
+  let cleanupComplete = false;
+  try {
+    assertTwitchCredentialValuesAbsent(`${stdout}\n${stderr}`, [
+      SYNTHETIC_TWITCH_APP_ID,
+      SYNTHETIC_TWITCH_APP_SECRET,
+      SYNTHETIC_TWITCH_CALLBACK_ACCESS_TOKEN,
+      SYNTHETIC_TWITCH_CALLBACK_REFRESH_TOKEN,
+      SYNTHETIC_TWITCH_TOKEN_ENCRYPTION_KEY
+    ], "stdout or stderr");
+    const externalAttempts = await shopifyScenarioExternalAttempts(requestLogPath);
+    if (externalAttempts.length) throw new Error("twitch portal credential scenario attempted an external request");
+    if (!childStopped) throw new Error("twitch portal credential scenario did not stop its child process");
+    if (JSON.stringify(Object.entries(process.env)) !== parentBefore) throw new Error("twitch portal credential scenario mutated the parent process environment");
+    if (scenarioFailure) throw scenarioFailure;
+  } catch (error) {
+    postFailure = error;
+  } finally {
+    await rm(scenarioDataDir, { recursive: true, force: true });
+    try {
+      await access(scenarioDataDir);
+    } catch (error) {
+      if (error?.code === "ENOENT") cleanupComplete = true;
+      else if (!postFailure) postFailure = error;
+    }
+  }
+  if (!cleanupComplete && !postFailure) postFailure = new Error("twitch portal credential scenario cleanup was incomplete");
+  if (postFailure) throw postFailure;
+  return { ...result, cleanupComplete };
+}
+
+function shopifyCallbackPath(shop, secret) {
+  const params = new URLSearchParams({
+    code: "shopify-fixture-code",
+    shop,
+    state: "shopify-fixture-invalid-state",
+    timestamp: "1786834800"
+  });
+  const message = [...params.entries()].map(([key, value]) => `${key}=${value}`).sort().join("&");
+  params.set("hmac", createHmac("sha256", secret).update(message).digest("hex"));
+  return `/api/oauth/shopify/callback?${params.toString()}`;
+}
+
+function encryptedShopifyFixtureToken(value, keyMaterial) {
+  const key = createHash("sha256").update(keyMaterial).digest();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const ciphertext = Buffer.concat([cipher.update(String(value), "utf8"), cipher.final()]);
+  return {
+    alg: "aes-256-gcm",
+    iv: iv.toString("base64url"),
+    tag: cipher.getAuthTag().toString("base64url"),
+    value: ciphertext.toString("base64url")
+  };
+}
+
+async function seedShopifyWorkspaceTokenFixture({ dataDir, credential, scenarioShop, user, workspaceId }) {
+  const seedSource = await readFile(new URL("./social-cues-model-seed.json", import.meta.url), "utf8");
+  const seed = JSON.parse(seedSource.replace(/^\uFEFF/, ""));
+  const owner = { ...user, id: String(user?.id || ""), workspaceId: String(workspaceId || "") };
+  if (!owner.id || !owner.workspaceId) throw new Error("shopify workspace-token fixture is missing its canonical owner identity");
+  const unavailable = () => { throw new Error("shopify workspace-token fixture must not invoke a browser merge callback"); };
+  const store = await openLocalWorkspacePersistence({ dataDir, seed, mergeClient: unavailable, recoverClient: unavailable });
+  try {
+    const sharedModel = await store.load();
+    const model = store.view(sharedModel, owner.workspaceId);
+    const connectedAt = new Date().toISOString();
+    model.connectedAccounts = Array.isArray(model.connectedAccounts) ? model.connectedAccounts : [];
+    model.connectedAccounts.push({
+      id: `acct-shopify-fixture-${owner.workspaceId}`,
+      platform: "shopify",
+      name: scenarioShop,
+      handle: scenarioShop,
+      status: "connected",
+      connectedAt,
+      credentialUpdatedAt: connectedAt,
+      oauthProvider: "shopify",
+      providerAccountId: scenarioShop,
+      credential,
+      tokenType: "Bearer",
+      scopes: ["read_products", "read_marketing_events", "write_marketing_events"],
+      ownerUserId: owner.id,
+      workspaceId: owner.workspaceId
+    });
+    await store.save(model, owner);
+  } finally {
+    await store.close();
+  }
+}
+
+function resolvedShopifyEnvSource(env, names) {
+  return names.find(name => Boolean(env[name])) || null;
+}
+
+function validShopifyFixtureClientId(value = "") {
+  return /^[a-f0-9]{32}$/i.test(String(value || "").trim());
+}
+
+function validShopifyFixtureClientSecret(value = "") {
+  return /^shpss_[a-f0-9]{32}$/i.test(String(value || "").trim());
+}
+
+function normalizedShopifyScenarioResult(result) {
+  return {
+    resolvedIdSource: result.resolvedIdSource,
+    resolvedSecretSource: result.resolvedSecretSource,
+    idFormatValid: result.idFormatValid,
+    secretFormatValid: result.secretFormatValid,
+    configured: result.configured,
+    missingEnv: result.missingEnv,
+    readinessConfigured: result.readinessConfigured,
+    readinessReady: result.readinessReady,
+    providerConfigured: result.providerConfigured,
+    providerTruthConfigured: result.providerTruthConfigured,
+    contractEnvReady: result.contractEnvReady,
+    oauthClientIdMatched: result.oauthClientIdMatched,
+    oauthRedirectMatched: result.oauthRedirectMatched,
+    oauthSecretMatched: result.oauthSecretMatched,
+    externalRequests: result.externalRequests,
+    workspaceTokenSeparated: result.workspaceTokenSeparated
+  };
+}
+
+let shopifyScenarioSequence = 0;
+
+async function runShopifyCredentialScenario(scenario) {
+  shopifyScenarioSequence += 1;
+  const sequence = shopifyScenarioSequence;
+  const scenarioPort = await availableLoopbackPort();
+  const scenarioBaseUrl = `http://127.0.0.1:${scenarioPort}`;
+  const scenarioShop = `social-cues-fixture-${sequence}.myshopify.com`;
+  const scenarioDataDir = path.join(process.cwd(), ".tmp", `shopify-credential-${sequence}-${Date.now()}`);
+  const requestLogPath = path.join(scenarioDataDir, "external-http-requests.ndjson");
+  const workspacePromoCode = `SC-SHOPIFY-${String(sequence).padStart(4, "0")}`;
+  const workspaceEncryptionKey = scenario.workspaceTokenFixture ? `shopify-fixture-encryption-${randomBytes(12).toString("hex")}` : "";
+  const workspaceTokenMarker = scenario.workspaceTokenFixture ? `shopify-fixture-workspace-token-${randomBytes(12).toString("hex")}` : "";
+  const authSessionMarker = `shopify-fixture-session-${randomBytes(12).toString("hex")}`;
+  const workerSecretMarker = `shopify-fixture-worker-${randomBytes(12).toString("hex")}`;
+  const workspaceCredential = scenario.workspaceTokenFixture ? encryptedShopifyFixtureToken(workspaceTokenMarker, workspaceEncryptionKey) : null;
+  await mkdir(scenarioDataDir, { recursive: true });
+  const suppliedBaseEnv = scenario.baseEnv || process.env;
+  const suppliedBaseBefore = JSON.stringify(Object.entries(suppliedBaseEnv));
+  const childEnv = shopifyScenarioEnv({
+    baseEnv: suppliedBaseEnv,
+    overrides: {
+      PORT: String(scenarioPort),
+      HOST: "127.0.0.1",
+      AUTH_PROVIDER: "alpha-local",
+      SUPABASE_ENABLED: "false",
+      SENTRY_DSN: "",
+      PUBLIC_APP_URL: "https://socialcuesapp.com",
+      SHOPIFY_PUBLIC_APP_URL: "https://socialcuesapp.com",
+      SHOPIFY_SHOP_DOMAIN: scenarioShop,
+      SHOPIFY_API_VERSION: "2026-07",
+      SOCIAL_CUES_DATA_DIR: scenarioDataDir,
+      SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
+      SOCIAL_CUES_PROMO_CODES: JSON.stringify([{ code: workspacePromoCode, label: "Shopify fixture", days: 1, active: true }]),
+      OAUTH_TOKEN_ENCRYPTION_KEY: workspaceEncryptionKey,
+      AUTH_SESSION_SECRET: authSessionMarker,
+      WORKER_SECRET: workerSecretMarker,
+      ...scenario.overrides
+    }
+  });
+  if (JSON.stringify(Object.entries(suppliedBaseEnv)) !== suppliedBaseBefore) throw new Error(`shopify scenario mutated its base environment: ${scenario.label}`);
+  const expectedShopifyNames = new Set([
+    "PUBLIC_APP_URL",
+    "SHOPIFY_PUBLIC_APP_URL",
+    "SHOPIFY_SHOP_DOMAIN",
+    "SHOPIFY_API_VERSION",
+    ...Object.keys(scenario.overrides || {}).filter(name => SHOPIFY_SCENARIO_ENV_KEYS.has(name.toLowerCase()))
+  ]);
+  const actualShopifyNames = new Set(shopifyEnvironmentState(childEnv).map(([name]) => name));
+  if (JSON.stringify([...actualShopifyNames].sort()) !== JSON.stringify([...expectedShopifyNames].sort())) {
+    throw new Error(`shopify scenario retained inherited configuration: ${scenario.label}`);
+  }
+  if (scenario.unrelatedSentinel && childEnv[scenario.unrelatedSentinel.name] !== scenario.unrelatedSentinel.value) {
+    throw new Error(`shopify scenario removed an unrelated inherited variable: ${scenario.label}`);
+  }
+
+  const idNameKeys = new Set(SHOPIFY_CLIENT_ID_ENV_NAMES.map(name => name.toLowerCase()));
+  const secretNameKeys = new Set(SHOPIFY_CLIENT_SECRET_ENV_NAMES.map(name => name.toLowerCase()));
+  const idCredentialValues = Object.entries(childEnv)
+    .filter(([name, value]) => idNameKeys.has(name.toLowerCase()) && String(value || "").trim())
+    .map(([, value]) => String(value));
+  const secretCredentialValues = Object.entries(childEnv)
+    .filter(([name, value]) => secretNameKeys.has(name.toLowerCase()) && String(value || "").trim())
+    .map(([, value]) => String(value));
+  const resolvedIdSource = resolvedShopifyEnvSource(childEnv, SHOPIFY_CLIENT_ID_ENV_NAMES);
+  const resolvedSecretSource = resolvedShopifyEnvSource(childEnv, SHOPIFY_CLIENT_SECRET_ENV_NAMES);
+  const resolvedClientId = resolvedIdSource ? String(childEnv[resolvedIdSource]) : "";
+  const resolvedClientSecret = resolvedSecretSource ? String(childEnv[resolvedSecretSource]) : "";
+  const idFormatValid = validShopifyFixtureClientId(resolvedClientId);
+  const secretFormatValid = validShopifyFixtureClientSecret(resolvedClientSecret);
+  if (resolvedIdSource !== (scenario.expectedIdSource || null)
+    || resolvedSecretSource !== (scenario.expectedSecretSource || null)
+    || idFormatValid !== scenario.expectedIdFormatValid
+    || secretFormatValid !== scenario.expectedSecretFormatValid) {
+    throw new Error(`shopify scenario resolved an unexpected credential source or format state: ${scenario.label}`);
+  }
+  const nonSelectedIdValues = idCredentialValues.filter(value => value !== scenario.expectedClientId);
+  const workspacePrivateMarkers = workspaceCredential
+    ? [workspaceTokenMarker, workspaceEncryptionKey, workspaceCredential.value]
+    : [];
+  const privateMarkers = [
+    ...secretCredentialValues,
+    authSessionMarker,
+    workerSecretMarker,
+    ...(scenario.privateMarkers || []),
+    ...(scenario.hostileMarkers || []),
+    ...workspacePrivateMarkers
+  ].filter(Boolean);
+  const capturedResponses = [];
+  const nonOAuthResponses = [];
+  let stdout = "";
+  let stderr = "";
+  let result;
+  let scenarioFailure;
+  let stopFailure;
+  let childStopped = false;
+  const children = [];
+  const startScenarioServer = () => {
+    const nextChild = spawn(process.execPath, [`--import=${pathToFileURL(externalRequestGuardPath).href}`, "server.mjs"], {
+      cwd: new URL(".", import.meta.url),
+      env: childEnv,
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
+    });
+    children.push(nextChild);
+    nextChild.stdout.on("data", chunk => { stdout += chunk; });
+    nextChild.stderr.on("data", chunk => { stderr += chunk; });
+    return nextChild;
+  };
+  let child = startScenarioServer();
+
+  try {
+    await waitForShopifyScenarioServer(child, scenarioBaseUrl, scenario.label);
+    let authenticatedOptions = {};
+    let workspaceTokenSeparated = false;
+    let signupUser = null;
+    let signupWorkspaceId = "";
+    if (scenario.expectedConfigured || scenario.workspaceTokenFixture) {
+      const signup = await shopifyScenarioResponse(scenarioBaseUrl, "/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Shopify Fixture User",
+          email: `shopify-fixture-${sequence}@example.test`,
+          password: "shopify-fixture-password-2026",
+          promoCode: workspacePromoCode,
+          workspaceName: `Shopify Fixture Workspace ${sequence}`
+        })
+      });
+      capturedResponses.push(signup);
+      if (signup.status !== 200 || signup.body?.ok !== true || !signup.body?.session?.token) {
+        throw new Error(`shopify credential scenario could not create its authenticated workspace: ${scenario.label}`);
+      }
+      authenticatedOptions = { headers: { Authorization: `Bearer ${signup.body.session.token}` } };
+      signupUser = signup.body.session.user || signup.body.user || null;
+      signupWorkspaceId = signup.body.workspace?.id || signupUser?.workspaceId || "";
+    }
+    if (scenario.workspaceTokenFixture) {
+      await stopShopifyScenarioServer(child);
+      if (child.exitCode === null && child.signalCode === null) throw new Error("shopify workspace-token fixture could not stop before canonical seeding");
+      await seedShopifyWorkspaceTokenFixture({
+        dataDir: scenarioDataDir,
+        credential: workspaceCredential,
+        scenarioShop,
+        user: signupUser,
+        workspaceId: signupWorkspaceId
+      });
+      child = startScenarioServer();
+      await waitForShopifyScenarioServer(child, scenarioBaseUrl, scenario.label);
+      const publicModel = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", authenticatedOptions);
+      capturedResponses.push(publicModel);
+      const publicAccount = publicModel.body?.connectedAccounts?.find(account => account.providerAccountId === scenarioShop);
+      if (publicModel.status !== 200 || !publicAccount?.connected || !publicAccount?.tokenStored) {
+        throw new Error("shopify workspace-token fixture was not represented as connected workspace state");
+      }
+      if (["credential", "token", "accessToken", "encryptedToken"].some(name => Object.prototype.hasOwnProperty.call(publicAccount, name))) {
+        throw new Error("shopify workspace-token fixture exposed a private credential field");
+      }
+      const rawModelSource = await readFile(path.join(scenarioDataDir, "model.json"), "utf8");
+      const rawModel = JSON.parse(rawModelSource);
+      const rawAccount = rawModel.workspaces?.[signupWorkspaceId]?.content?.connectedAccounts
+        ?.find(account => account.providerAccountId === scenarioShop);
+      if (rawAccount?.credential?.alg !== "aes-256-gcm"
+        || rawAccount.credential.value !== workspaceCredential.value
+        || rawModelSource.includes(workspaceTokenMarker)) {
+        throw new Error("shopify workspace-token fixture was not stored as the expected encrypted envelope");
+      }
+      workspaceTokenSeparated = true;
+    }
+
+    const status = await shopifyScenarioResponse(scenarioBaseUrl, "/api/oauth/shopify/status", authenticatedOptions);
+    const readiness = await shopifyScenarioResponse(scenarioBaseUrl, "/api/shopify/readiness", authenticatedOptions);
+    const integrations = await shopifyScenarioResponse(scenarioBaseUrl, "/api/integrations/readiness", authenticatedOptions);
+    const providerTruth = await shopifyScenarioResponse(scenarioBaseUrl, "/api/provider/truth", authenticatedOptions);
+    const providerContracts = await shopifyScenarioResponse(scenarioBaseUrl, "/api/provider/contracts", authenticatedOptions);
+    capturedResponses.push(status, readiness, integrations, providerTruth, providerContracts);
+    nonOAuthResponses.push(status, readiness, integrations, providerTruth, providerContracts);
+    const providerService = integrations.body?.providerServices?.find(item => item.id === "shopify");
+    const providerTruthRow = providerTruth.body?.rows?.find(item => item.id === "shopify");
+    const providerContract = providerContracts.body?.rows?.find(item => item.id === "shopify");
+    if (status.status !== 200 || status.body?.ok !== true) throw new Error(`shopify status failed in credential scenario: ${scenario.label}`);
+    if (readiness.status !== 200 || readiness.body?.ok !== true) throw new Error(`shopify readiness failed in credential scenario: ${scenario.label}`);
+    if (integrations.status !== 200 || integrations.body?.ok !== true || !providerService) throw new Error(`shopify integration readiness failed in credential scenario: ${scenario.label}`);
+    if (providerTruth.status !== 200 || providerTruth.body?.ok !== true || !providerTruthRow) throw new Error(`shopify provider truth failed in credential scenario: ${scenario.label}`);
+    if (providerContracts.status !== 200 || providerContracts.body?.ok !== true || !providerContract) throw new Error(`shopify provider contracts failed in credential scenario: ${scenario.label}`);
+    if (JSON.stringify(status.body.acceptedEnv?.SHOPIFY_CLIENT_ID) !== JSON.stringify(SHOPIFY_CLIENT_ID_ENV_NAMES)
+      || JSON.stringify(status.body.acceptedEnv?.SHOPIFY_CLIENT_SECRET) !== JSON.stringify(SHOPIFY_CLIENT_SECRET_ENV_NAMES)
+      || JSON.stringify(status.body.acceptedEnv?.SHOPIFY_SHOP_DOMAIN) !== JSON.stringify(SHOPIFY_SHOP_DOMAIN_ENV_NAMES)
+      || JSON.stringify(providerService.acceptedEnv?.SHOPIFY_CLIENT_ID) !== JSON.stringify(SHOPIFY_CLIENT_ID_ENV_NAMES)
+      || JSON.stringify(providerService.acceptedEnv?.SHOPIFY_CLIENT_SECRET) !== JSON.stringify(SHOPIFY_CLIENT_SECRET_ENV_NAMES)) {
+      throw new Error(`shopify accepted environment inventory changed in scenario: ${scenario.label}`);
+    }
+    assertShopifyCredentialValuesAbsent(nonOAuthResponses, [...idCredentialValues, ...secretCredentialValues, ...privateMarkers], `${scenario.label} public readiness and provider reports`);
+
+    const observation = {
+      key: scenario.key,
+      resolvedIdSource,
+      resolvedSecretSource,
+      idFormatValid,
+      secretFormatValid,
+      configured: Boolean(status.body.configured),
+      missingEnv: [...(status.body.missingEnv || [])],
+      readinessConfigured: Boolean(readiness.body.configured),
+      readinessReady: Boolean(readiness.body.ready),
+      providerConfigured: Boolean(providerService.configured),
+      providerTruthConfigured: Boolean(providerTruthRow.configured),
+      contractEnvReady: Boolean(providerContract.gates?.envReady),
+      oauthClientIdMatched: false,
+      oauthRedirectMatched: false,
+      oauthSecretMatched: false,
+      externalRequests: 0,
+      workspaceTokenSeparated
+    };
+
+    const accountConnected = Boolean(scenario.workspaceTokenFixture);
+    if (observation.configured !== scenario.expectedConfigured
+      || Boolean(status.body.clientIdPresent) !== scenario.expectedIdFormatValid
+      || Boolean(status.body.clientSecretPresent) !== scenario.expectedSecretFormatValid
+      || JSON.stringify(observation.missingEnv) !== JSON.stringify(scenario.expectedMissingEnv)
+      || JSON.stringify(readiness.body.missingEnv || []) !== JSON.stringify(scenario.expectedMissingEnv)
+      || observation.readinessConfigured !== scenario.expectedConfigured
+      || observation.readinessReady !== Boolean(scenario.expectedConfigured && accountConnected)
+      || observation.providerConfigured !== scenario.expectedConfigured
+      || observation.providerTruthConfigured !== scenario.expectedConfigured
+      || observation.contractEnvReady !== scenario.expectedConfigured
+      || Boolean(status.body.connected) !== accountConnected
+      || Boolean(readiness.body.account?.connected) !== accountConnected
+      || Boolean(providerTruthRow.connected) !== accountConnected
+      || Boolean(providerTruthRow.tokenStored) !== accountConnected
+      || Boolean(providerContract.gates?.oauthConnected) !== accountConnected) {
+      throw new Error(`shopify credential scenario returned the wrong readiness or workspace state: ${scenario.label}`);
+    }
+    if (scenario.workspaceTokenFixture) {
+      const providerAccounts = await shopifyScenarioResponse(scenarioBaseUrl, "/api/provider/accounts?platform=shopify", authenticatedOptions);
+      capturedResponses.push(providerAccounts);
+      nonOAuthResponses.push(providerAccounts);
+      const selectedAccount = providerAccounts.body?.rows?.[0]?.accounts?.find(account => account.providerAccountId === scenarioShop);
+      if (providerAccounts.status !== 200 || providerAccounts.body?.ok !== true || !selectedAccount?.connected || !selectedAccount?.tokenStored) {
+        throw new Error("shopify workspace-token fixture was absent from the safe provider-account surface");
+      }
+      if (observation.configured || observation.readinessReady || !observation.workspaceTokenSeparated) {
+        throw new Error("shopify workspace token incorrectly satisfied application OAuth readiness");
+      }
+    }
+
+    const connectUrl = await shopifyScenarioResponse(scenarioBaseUrl, `/api/oauth/connect-url?provider=shopify&shop=${encodeURIComponent(scenarioShop)}`, authenticatedOptions);
+    const directStart = await shopifyScenarioResponse(scenarioBaseUrl, `/api/oauth/shopify/start?shop=${encodeURIComponent(scenarioShop)}`, authenticatedOptions);
+    capturedResponses.push(connectUrl, directStart);
+    if (observation.configured) {
+      const genericStartUrl = typeof connectUrl.body?.url === "string" ? connectUrl.body.url : "";
+      if (connectUrl.status !== 200 || connectUrl.body?.ok !== true || !genericStartUrl
+        || directStart.status !== 302 || !directStart.location) {
+        throw new Error(`shopify OAuth start did not return its configured redirect: ${scenario.label}`);
+      }
+      let genericOAuthUrl;
+      let directOAuthUrl;
+      try {
+        genericOAuthUrl = new URL(genericStartUrl);
+        directOAuthUrl = new URL(directStart.location);
+      } catch {
+        throw new Error(`shopify OAuth start returned a malformed configured redirect: ${scenario.label}`);
+      }
+      const expectedCallback = "https://socialcuesapp.com/api/oauth/shopify/callback";
+      const validStartUrl = value => value.protocol === "https:"
+        && value.hostname === scenarioShop
+        && value.pathname === "/admin/oauth/authorize"
+        && value.searchParams.get("client_id") === scenario.expectedClientId
+        && value.searchParams.get("redirect_uri") === expectedCallback
+        && Boolean(value.searchParams.get("state"));
+      if (!validStartUrl(genericOAuthUrl) || !validStartUrl(directOAuthUrl)) {
+        throw new Error(`shopify OAuth start resolved a different client id: ${scenario.label}`);
+      }
+      assertShopifyCredentialValuesAbsent([connectUrl.text, directStart.text, directStart.location], [scenario.expectedClientSecret], `${scenario.label} OAuth start`);
+      const callback = await shopifyScenarioResponse(scenarioBaseUrl, shopifyCallbackPath(scenarioShop, scenario.expectedClientSecret), authenticatedOptions);
+      if (callback.status !== 400 || !/OAuth state rejected/i.test(callback.text) || /HMAC did not validate/i.test(callback.text)) {
+        throw new Error(`shopify OAuth callback resolved a different client secret: ${scenario.label}`);
+      }
+      const wrongSecret = syntheticShopifyPair(4095).clientSecret;
+      const rejectedCallback = await shopifyScenarioResponse(scenarioBaseUrl, shopifyCallbackPath(scenarioShop, wrongSecret), authenticatedOptions);
+      capturedResponses.push(callback, rejectedCallback);
+      if (rejectedCallback.status !== 400 || !/HMAC did not validate/i.test(rejectedCallback.text) || /OAuth state rejected/i.test(rejectedCallback.text)) {
+        throw new Error(`shopify OAuth callback accepted a signature from another credential pair: ${scenario.label}`);
+      }
+      assertShopifyCredentialValuesAbsent([callback, rejectedCallback], [...secretCredentialValues, wrongSecret], `${scenario.label} OAuth callback`);
+      observation.oauthClientIdMatched = true;
+      observation.oauthRedirectMatched = true;
+      observation.oauthSecretMatched = true;
+    } else {
+      assertShopifyCredentialValuesAbsent([connectUrl, directStart], [...idCredentialValues, ...secretCredentialValues, ...privateMarkers], `${scenario.label} rejected OAuth start`);
+      if (connectUrl.status !== 409 || connectUrl.body?.url || connectUrl.location
+        || directStart.status !== 200 || !/Shopify app credentials needed/i.test(directStart.text) || directStart.location) {
+        throw new Error(`shopify OAuth start did not fail closed: ${scenario.label}`);
+      }
+    }
+    assertShopifyCredentialValuesAbsent(capturedResponses, [...privateMarkers, ...nonSelectedIdValues], `${scenario.label} captured HTTP surfaces`);
+    assertShopifyCredentialValuesAbsent(nonOAuthResponses, scenario.expectedClientId?.trim() ? [scenario.expectedClientId] : [], `${scenario.label} non-OAuth surfaces`);
+    assertShopifyCredentialValuesAbsent(observation, [...idCredentialValues, ...secretCredentialValues, ...privateMarkers], `${scenario.label} normalized report`);
+    result = observation;
+  } catch (error) {
+    scenarioFailure = error;
+  } finally {
+    try {
+      for (const scenarioChild of children) await stopShopifyScenarioServer(scenarioChild);
+      childStopped = children.every(scenarioChild => scenarioChild.exitCode !== null || scenarioChild.signalCode !== null);
+    } catch (error) {
+      stopFailure = error;
+    }
+  }
+
+  let postFailure = scenarioFailure || stopFailure;
+  let cleanupComplete = false;
+  try {
+    assertShopifyCredentialValuesAbsent(`${stdout}\n${stderr}`, [...idCredentialValues, ...secretCredentialValues, ...privateMarkers], `${scenario.label} stdout or stderr`);
+    const externalAttempts = await shopifyScenarioExternalAttempts(requestLogPath);
+    if (externalAttempts.length) throw new Error(`shopify credential scenario attempted an external request: ${scenario.label}`);
+    if (!childStopped) throw new Error(`shopify credential scenario did not stop its child process: ${scenario.label}`);
+    if (JSON.stringify(Object.entries(suppliedBaseEnv)) !== suppliedBaseBefore) throw new Error(`shopify scenario changed its supplied base after execution: ${scenario.label}`);
+  } catch (error) {
+    if (!postFailure) postFailure = error;
+  } finally {
+    await rm(scenarioDataDir, { recursive: true, force: true });
+    try {
+      await access(scenarioDataDir);
+    } catch (error) {
+      if (error?.code === "ENOENT") cleanupComplete = true;
+      else if (!postFailure) postFailure = error;
+    }
+  }
+  if (!cleanupComplete && !postFailure) postFailure = new Error(`shopify credential scenario cleanup was incomplete: ${scenario.label}`);
+  if (postFailure) throw postFailure;
+  result.cleanupComplete = true;
+  return result;
+}
+
+function syntheticShopifyPair(index) {
+  const payload = Number(index).toString(16).padStart(32, "0");
+  return {
+    clientId: payload,
+    clientSecret: `shpss_${payload}`
+  };
+}
+
+function defineShopifyScenario({ key, label, overrides = {}, idSource = null, secretSource = null, ...options }) {
+  const expectedClientId = idSource ? String(overrides[idSource] || "") : "";
+  const expectedClientSecret = secretSource ? String(overrides[secretSource] || "") : "";
+  const expectedIdFormatValid = validShopifyFixtureClientId(expectedClientId);
+  const expectedSecretFormatValid = validShopifyFixtureClientSecret(expectedClientSecret);
+  return {
+    key,
+    label,
+    overrides,
+    expectedIdSource: idSource,
+    expectedSecretSource: secretSource,
+    expectedClientId,
+    expectedClientSecret,
+    expectedIdFormatValid,
+    expectedSecretFormatValid,
+    expectedConfigured: expectedIdFormatValid && expectedSecretFormatValid,
+    expectedMissingEnv: [
+      ...(!expectedIdFormatValid ? [SHOPIFY_MISSING_CLIENT_ID] : []),
+      ...(!expectedSecretFormatValid ? [SHOPIFY_MISSING_CLIENT_SECRET] : [])
+    ],
+    ...options
+  };
+}
+
+function hostileShopifyEnvironment() {
+  const inherited = {};
+  const markers = [];
+  let pairIndex = 100;
+  for (const name of SHOPIFY_CLIENT_ID_ENV_NAMES) {
+    const value = syntheticShopifyPair(pairIndex).clientId;
+    pairIndex += 1;
+    inherited[name] = value;
+    markers.push(value);
+  }
+  for (const name of SHOPIFY_CLIENT_SECRET_ENV_NAMES) {
+    const value = syntheticShopifyPair(pairIndex).clientSecret;
+    pairIndex += 1;
+    inherited[name] = value;
+    markers.push(value);
+  }
+  Object.assign(inherited, {
+    SHOPIFY_SHOP_DOMAIN: "hostile-canonical.myshopify.com",
+    SHOPIFY_STORE_DOMAIN: "hostile-store.myshopify.com",
+    SHOPIFY_TEST_STORE_DOMAIN: "hostile-test.myshopify.com",
+    shopify_shop_domain: "hostile-lower.myshopify.com",
+    SHOPIFY_PUBLIC_APP_URL: "https://hostile-shopify.example.test",
+    SHOPIFY_API_VERSION: "2025-01",
+    PUBLIC_APP_URL: "https://hostile-public.example.test",
+    ShOpIfY_ClIeNt_Id: syntheticShopifyPair(pairIndex++).clientId,
+    sHoPiFy_ClIeNt_SeCrEt: syntheticShopifyPair(pairIndex++).clientSecret,
+    ShOpIfY_ApP_Id: syntheticShopifyPair(pairIndex++).clientId,
+    sHoPiFy_ApP_sEcReT: syntheticShopifyPair(pairIndex++).clientSecret
+  });
+  markers.push(...Object.values(inherited).filter(Boolean));
+  const unrelatedSentinel = { name: "SOCIAL_CUES_SHOPIFY_UNRELATED_SENTINEL", value: "shopify-unrelated-preserved" };
+  return {
+    baseEnv: { ...process.env, ...inherited, [unrelatedSentinel.name]: unrelatedSentinel.value },
+    hostileEnvNames: Object.keys(inherited),
+    hostileMarkers: [...new Set([...markers, unrelatedSentinel.value])],
+    unrelatedSentinel
+  };
+}
+
+async function runShopifyCredentialMatrix() {
+  const parentBefore = Object.entries(process.env);
+  assertShopifyScenarioEnvironmentHelper();
+  const committedServerSource = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
+  assertCommittedShopifyCredentialFamilies(committedServerSource);
+  const canonical = syntheticShopifyPair(1);
+  const aliasPairs = [
+    ["api-key-pair", "SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", syntheticShopifyPair(2)],
+    ["app-id-pair", "SHOPIFY_APP_ID", "SHOPIFY_APP_SECRET", syntheticShopifyPair(3)],
+    ["app-client-pair", "SHOPIFY_APP_CLIENT_ID", "SHOPIFY_APP_CLIENT_SECRET", syntheticShopifyPair(4)],
+    ["lowercase-client-pair", "shopify_client_id", "shopify_client_secret", syntheticShopifyPair(5)],
+    ["lowercase-api-pair", "shopify_api_key", "shopify_api_secret", syntheticShopifyPair(6)]
+  ];
+  const negativePair = syntheticShopifyPair(10);
+  const aliasNegativePair = syntheticShopifyPair(11);
+  const precedenceCanonical = syntheticShopifyPair(20);
+  const precedenceAlias = syntheticShopifyPair(21);
+  const unknownPair = syntheticShopifyPair(25);
+  const unknownIdName = SHOPIFY_TEST_ONLY_UNKNOWN_ENV_NAMES[0];
+  const unknownSecretName = SHOPIFY_TEST_ONLY_UNKNOWN_ENV_NAMES[1];
+  const hostile = hostileShopifyEnvironment();
+  const hostileTarget = syntheticShopifyPair(40);
+  const scenarios = [
+    defineShopifyScenario({
+      key: "canonical-pair",
+      label: "canonical pair",
+      overrides: { SHOPIFY_CLIENT_ID: canonical.clientId, SHOPIFY_CLIENT_SECRET: canonical.clientSecret },
+      idSource: "SHOPIFY_CLIENT_ID",
+      secretSource: "SHOPIFY_CLIENT_SECRET"
+    }),
+    ...aliasPairs.map(([key, idName, secretName, pair]) => defineShopifyScenario({
+      key,
+      label: `${idName} and ${secretName}`,
+      overrides: { [idName]: pair.clientId, [secretName]: pair.clientSecret },
+      idSource: idName,
+      secretSource: secretName
+    })),
+    defineShopifyScenario({
+      key: "canonical-id-only",
+      label: "canonical id without secret",
+      overrides: { SHOPIFY_CLIENT_ID: negativePair.clientId },
+      idSource: "SHOPIFY_CLIENT_ID"
+    }),
+    defineShopifyScenario({
+      key: "canonical-secret-only",
+      label: "canonical secret without id",
+      overrides: { SHOPIFY_CLIENT_SECRET: negativePair.clientSecret },
+      secretSource: "SHOPIFY_CLIENT_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "alias-id-only",
+      label: "alias id without secret",
+      overrides: { SHOPIFY_API_KEY: aliasNegativePair.clientId },
+      idSource: "SHOPIFY_API_KEY"
+    }),
+    defineShopifyScenario({
+      key: "alias-secret-only",
+      label: "alias secret without id",
+      overrides: { SHOPIFY_API_SECRET: aliasNegativePair.clientSecret },
+      secretSource: "SHOPIFY_API_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "blank-canonical-id",
+      label: "blank canonical id",
+      overrides: { SHOPIFY_CLIENT_ID: "", SHOPIFY_CLIENT_SECRET: negativePair.clientSecret },
+      secretSource: "SHOPIFY_CLIENT_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "blank-canonical-secret",
+      label: "blank canonical secret",
+      overrides: { SHOPIFY_CLIENT_ID: negativePair.clientId, SHOPIFY_CLIENT_SECRET: "" },
+      idSource: "SHOPIFY_CLIENT_ID"
+    }),
+    defineShopifyScenario({
+      key: "whitespace-canonical-id",
+      label: "whitespace canonical id",
+      overrides: { SHOPIFY_CLIENT_ID: "   ", SHOPIFY_CLIENT_SECRET: negativePair.clientSecret },
+      idSource: "SHOPIFY_CLIENT_ID",
+      secretSource: "SHOPIFY_CLIENT_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "whitespace-canonical-secret",
+      label: "whitespace canonical secret",
+      overrides: { SHOPIFY_CLIENT_ID: negativePair.clientId, SHOPIFY_CLIENT_SECRET: "\t" },
+      idSource: "SHOPIFY_CLIENT_ID",
+      secretSource: "SHOPIFY_CLIENT_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "blank-alias-id",
+      label: "blank alias id",
+      overrides: { SHOPIFY_APP_ID: "", SHOPIFY_APP_SECRET: aliasNegativePair.clientSecret },
+      secretSource: "SHOPIFY_APP_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "blank-alias-secret",
+      label: "blank alias secret",
+      overrides: { SHOPIFY_APP_ID: aliasNegativePair.clientId, SHOPIFY_APP_SECRET: "" },
+      idSource: "SHOPIFY_APP_ID"
+    }),
+    defineShopifyScenario({
+      key: "whitespace-alias-id",
+      label: "whitespace alias id",
+      overrides: { SHOPIFY_APP_ID: "  ", SHOPIFY_APP_SECRET: aliasNegativePair.clientSecret },
+      idSource: "SHOPIFY_APP_ID",
+      secretSource: "SHOPIFY_APP_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "whitespace-alias-secret",
+      label: "whitespace alias secret",
+      overrides: { SHOPIFY_APP_ID: aliasNegativePair.clientId, SHOPIFY_APP_SECRET: "  " },
+      idSource: "SHOPIFY_APP_ID",
+      secretSource: "SHOPIFY_APP_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "invalid-id-characters",
+      label: "invalid id character set",
+      overrides: { SHOPIFY_CLIENT_ID: "g".repeat(32), SHOPIFY_CLIENT_SECRET: negativePair.clientSecret },
+      idSource: "SHOPIFY_CLIENT_ID",
+      secretSource: "SHOPIFY_CLIENT_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "invalid-id-length",
+      label: "invalid id length",
+      overrides: { SHOPIFY_CLIENT_ID: negativePair.clientId.slice(1), SHOPIFY_CLIENT_SECRET: negativePair.clientSecret },
+      idSource: "SHOPIFY_CLIENT_ID",
+      secretSource: "SHOPIFY_CLIENT_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "invalid-secret-format",
+      label: "invalid secret prefix or format",
+      overrides: { SHOPIFY_CLIENT_ID: negativePair.clientId, SHOPIFY_CLIENT_SECRET: negativePair.clientSecret.replace(/^shpss_/, "shopify_") },
+      idSource: "SHOPIFY_CLIENT_ID",
+      secretSource: "SHOPIFY_CLIENT_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "unknown-id-valid-secret",
+      label: "unknown id alias with approved secret",
+      overrides: { [unknownIdName]: unknownPair.clientId, SHOPIFY_API_SECRET: unknownPair.clientSecret },
+      secretSource: "SHOPIFY_API_SECRET",
+      allowedUnknownEnvNames: [unknownIdName],
+      privateMarkers: [unknownPair.clientId]
+    }),
+    defineShopifyScenario({
+      key: "valid-id-unknown-secret",
+      label: "approved id with unknown secret alias",
+      overrides: { SHOPIFY_API_KEY: unknownPair.clientId, [unknownSecretName]: unknownPair.clientSecret },
+      idSource: "SHOPIFY_API_KEY",
+      allowedUnknownEnvNames: [unknownSecretName],
+      privateMarkers: [unknownPair.clientSecret]
+    }),
+    defineShopifyScenario({
+      key: "unknown-id-and-secret",
+      label: "unknown id and secret aliases",
+      overrides: { [unknownIdName]: unknownPair.clientId, [unknownSecretName]: unknownPair.clientSecret },
+      allowedUnknownEnvNames: [unknownIdName, unknownSecretName],
+      privateMarkers: [unknownPair.clientId, unknownPair.clientSecret]
+    }),
+    defineShopifyScenario({
+      key: "canonical-conflicting-alias",
+      label: "conflicting canonical and alias pairs",
+      overrides: {
+        SHOPIFY_CLIENT_ID: precedenceCanonical.clientId,
+        SHOPIFY_CLIENT_SECRET: precedenceCanonical.clientSecret,
+        SHOPIFY_API_KEY: precedenceAlias.clientId,
+        SHOPIFY_API_SECRET: precedenceAlias.clientSecret
+      },
+      idSource: "SHOPIFY_CLIENT_ID",
+      secretSource: "SHOPIFY_CLIENT_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "empty-canonical-id-alias-fallback",
+      label: "empty canonical id with alias fallback",
+      overrides: {
+        SHOPIFY_CLIENT_ID: "",
+        SHOPIFY_CLIENT_SECRET: precedenceCanonical.clientSecret,
+        SHOPIFY_API_KEY: precedenceAlias.clientId,
+        SHOPIFY_API_SECRET: precedenceAlias.clientSecret
+      },
+      idSource: "SHOPIFY_API_KEY",
+      secretSource: "SHOPIFY_CLIENT_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "empty-canonical-secret-alias-fallback",
+      label: "empty canonical secret with alias fallback",
+      overrides: {
+        SHOPIFY_CLIENT_ID: precedenceCanonical.clientId,
+        SHOPIFY_CLIENT_SECRET: "",
+        SHOPIFY_API_KEY: precedenceAlias.clientId,
+        SHOPIFY_API_SECRET: precedenceAlias.clientSecret
+      },
+      idSource: "SHOPIFY_CLIENT_ID",
+      secretSource: "SHOPIFY_API_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "empty-canonical-pair-alias-fallback",
+      label: "empty canonical pair with alias fallback",
+      overrides: {
+        SHOPIFY_CLIENT_ID: "",
+        SHOPIFY_CLIENT_SECRET: "",
+        SHOPIFY_API_KEY: precedenceAlias.clientId,
+        SHOPIFY_API_SECRET: precedenceAlias.clientSecret
+      },
+      idSource: "SHOPIFY_API_KEY",
+      secretSource: "SHOPIFY_API_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "whitespace-canonical-id-blocks-alias",
+      label: "whitespace canonical id blocks alias fallback",
+      overrides: {
+        SHOPIFY_CLIENT_ID: "   ",
+        SHOPIFY_CLIENT_SECRET: precedenceCanonical.clientSecret,
+        SHOPIFY_API_KEY: precedenceAlias.clientId,
+        SHOPIFY_API_SECRET: precedenceAlias.clientSecret
+      },
+      idSource: "SHOPIFY_CLIENT_ID",
+      secretSource: "SHOPIFY_CLIENT_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "whitespace-canonical-secret-blocks-alias",
+      label: "whitespace canonical secret blocks alias fallback",
+      overrides: {
+        SHOPIFY_CLIENT_ID: precedenceCanonical.clientId,
+        SHOPIFY_CLIENT_SECRET: "\t",
+        SHOPIFY_API_KEY: precedenceAlias.clientId,
+        SHOPIFY_API_SECRET: precedenceAlias.clientSecret
+      },
+      idSource: "SHOPIFY_CLIENT_ID",
+      secretSource: "SHOPIFY_CLIENT_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "mixed-canonical-id-alias-secret",
+      label: "mixed canonical id and alias secret",
+      overrides: { SHOPIFY_CLIENT_ID: syntheticShopifyPair(30).clientId, SHOPIFY_APP_SECRET: syntheticShopifyPair(30).clientSecret },
+      idSource: "SHOPIFY_CLIENT_ID",
+      secretSource: "SHOPIFY_APP_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "mixed-alias-id-canonical-secret",
+      label: "mixed alias id and canonical secret",
+      overrides: { SHOPIFY_APP_ID: syntheticShopifyPair(31).clientId, SHOPIFY_CLIENT_SECRET: syntheticShopifyPair(31).clientSecret },
+      idSource: "SHOPIFY_APP_ID",
+      secretSource: "SHOPIFY_CLIENT_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "mixed-api-key-app-secret",
+      label: "mixed API key and app secret",
+      overrides: { SHOPIFY_API_KEY: syntheticShopifyPair(32).clientId, SHOPIFY_APP_SECRET: syntheticShopifyPair(32).clientSecret },
+      idSource: "SHOPIFY_API_KEY",
+      secretSource: "SHOPIFY_APP_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "mixed-app-id-api-secret",
+      label: "mixed app id and API secret",
+      overrides: { SHOPIFY_APP_ID: syntheticShopifyPair(33).clientId, SHOPIFY_API_SECRET: syntheticShopifyPair(33).clientSecret },
+      idSource: "SHOPIFY_APP_ID",
+      secretSource: "SHOPIFY_API_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "mixed-app-client-lowercase-secret",
+      label: "mixed app client id and lowercase secret",
+      overrides: { SHOPIFY_APP_CLIENT_ID: syntheticShopifyPair(34).clientId, shopify_client_secret: syntheticShopifyPair(34).clientSecret },
+      idSource: "SHOPIFY_APP_CLIENT_ID",
+      secretSource: "shopify_client_secret"
+    }),
+    defineShopifyScenario({
+      key: "mixed-lowercase-id-uppercase-secret",
+      label: "mixed lowercase id and uppercase secret",
+      overrides: { shopify_api_key: syntheticShopifyPair(35).clientId, SHOPIFY_APP_CLIENT_SECRET: syntheticShopifyPair(35).clientSecret },
+      idSource: "shopify_api_key",
+      secretSource: "SHOPIFY_APP_CLIENT_SECRET"
+    }),
+    defineShopifyScenario({
+      key: "hostile-inherited-environment",
+      label: "hostile inherited environment",
+      overrides: { SHOPIFY_APP_ID: hostileTarget.clientId, SHOPIFY_APP_SECRET: hostileTarget.clientSecret },
+      idSource: "SHOPIFY_APP_ID",
+      secretSource: "SHOPIFY_APP_SECRET",
+      ...hostile
+    }),
+    defineShopifyScenario({
+      key: "workspace-token-without-app-credentials",
+      label: "workspace token without application credentials",
+      workspaceTokenFixture: true
+    })
+  ];
+  assertShopifyScenarioDefinitions(scenarios, committedServerSource);
+  const scenarioByKey = new Map(scenarios.map(scenario => [scenario.key, scenario]));
+  const observationsByKey = new Map();
+  for (const scenario of scenarios) {
+    observationsByKey.set(scenario.key, await runShopifyCredentialScenario(scenario));
+  }
+
+  const orderSequences = [
+    ["canonical then API-key alias", ["canonical-pair", "api-key-pair"]],
+    ["API-key alias then canonical", ["api-key-pair", "canonical-pair"]],
+    ["same valid alias repeated", ["api-key-pair", "api-key-pair"]],
+    ["invalid ID then valid alias", ["invalid-id-characters", "api-key-pair"]],
+    ["valid alias then invalid ID", ["api-key-pair", "invalid-id-characters"]],
+    ["alias family A then B", ["api-key-pair", "app-id-pair"]],
+    ["alias family B then A", ["app-id-pair", "api-key-pair"]],
+    ["hostile target repeated", ["hostile-inherited-environment", "hostile-inherited-environment"]],
+    ["empty canonical fallback then canonical", ["empty-canonical-pair-alias-fallback", "canonical-pair"]],
+    ["canonical then empty canonical fallback", ["canonical-pair", "empty-canonical-pair-alias-fallback"]]
+  ];
+  let orderExecutionCount = 0;
+  for (const [label, keys] of orderSequences) {
+    const sequenceResults = [];
+    for (const key of keys) {
+      const scenario = scenarioByKey.get(key);
+      if (!scenario) throw new Error(`shopify order sequence references an unknown scenario: ${label}`);
+      const actual = normalizedShopifyScenarioResult(await runShopifyCredentialScenario(scenario));
+      const expected = normalizedShopifyScenarioResult(observationsByKey.get(key));
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`shopify scenario result changed with execution order: ${label}`);
+      sequenceResults.push(actual);
+      orderExecutionCount += 1;
+    }
+    if (keys[0] === keys[1] && JSON.stringify(sequenceResults[0]) !== JSON.stringify(sequenceResults[1])) {
+      throw new Error(`shopify repeated scenario was not deterministic: ${label}`);
+    }
+  }
+
+  if (JSON.stringify(Object.entries(process.env)) !== JSON.stringify(parentBefore)) throw new Error("shopify credential matrix mutated the parent process environment");
+  for (const key of ["canonical-pair", "api-key-pair", "app-id-pair"]) {
+    const result = observationsByKey.get(key);
+    if (!result?.oauthClientIdMatched || !result?.oauthRedirectMatched || !result?.oauthSecretMatched) {
+      throw new Error("shopify callback HMAC coverage did not behaviorally prove canonical and alias credential resolution");
+    }
+  }
+  if ([...observationsByKey.values()].some(result => result.cleanupComplete !== true)) throw new Error("shopify credential matrix left scenario data behind");
+  const workspaceResult = observationsByKey.get("workspace-token-without-app-credentials");
+  if (!workspaceResult?.workspaceTokenSeparated || workspaceResult.configured || workspaceResult.readinessReady) throw new Error("shopify workspace token was not kept separate from application credentials");
+  const mixedResult = observationsByKey.get("mixed-canonical-id-alias-secret");
+  return {
+    count: scenarios.length,
+    executions: scenarios.length + orderExecutionCount,
+    orderSequenceCount: orderSequences.length,
+    workspaceTokenSeparated: true,
+    callbackHmacBehavioral: true,
+    configuredOAuthStarts: true,
+    cleanupComplete: true,
+    mixedCanonicalIdAliasSecretConfigured: mixedResult?.configured === true
+  };
+}
+
+const coreModelFixtureOnly = process.env.SOCIAL_CUES_CORE_MODEL_FIXTURE_ONLY === "true";
+const providerStateFixtureOnly = process.env.SOCIAL_CUES_PROVIDER_STATE_FIXTURE_ONLY === "true";
+const googleCallbackFixtureOnly = process.env.SOCIAL_CUES_GOOGLE_CALLBACK_FIXTURE_ONLY === "true";
+const googleStartFixtureOnly = process.env.SOCIAL_CUES_GOOGLE_START_FIXTURE_ONLY === "true";
+const twitchPortalFixtureOnly = process.env.SOCIAL_CUES_TWITCH_PORTAL_FIXTURE_ONLY === "true";
+const shopifyFixtureOnly = process.env.SOCIAL_CUES_SHOPIFY_FIXTURE_ONLY === "true";
+const metaStartFixtureOnly = process.env.SOCIAL_CUES_META_START_FIXTURE_ONLY === "true";
+const metaAssetsFixtureOnly = process.env.SOCIAL_CUES_META_ASSETS_FIXTURE_ONLY === "true";
+const metaCallbackFixtureOnly = process.env.SOCIAL_CUES_META_CALLBACK_FIXTURE_ONLY === "true";
+const metaCallbackAtomicFixtureOnly = process.env.SOCIAL_CUES_META_CALLBACK_ATOMIC_FIXTURE_ONLY === "true";
+const xAccountFixtureOnly = process.env.SOCIAL_CUES_X_ACCOUNT_FIXTURE_ONLY === "true";
+const billingCheckoutFixtureOnly = process.env.SOCIAL_CUES_BILLING_CHECKOUT_FIXTURE_ONLY === "true";
+const discordCommunityFixtureOnly = process.env.SOCIAL_CUES_DISCORD_COMMUNITY_FIXTURE_ONLY === "true";
+const skipDiscordCommunityFixture = coreModelFixtureOnly || providerStateFixtureOnly || googleCallbackFixtureOnly
+  || googleStartFixtureOnly || twitchPortalFixtureOnly || shopifyFixtureOnly || metaStartFixtureOnly
+  || metaAssetsFixtureOnly || metaCallbackFixtureOnly || metaCallbackAtomicFixtureOnly || xAccountFixtureOnly
+  || billingCheckoutFixtureOnly;
+const discordCommunityFixture = skipDiscordCommunityFixture ? null : await runDiscordCommunityBoundaryScenario();
+if (discordCommunityFixtureOnly) {
+  console.log(JSON.stringify({ ok: true, discordCommunity: discordCommunityFixture }));
+  process.exit(0);
+}
+const skipMetaStartFixture = coreModelFixtureOnly || providerStateFixtureOnly || googleCallbackFixtureOnly
+  || googleStartFixtureOnly || twitchPortalFixtureOnly || shopifyFixtureOnly || metaAssetsFixtureOnly || metaCallbackFixtureOnly
+  || metaCallbackAtomicFixtureOnly || xAccountFixtureOnly;
+const metaStartFixture = skipMetaStartFixture ? null : await runMetaOAuthStartScenario();
+if (metaStartFixtureOnly) {
+  console.log(JSON.stringify({ ok: true, ...metaStartFixture }));
+  process.exit(0);
+}
+const skipMetaAssetsFixture = coreModelFixtureOnly || providerStateFixtureOnly || googleCallbackFixtureOnly
+  || googleStartFixtureOnly || twitchPortalFixtureOnly || shopifyFixtureOnly || metaStartFixtureOnly || metaCallbackFixtureOnly
+  || metaCallbackAtomicFixtureOnly || xAccountFixtureOnly;
+const metaAssetsFixture = skipMetaAssetsFixture ? null : await runMetaAssetsScenario();
+if (metaAssetsFixtureOnly) {
+  console.log(JSON.stringify({ ok: true, ...metaAssetsFixture }));
+  process.exit(0);
+}
+const skipMetaCallbackFixture = coreModelFixtureOnly || providerStateFixtureOnly || googleCallbackFixtureOnly
+  || googleStartFixtureOnly || twitchPortalFixtureOnly || shopifyFixtureOnly || metaStartFixtureOnly || metaAssetsFixtureOnly
+  || metaCallbackAtomicFixtureOnly || xAccountFixtureOnly;
+const metaCallbackFixture = skipMetaCallbackFixture ? null : await runMetaCallbackRejectionScenario();
+if (metaCallbackFixtureOnly) {
+  console.log(JSON.stringify({ ok: true, ...metaCallbackFixture }));
+  process.exit(0);
+}
+const skipMetaCallbackAtomicFixture = coreModelFixtureOnly || providerStateFixtureOnly || googleCallbackFixtureOnly
+  || googleStartFixtureOnly || twitchPortalFixtureOnly || shopifyFixtureOnly || metaStartFixtureOnly || metaAssetsFixtureOnly
+  || metaCallbackFixtureOnly || xAccountFixtureOnly;
+const metaCallbackAtomicFixture = skipMetaCallbackAtomicFixture ? null : await runMetaCallbackAtomicPersistenceScenario();
+if (metaCallbackAtomicFixtureOnly) {
+  console.log(JSON.stringify({ ok: true, ...metaCallbackAtomicFixture }));
+  process.exit(0);
+}
+const skipGoogleStartFixture = coreModelFixtureOnly || providerStateFixtureOnly || googleCallbackFixtureOnly
+  || twitchPortalFixtureOnly || shopifyFixtureOnly || metaStartFixtureOnly || metaAssetsFixtureOnly
+  || metaCallbackFixtureOnly || metaCallbackAtomicFixtureOnly || xAccountFixtureOnly;
+const googleStartFixture = skipGoogleStartFixture ? null : await runGoogleOAuthStartScenario();
+if (googleStartFixtureOnly) {
+  console.log(JSON.stringify({ ok: true, ...googleStartFixture }));
+  process.exit(0);
+}
+const skipGoogleCallbackFixture = coreModelFixtureOnly || providerStateFixtureOnly || twitchPortalFixtureOnly
+  || shopifyFixtureOnly || metaStartFixtureOnly || metaAssetsFixtureOnly || metaCallbackFixtureOnly || googleStartFixtureOnly
+  || metaCallbackAtomicFixtureOnly || xAccountFixtureOnly;
+const googleCallbackFixture = skipGoogleCallbackFixture ? null : await runGoogleCallbackPersistenceScenario();
+if (googleCallbackFixtureOnly) {
+  console.log(JSON.stringify({ ok: true, ...googleCallbackFixture }));
+  process.exit(0);
+}
+const skipXAccountFixture = coreModelFixtureOnly || providerStateFixtureOnly || googleCallbackFixtureOnly
+  || googleStartFixtureOnly || twitchPortalFixtureOnly || shopifyFixtureOnly || metaStartFixtureOnly || metaAssetsFixtureOnly
+  || metaCallbackFixtureOnly || metaCallbackAtomicFixtureOnly;
+const xAccountFixture = skipXAccountFixture ? null : await runXAccountBoundaryScenario();
+if (xAccountFixtureOnly) {
+  console.log(JSON.stringify({ ok: true, ...xAccountFixture }));
+  process.exit(0);
+}
+const skipCredentialFixtureMatrices = coreModelFixtureOnly || providerStateFixtureOnly || metaStartFixtureOnly
+  || metaAssetsFixtureOnly || metaCallbackFixtureOnly || metaCallbackAtomicFixtureOnly || googleStartFixtureOnly
+  || xAccountFixtureOnly;
+const twitchPortalCredentialFixture = skipCredentialFixtureMatrices ? null : await runTwitchPortalCredentialScenario();
+if (!skipCredentialFixtureMatrices && twitchPortalFixtureOnly) {
+  console.log(JSON.stringify({ ok: true, ...twitchPortalCredentialFixture }));
+  process.exit(0);
+}
+
+const shopifyCredentialMatrix = skipCredentialFixtureMatrices ? null : await runShopifyCredentialMatrix();
+if (!skipCredentialFixtureMatrices && shopifyFixtureOnly) {
+  console.log(JSON.stringify({
+    ok: true,
+    shopifyCredentialScenarios: shopifyCredentialMatrix.count,
+    shopifyCredentialExecutions: shopifyCredentialMatrix.executions,
+    orderSequences: shopifyCredentialMatrix.orderSequenceCount,
+    workspaceTokenSeparated: shopifyCredentialMatrix.workspaceTokenSeparated,
+    callbackHmacBehavioral: shopifyCredentialMatrix.callbackHmacBehavioral,
+    configuredOAuthStarts: shopifyCredentialMatrix.configuredOAuthStarts,
+    cleanupComplete: shopifyCredentialMatrix.cleanupComplete,
+    mixedCanonicalIdAliasSecretConfigured: shopifyCredentialMatrix.mixedCanonicalIdAliasSecretConfigured,
+    externalRequests: 0
+  }));
+  process.exit(0);
+}
+
+const providerStateFixtureEncryptionKey = `p19-provider-state-${randomBytes(24).toString("hex")}`;
+
+function providerStateFixtureAccounts(owner) {
+  const now = new Date().toISOString();
+  const credential = marker => encryptedShopifyFixtureToken(marker, providerStateFixtureEncryptionKey);
+  return [
+    {
+      id: "acct-twitch-regression", platform: "twitch", name: "Regression Twitch", handle: "@regression_twitch",
+      status: "connected", connectedAt: now, oauthProvider: "twitch", providerAccountId: "test-twitch-user-1",
+      credential: credential("fake-test-token-marker"), scopes: ["user:read:email", "clips:edit", "user:read:broadcast"]
+    },
+    {
+      id: "acct-twitch-regression-alternate", platform: "twitch", name: "Regression Twitch duplicate evidence", handle: "@regression_twitch",
+      status: "connected", connectedAt: new Date(Date.now() - 60_000).toISOString(), oauthProvider: "twitch", providerAccountId: "test-twitch-user-1",
+      credential: credential("fake-test-token-marker-alternate"), scopes: ["user:read:email", "clips:edit", "user:read:broadcast"]
+    },
+    {
+      id: "acct-discord-regression", platform: "discord", name: "Regression Discord", handle: "@regression_discord",
+      status: "connected", connectedAt: now, oauthProvider: "discord", providerAccountId: "test-discord-user-1",
+      credential: credential("fake-test-token-marker"), scopes: ["identify", "guilds", "guilds.members.read"],
+      profile: {
+        discordSelectedGuildId: "test-discord-guild", discordSelectedGuildName: "Regression Guild",
+        discordSelectedChannelId: "test-discord-channel", discordSelectedChannelName: "regression-channel"
+      }
+    },
+    {
+      id: "acct-x-regression", platform: "x", name: "Regression X", handle: "@regression_x", displayName: "Regression X",
+      status: "connected", connectedAt: now, oauthProvider: "x", providerAccountId: "test-x-user-1",
+      credential: credential("fake-test-token-marker"), scopes: ["tweet.read", "tweet.write", "users.read", "offline.access"]
+    },
+    {
+      id: "acct-tiktok-regression", platform: "tiktok", name: "TikTok", handle: "Regression TikTok", displayName: "Regression TikTok",
+      status: "connected", connectedAt: now, oauthProvider: "tiktok", providerAccountId: "test-tiktok-user-1",
+      credential: credential("fake-test-token-marker"), scopes: ["user.info.basic", "video.upload", "video.publish"]
+    },
+    {
+      id: "acct-youtube-regression", platform: "youtube", name: "Regression YouTube", handle: "Regression YouTube", displayName: "Regression YouTube",
+      status: "connected", connectedAt: now, oauthProvider: "youtube", providerAccountId: "test-youtube-channel-1",
+      credential: credential("fake-test-token-marker"),
+      scopes: ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/yt-analytics.readonly", "https://www.googleapis.com/auth/youtube.readonly"]
+    },
+    {
+      id: "acct-pinterest-regression", platform: "pinterest", name: "Regression Pinterest", handle: "@regression_pinterest",
+      status: "connected", connectedAt: now, oauthProvider: "pinterest", providerAccountId: "test-pinterest-user-1",
+      credential: credential("fake-test-token-marker"), scopes: ["boards:read", "pins:read", "pins:write"]
+    },
+    {
+      id: "acct-canva-regression", platform: "canva", name: "Regression Canva", handle: "Regression Canva",
+      status: "connected", connectedAt: now, oauthProvider: "canva", providerAccountId: "test-canva-user-1",
+      credential: credential("fake-test-token-marker"),
+      scopes: ["profile:read", "design:meta:read", "design:content:read", "design:content:write", "asset:read", "asset:write", "brandtemplate:meta:read", "brandtemplate:content:read", "folder:read", "comment:read"]
+    },
+    {
+      id: "acct-shopify-regression", platform: "shopify", name: "regression.myshopify.com", handle: "regression.myshopify.com",
+      status: "connected", connectedAt: now, oauthProvider: "shopify", providerAccountId: "regression.myshopify.com",
+      credential: credential("fake-test-token-marker"), scopes: ["read_products", "read_marketing_events", "write_marketing_events"]
+    },
+    {
+      id: "acct-etsy-regression", platform: "etsy", name: "Regression Etsy", handle: "Regression Etsy",
+      status: "connected", connectedAt: now, oauthProvider: "etsy", providerAccountId: "test-etsy-user-1",
+      credential: credential("fake-test-token-marker"), scopes: ["shops_r", "listings_r", "listings_w"]
+    },
+    {
+      id: "acct-meta-regression", platform: "meta", name: "Regression Meta User", handle: "Regression Meta User",
+      status: "connected", connectedAt: now, oauthProvider: "meta", providerAccountId: "test-meta-user-1",
+      credential: credential("fake-test-token-marker"), scopes: ["public_profile", "pages_show_list", "pages_read_engagement"]
+    },
+    {
+      id: "acct-facebook-regression", platform: "facebook", name: "Regression Facebook Page", handle: "Regression Facebook Page", displayName: "Regression Facebook Page",
+      status: "connected", connectedAt: now, oauthProvider: "meta", providerAccountId: "test-facebook-page-1",
+      credential: credential("fake-test-token-marker"), scopes: ["pages_show_list", "pages_read_engagement", "pages_manage_posts", "public_profile"]
+    },
+    {
+      id: "acct-threads", platform: "threads", name: "Threads", handle: "@threads", status: "connected",
+      connectedAt: "2026-01-01T00:00:00.000Z", oauthProvider: "threads", providerAccountId: "acct-threads",
+      credential: credential("fake-stale-threads-token"), tokenExpiresAt: "2026-01-02T00:00:00.000Z", scopes: []
+    },
+    {
+      id: "acct-threads-regression", platform: "threads", name: "Regression Threads", handle: "@regression_threads",
+      status: "connected", connectedAt: now, oauthProvider: "threads", providerAccountId: "test-threads-user-1",
+      credential: credential("fake-test-token-marker"),
+      scopes: ["threads_basic", "threads_content_publish", "threads_manage_insights", "threads_manage_replies"],
+      profile: { biography: "safe public field" }
+    }
+  ].map(account => ({ ...account, ownerUserId: owner.id, workspaceId: owner.workspaceId }));
+}
+
+async function mutateProviderStateFixture({ user, workspaceId, mutate }) {
+  const seedSource = await readFile(new URL("./social-cues-model-seed.json", import.meta.url), "utf8");
+  const seed = JSON.parse(seedSource.replace(/^\uFEFF/, ""));
+  const owner = { ...user, id: String(user?.id || ""), workspaceId: String(workspaceId || "") };
+  if (!owner.id || !owner.workspaceId) throw new Error("provider-state fixture is missing its canonical owner identity");
+  const unavailable = () => { throw new Error("provider-state fixture must not invoke a browser merge callback"); };
+  const store = await openLocalWorkspacePersistence({ dataDir: testDataDir, seed, mergeClient: unavailable, recoverClient: unavailable });
+  try {
+    const sharedModel = await store.load();
+    const model = store.view(sharedModel, owner.workspaceId);
+    await mutate(model, owner);
+    await store.save(model, owner);
+  } finally {
+    await store.close();
+  }
+}
+
+async function bindBillingCheckoutNonOwnerDeviceFixture({ owner, nonOwner }) {
+  const ownerUserId = String(owner?.userId || "");
+  const ownerWorkspaceId = String(owner?.workspaceId || "");
+  const nonOwnerUserId = String(nonOwner?.userId || "");
+  const nonOwnerDeviceId = String(nonOwner?.deviceId || "");
+  const nonOwnerWorkspaceId = String(nonOwner?.workspaceId || "");
+  if (!ownerUserId || !ownerWorkspaceId || !nonOwnerUserId || !nonOwnerDeviceId || !nonOwnerWorkspaceId) {
+    throw new Error("billing checkout fixture is missing canonical session identity");
+  }
+  await mutateProviderStateFixture({
+    user: { id: ownerUserId, workspaceId: ownerWorkspaceId },
+    workspaceId: ownerWorkspaceId,
+    mutate(model) {
+      const ownerWorkspace = (model.workspaces || []).filter(workspace => (
+        workspace?.id === ownerWorkspaceId && workspace?.ownerUserId === ownerUserId
+      ));
+      const targetDevices = (model.deviceSessions || []).filter(device => (
+        device?.userId === nonOwnerUserId
+        && device?.deviceId === nonOwnerDeviceId
+        && !device?.revokedAt
+      ));
+      if (ownerWorkspace.length !== 1
+        || targetDevices.length !== 1
+        || targetDevices[0].workspaceId !== nonOwnerWorkspaceId) {
+        throw new Error("billing checkout fixture could not bind the exact authenticated non-owner device");
+      }
+      targetDevices[0].workspaceId = ownerWorkspaceId;
+    }
+  });
+}
+
+function revisionedModelSaveEnvelope(model) {
+  if (!model?.persistence?.conditionalSave || !model.persistence.revision) {
+    throw new Error("revisioned model-save fixture requires the current workspace revision capability");
+  }
+  return {
+    operationId: `test-model-save-${randomBytes(16).toString("hex")}`,
+    kind: "model-save",
+    expectedRevision: structuredClone(model.persistence.revision),
+    request: structuredClone(model)
+  };
+}
+
 const localPromoCodes = [
   { code: "SC-LOCAL-BEACON-4M7Q", label: "Local test account 1", days: 120, active: true },
   { code: "SC-LOCAL-SIGNAL-9X2P", label: "Local test account 2", days: 120, active: true },
@@ -13,44 +5776,103 @@ const localPromoCodes = [
   { code: "SC-LOCAL-LAUNCH-3V5K", label: "Local test account 4", days: 120, active: true },
   { code: "SC-LOCAL-MEMBER-8N4Q", label: "Email-bound member account", email: "mr.barton+member-promo@socialcuesapp.com", days: 120, memberOnly: true, active: true }
 ];
-const server = spawn(process.execPath, ["server.mjs"], {
-  cwd: new URL(".", import.meta.url),
-  env: {
-    ...process.env,
+const mainTestServerEnv = {
+    ...discordScenarioEnv({
+      baseEnv: twitchScenarioEnv({
+        baseEnv: shopifyScenarioEnv({
+          baseEnv: pinterestScenarioEnv({
+            PINTEREST_CLIENT_ID: "1234567",
+            PINTEREST_CLIENT_SECRET: "test-pinterest-client-secret"
+          }),
+          overrides: {
+            SHOPIFY_APP_ID: SYNTHETIC_SHOPIFY_APP_ID,
+            SHOPIFY_APP_SECRET: SYNTHETIC_SHOPIFY_APP_SECRET
+          }
+        }),
+        overrides: {
+          TWITCH_CLIENT_ID: "",
+          TWITCH_CLIENT_SECRET: ""
+        }
+      }),
+      overrides: {
+        DISCORD_APPLICATION_ID: SYNTHETIC_DISCORD_APPLICATION_ID,
+        DISCORD_APP_SECRET: SYNTHETIC_DISCORD_CLIENT_SECRET,
+        DISCORD_INTERACTIONS_PUBLIC_KEY: SYNTHETIC_DISCORD_PUBLIC_KEY
+      }
+    }),
     PORT: String(port),
     AUTH_PROVIDER: "alpha-local",
     SUPABASE_ENABLED: "false",
     SENTRY_DSN: "",
     SOCIAL_CUES_DATA_DIR: testDataDir,
+    SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: externalRequestLogPath,
+    SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath,
+    SOCIAL_CUES_TEST_MOCK_META_ASSETS: "true",
+    SOCIAL_CUES_TEST_META_USER_ID: "test-meta-user-1",
+    SOCIAL_CUES_TEST_META_USER_TOKEN: "fake-test-token-marker",
+    SOCIAL_CUES_TEST_META_PAGE_ID: "test-facebook-page-1",
+    SOCIAL_CUES_TEST_META_PAGE_TOKEN: SYNTHETIC_META_ASSETS_PAGE_TOKEN,
+    SOCIAL_CUES_TEST_META_INSTAGRAM_ID: SYNTHETIC_META_ASSETS_INSTAGRAM_ID,
     SOCIAL_CUES_PROMO_CODES: JSON.stringify(localPromoCodes),
+    OAUTH_TOKEN_ENCRYPTION_KEY: providerStateFixtureEncryptionKey,
     WORKER_SECRET: "test-worker-secret",
     GOOGLE_CLIENT_ID: "test-google-client-id",
     GOOGLE_CLIENT_SECRET: "test-google-client-secret",
     GOOGLE_PUBLIC_APP_URL: "https://socialcuesapp.com",
     META_APP_ID: "test-meta-app-id",
     META_APP_SECRET: "test-meta-app-secret",
-    DISCORD_APPLICATION_ID: "test-discord-application-id",
-    DISCORD_APP_SECRET: "test-discord-app-secret",
-    PINTEREST_CLIENT_ID: "test-pinterest-client-id",
-    PINTEREST_CLIENT_SECRET: "test-pinterest-client-secret",
+    META_PUBLIC_APP_URL: "https://socialcuesapp.com",
     PINTEREST_ACCESS_TIER: "trial",
     CANVA_CONNECT_CLIENT_ID: "test-canva-connect-client-id",
     CANVA_CONNECT_CLIENT_SECRET: "test-canva-connect-client-secret",
-    SHOPIFY_APP_ID: "test-shopify-app-id",
-    SHOPIFY_APP_SECRET: "test-shopify-app-secret",
     ETSY_KEYSTRING: "test-etsy-keystring",
     ETSY_SHARED_SECRET: "test-etsy-shared-secret",
     PATREON_PUBLIC_APP_URL: "https://socialcuesapp.com",
     PATREON_CLIENT_ID: "test-patreon-client-id",
     PATREON_CLIENT_SECRET: "test-patreon-client-secret",
     PATREON_OAUTH_SCOPES: "identity campaigns campaigns.members campaigns.posts w:campaigns.webhook"
-  },
-  stdio: ["ignore", "pipe", "pipe"]
-});
+};
 
 let output = "";
-server.stdout.on("data", chunk => { output += chunk; });
-server.stderr.on("data", chunk => { output += chunk; });
+let server = null;
+
+function startMainTestServer() {
+  if (server && server.exitCode === null && server.signalCode === null) throw new Error("Social Cues test server is already running");
+  const child = spawn(process.execPath, [`--import=${pathToFileURL(externalRequestGuardPath).href}`, "server.mjs"], {
+    cwd: new URL(".", import.meta.url),
+    env: mainTestServerEnv,
+    stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  child.stdout.on("data", chunk => { output += chunk; });
+  child.stderr.on("data", chunk => { output += chunk; });
+  server = child;
+  return child;
+}
+
+async function stopMainTestServer() {
+  const child = server;
+  if (!child) return;
+  if (child.exitCode === null && child.signalCode === null) {
+    const closed = new Promise(resolve => child.once("close", resolve));
+    if (child.connected) child.send({ type: "social-cues-local-shutdown" });
+    else child.kill();
+    await Promise.race([closed, delay(5000)]);
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+      await Promise.race([closed, delay(3000)]);
+    }
+  }
+  if (child.exitCode === null && child.signalCode === null) throw new Error("Social Cues test server did not stop");
+  server = null;
+}
+
+async function restartMainTestServer() {
+  await stopMainTestServer();
+  startMainTestServer();
+  await waitForServer();
+}
+
+startMainTestServer();
 
 async function request(path, options = {}) {
   const response = await fetch(base + path, options);
@@ -63,6 +5885,450 @@ async function request(path, options = {}) {
   }
   if (!response.ok) throw new Error(`${path} failed: ${response.status} ${text}`);
   return body;
+}
+
+async function externalHttpRequestAttempts() {
+  try {
+    const source = await readFile(externalRequestLogPath, "utf8");
+    return source.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function assertAnonymousMutationDenied(pathname, payload, label, forbiddenMarkers = []) {
+  const modelFilePath = path.join(testDataDir, "model.json");
+  const modelBefore = await readFile(modelFilePath);
+  const requestsBefore = await externalHttpRequestAttempts();
+  const response = await fetch(base + pathname, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const result = await response.json();
+  if (response.status !== 401 || result.ok !== false || !/sign in/i.test(result.error || "")) {
+    throw new Error(`${label} should return a sanitized authentication-required response`);
+  }
+  if (Buffer.compare(await readFile(modelFilePath), modelBefore) !== 0) {
+    throw new Error(`${label} changed durable workspace, queue, or job state`);
+  }
+  if (JSON.stringify(await externalHttpRequestAttempts()) !== JSON.stringify(requestsBefore)) {
+    throw new Error(`${label} attempted an external provider request`);
+  }
+  const publicResult = JSON.stringify(result);
+  if (forbiddenMarkers.some(marker => marker && publicResult.includes(marker))) {
+    throw new Error(`${label} reflected an untrusted identity or credential marker`);
+  }
+  return result;
+}
+
+const credentialLikeOwnershipKeys = new Set([
+  "credential", "refreshcredential", "token", "accesstoken", "refreshtoken",
+  "encryptedtoken", "encryptedcredential", "clientsecret", "appsecret",
+  "authorization", "cookie", "password", "sessiontoken", "sessiontokenhash"
+]);
+
+function containsCredentialLikeOwnershipField(value) {
+  if (Array.isArray(value)) return value.some(containsCredentialLikeOwnershipField);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(([key, nested]) => (
+    credentialLikeOwnershipKeys.has(String(key).replace(/[_-]/g, "").toLowerCase())
+    || containsCredentialLikeOwnershipField(nested)
+  ));
+}
+
+function providerReceiptEvidence(model = {}, providerId = "") {
+  const queued = (model.publishQueue || []).filter(item => (
+    item.provider === providerId
+    || item.platform === providerId
+    || item.variant?.platform === providerId
+  ));
+  const campaignReceipts = (model.campaigns || []).flatMap(campaign => (
+    (campaign.variants || [])
+      .filter(variant => variant.platform === providerId)
+      .flatMap(variant => variant.publishReceipts || [])
+  ));
+  return { queued, campaignReceipts };
+}
+
+function providerOwnershipRunStateDelta(before = {}, after = {}, expected = {}) {
+  const beforeActivityIds = new Set((before.activity || []).map(item => item.id));
+  const beforeProofIds = new Set((before.proof || []).map(item => item.id));
+  const addedActivity = (after.activity || []).filter(item => !beforeActivityIds.has(item.id));
+  const account = (after.connectedAccounts || []).find(item => (
+    item.platform === expected.providerId
+    && item.providerAccountId === expected.providerAccountId
+  ));
+  const stable = value => JSON.stringify(value ?? null);
+  return {
+    blockedActivityAdded: addedActivity.length === 1
+      && addedActivity[0].type === "provider-ownership-run"
+      && addedActivity[0].providerId === expected.providerId
+      && addedActivity[0].status === "blocked"
+      && addedActivity[0].ownerUserId === expected.userId
+      && addedActivity[0].workspaceId === expected.workspaceId,
+    accountStillConnected: Boolean(account?.connected && account?.tokenStored),
+    tenancyChanged: after.currentUser?.id !== before.currentUser?.id
+      || after.workspace?.id !== before.workspace?.id,
+    functionCheckChanged: stable(after.functionChecks?.[expected.providerId]) !== stable(before.functionChecks?.[expected.providerId]),
+    proofChanged: stable(after.proof) !== stable(before.proof),
+    actionChanged: stable(after.actions) !== stable(before.actions),
+    publishQueueChanged: stable(after.publishQueue) !== stable(before.publishQueue),
+    providerReceiptCreated: stable(providerReceiptEvidence(after, expected.providerId)) !== stable(providerReceiptEvidence(before, expected.providerId)),
+    completionRecorded: addedActivity.some(item => item.status !== "blocked")
+      || (after.proof || []).some(item => !beforeProofIds.has(item.id) && /ownership .* proven/i.test(item.metric || ""))
+  };
+}
+
+function manualProviderOwnershipHandoffIsSafe(fixture = {}) {
+  const result = fixture.result || {};
+  const queue = result.providerOwnershipQueue || {};
+  const row = (queue.rows || []).find(item => item.id === fixture.expectedProviderId);
+  const ownership = fixture.ownershipEvidence || {};
+  const delta = fixture.stateDelta || {};
+  const responseKeys = ["currentStep", "nextAction", "ok", "phase", "providerId", "providerOwnershipQueue", "status"];
+  const exactResponseShape = Object.keys(result).sort().join("|") === responseKeys.sort().join("|");
+  const safeAccountShape = Object.keys(row?.account || {}).sort().join("|") === "handle|name|providerAccountId";
+  return Boolean(
+    fixture.authenticated === true
+    && fixture.httpStatus === 409
+    && exactResponseShape
+    && result.ok === false
+    && result.providerId === fixture.expectedProviderId
+    && result.status === "manual-step-required"
+    && result.phase === "Configure"
+    && result.currentStep?.id === "developer"
+    && result.currentStep?.label === "Developer app/portal"
+    && result.currentStep?.state === "blocked"
+    && result.currentStep?.detail === "Missing TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET"
+    && result.currentStep?.at === ""
+    && typeof result.nextAction === "string"
+    && result.nextAction.length > 0
+    && queue.ok === true
+    && queue.workspaceId === fixture.expectedWorkspaceId
+    && row?.status === "connected"
+    && row.phase === "Configure"
+    && row.executable === false
+    && row.banked === true
+    && row.owned === false
+    && row.currentStep?.id === "developer"
+    && row.currentStep?.label === result.currentStep.label
+    && row.currentStep?.state === "blocked"
+    && row.currentStep?.detail === result.currentStep.detail
+    && row.nextAction === result.nextAction
+    && row.account?.providerAccountId === fixture.expectedProviderAccountId
+    && safeAccountShape
+    && ownership.workspaceId === fixture.expectedWorkspaceId
+    && ownership.ownerUserId === fixture.expectedUserId
+    && ownership.providerAccountId === fixture.expectedProviderAccountId
+    && ownership.connected === true
+    && ownership.banked === true
+    && fixture.providerRequestCount === 0
+    && delta.blockedActivityAdded === true
+    && delta.accountStillConnected === true
+    && delta.tenancyChanged === false
+    && delta.functionCheckChanged === false
+    && delta.proofChanged === false
+    && delta.actionChanged === false
+    && delta.publishQueueChanged === false
+    && delta.providerReceiptCreated === false
+    && delta.completionRecorded === false
+    && !containsCredentialLikeOwnershipField(result)
+    && !JSON.stringify(result).includes("fake-test-token-marker")
+  );
+}
+
+function twitchProviderContractOwnershipIsTruthful(fixture = {}) {
+  const response = fixture.response || {};
+  const contract = fixture.contract || {};
+  const gates = contract.gates || {};
+  const account = contract.account || {};
+  const queueRow = fixture.ownershipQueueRow || {};
+  const ledger = contract.ledger || {};
+  const publishProbe = ledger.publishProbe || {};
+  const publishResult = publishProbe.result || {};
+  const missing = new Set(contract.missing || []);
+  const missingEnv = new Set(contract.missingEnv || []);
+  const grantedScopes = new Set((account.grantedScopes || account.scopes || []).map(String));
+  const expectedMissingGates = ["envReady", "portalReady", "liveReadProven", "publishDryRunProven", "reviewClear"];
+  const expectedMissingEnv = ["TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET"];
+  return Boolean(
+    fixture.authenticated === true
+    && fixture.developerCredentialsPresent === false
+    && fixture.providerRequestCount === 0
+    && response.ok === true
+    && response.workspaceId === fixture.expectedWorkspaceId
+    && contract.id === "twitch"
+    && contract.account
+    && account.providerAccountId === fixture.expectedProviderAccountId
+    && account.ownerUserId === fixture.expectedUserId
+    && account.workspaceId === fixture.expectedWorkspaceId
+    && account.connected === true
+    && account.tokenStored === true
+    && queueRow.id === "twitch"
+    && queueRow.banked === true
+    && queueRow.executable === false
+    && queueRow.phase === "Configure"
+    && contract.status === "banked-needs-proof"
+    && contract.owned === false
+    && gates.envReady === false
+    && gates.portalReady === false
+    && gates.oauthConnected === true
+    && gates.liveReadProven === false
+    && gates.publishLaneReady === true
+    && gates.publishDryRunProven === false
+    && gates.analyticsLaneReady === true
+    && gates.reviewClear === false
+    && expectedMissingGates.every(gate => missing.has(gate))
+    && missing.size === expectedMissingGates.length
+    && contract.truth?.configured === false
+    && contract.truth?.connected === true
+    && contract.truth?.tokenStored === true
+    && contract.truth?.canPublish === true
+    && contract.truth?.canReadAnalytics === true
+    && expectedMissingEnv.every(name => missingEnv.has(name))
+    && missingEnv.size === expectedMissingEnv.length
+    && grantedScopes.has("user:read:email")
+    && grantedScopes.has("clips:edit")
+    && grantedScopes.has("user:read:broadcast")
+    && ledger.status === "connected-unproven"
+    && ledger.banked === false
+    && publishProbe.ok === false
+    && publishProbe.attempted === true
+    && publishProbe.status === "blocked"
+    && publishResult.dryRun === false
+    && publishResult.status === "blocked"
+    && /does not have a native publish adapter/i.test(publishResult.error || publishProbe.summary || "")
+    && !containsCredentialLikeOwnershipField(response)
+    && !JSON.stringify(response).includes("fake-test-token-marker")
+  );
+}
+
+function hostedWorkspaceCacheIsIsolated(source) {
+  const persistStart = source.indexOf("function persistModelSnapshot");
+  const loadStart = source.indexOf("function loadModel", persistStart);
+  const shellStart = source.indexOf("function hostedSessionShell", loadStart);
+  const shellEnd = source.indexOf("async function syncModelFromServer", shellStart);
+  if ([persistStart, loadStart, shellStart, shellEnd].some(index => index < 0) || !(persistStart < loadStart && loadStart < shellStart && shellStart < shellEnd)) return false;
+
+  const persistSource = source.slice(persistStart, loadStart);
+  const loadSource = source.slice(loadStart, shellStart);
+  const shellSource = source.slice(shellStart, shellEnd);
+  const persistGuard = /if\s*\(\s*SERVER_MODE\s*\)\s*\{([^{}]*)\}/.exec(persistSource);
+  const loadGuard = /if\s*\(\s*SERVER_MODE\s*\)\s*\{([^{}]*)\}/.exec(loadSource);
+  if (!persistGuard || !loadGuard) return false;
+
+  const clearsHostedCache = branch => (
+    /localStorage\.removeItem\(\s*STORAGE_KEY\s*\)\s*;/.test(branch)
+    && /localStorage\.removeItem\(\s*LEGACY_STORAGE_KEY\s*\)\s*;/.test(branch)
+    && !/localStorage\.(?:getItem|setItem)\s*\(/.test(branch)
+  );
+  const localPersistSource = persistSource.slice(persistGuard.index + persistGuard[0].length);
+  const localLoadSource = loadSource.slice(loadGuard.index + loadGuard[0].length);
+  return (
+    clearsHostedCache(persistGuard[1])
+    && /\breturn\s*;/.test(persistGuard[1])
+    && /localStorage\.setItem\(\s*STORAGE_KEY\s*,/.test(localPersistSource)
+    && clearsHostedCache(loadGuard[1])
+    && /localStorage\.getItem\(\s*STORAGE_KEY\s*\)/.test(localLoadSource)
+    && /return\s+normalizeModel\(\s*clone\(\s*defaultModel\s*\)\s*\)\s*;/.test(loadGuard[1])
+    && /currentUser\s*:\s*auth\.user\s*\|\|\s*null/.test(shellSource)
+    && /workspaces\s*:\s*auth\.workspace\s*\?\s*\[\s*auth\.workspace\s*\]\s*:\s*\[\s*\]/.test(shellSource)
+    && /campaigns\s*:\s*\[\s*\]/.test(shellSource)
+    && /connectedAccounts\s*:\s*\[\s*\]/.test(shellSource)
+  );
+}
+
+function boundedSourceSection(source, startMarker, endMarker, fromIndex = 0) {
+  const start = source.indexOf(startMarker, fromIndex);
+  if (start < 0) return "";
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  return end < 0 ? "" : source.slice(start, end);
+}
+
+function namedFunctionSection(source, functionName, nextFunctionNames = []) {
+  const startMarker = `function ${functionName}`;
+  const start = source.indexOf(startMarker);
+  if (start < 0) return "";
+  const ends = nextFunctionNames
+    .map(name => source.indexOf(`function ${name}`, start + startMarker.length))
+    .filter(index => index >= 0);
+  const end = ends.length ? Math.min(...ends) : source.length;
+  return source.slice(start, end);
+}
+
+function browserControlState(source, id) {
+  const escapedId = String(id).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const element = new RegExp(`<(?:button|input)\\b[^>]*\\bid=["']${escapedId}["'][^>]*>`, "i").exec(source)?.[0] || "";
+  return {
+    present: Boolean(element),
+    disabled: Boolean(element && (/\bdisabled(?:\s*=\s*(?:["']disabled["']|["']?["']|true))?/i.test(element) || /\baria-disabled=["']true["']/i.test(element)))
+  };
+}
+
+function browserPaymentSafetyContract({ appSource, serverSource, modelSeedSource }) {
+  const createCheckoutSource = namedFunctionSection(appSource, "createCheckout", ["manageSubscription"]);
+  const manageSubscriptionSource = namedFunctionSection(appSource, "manageSubscription", ["providerTruthPill"]);
+  const renderBillingSource = namedFunctionSection(appSource, "renderBilling", ["loadBillingStatus"]);
+  const safeOpenerSource = namedFunctionSection(appSource, "openSafeExternalUrl", ["safeRedditHostedUrl"]);
+  const paymentOpenerSource = namedFunctionSection(appSource, "openPaymentUrl", ["copyTextValue"]);
+  const paymentHandlersSource = `${createCheckoutSource}\n${manageSubscriptionSource}`;
+  const checkoutControl = browserControlState(appSource, "createCheckout");
+  const portalControl = browserControlState(appSource, "manageSubscription");
+  const portalPageControl = browserControlState(serverSource, "portalCheckout");
+  const activeCheckoutRequest = /(?:authedFetch|fetch)\s*\(\s*["'`]\/api\/billing\/checkout["'`]/.test(createCheckoutSource);
+  const activePortalRequest = /(?:authedFetch|fetch)\s*\(\s*["'`]\/api\/billing\/portal["'`]/.test(manageSubscriptionSource);
+  const paymentUrlConsumed = /\b(?:openPaymentUrl|openSafeExternalUrl)\s*\(\s*(?:result|payload)\.url\b/.test(paymentHandlersSource);
+  const paymentLinkAuthority = /\b(?:openPaymentUrl|openSafeExternalUrl|window\.open)\s*\([^)]*\bpaymentLink\b/i.test(paymentHandlersSource)
+    || /(?:window\.)?location(?:\.href\s*=|\.(?:assign|replace)\s*\()[^;]*\bpaymentLink\b/i.test(paymentHandlersSource);
+  const paymentHostPresent = /(?:checkout|buy)\.stripe\.com/i.test(appSource);
+  const directNavigationSink = /\bwindow\.open\s*\(|(?:window\.)?location(?:\.href\s*=|\.(?:assign|replace)\s*\()/;
+  const livePaymentNavigation = activeCheckoutRequest
+    || activePortalRequest
+    || paymentUrlConsumed
+    || paymentLinkAuthority
+    || paymentHostPresent
+    || (checkoutControl.present && !checkoutControl.disabled)
+    || (portalControl.present && !portalControl.disabled);
+  const result = {
+    mode: livePaymentNavigation ? "payment-navigation" : "fail-closed",
+    assertions: 0,
+    safeOpenerAssertions: 0,
+    failClosedAssertions: 0
+  };
+  const check = (condition, message, category) => {
+    result.assertions += 1;
+    if (category === "safe-opener") result.safeOpenerAssertions += 1;
+    if (category === "fail-closed") result.failClosedAssertions += 1;
+    if (!condition) throw new Error(message);
+  };
+
+  if (livePaymentNavigation) {
+    const checkoutRequestStart = createCheckoutSource.indexOf('/api/billing/checkout');
+    const checkoutRequestEnd = createCheckoutSource.indexOf("const result", checkoutRequestStart);
+    const checkoutRequestSource = checkoutRequestStart >= 0 && checkoutRequestEnd > checkoutRequestStart
+      ? createCheckoutSource.slice(checkoutRequestStart, checkoutRequestEnd)
+      : "";
+    const checkoutHostMentions = (appSource.match(/checkout\.stripe\.com/gi) || []).length;
+    const buyHostMentions = (appSource.match(/buy\.stripe\.com/gi) || []).length;
+    check(activeCheckoutRequest, "live payment mode must retain the checkout request", "safe-opener");
+    check(activePortalRequest, "live payment mode must retain the billing-portal request", "safe-opener");
+    check(checkoutControl.present && !checkoutControl.disabled, "live checkout must use an enabled checkout control", "safe-opener");
+    check(portalControl.present && !portalControl.disabled, "live billing management must use an enabled portal control", "safe-opener");
+    check(/\bopenPaymentUrl\s*\(\s*result\.url\s*\)/.test(createCheckoutSource), "checkout URLs must pass through the payment safe opener", "safe-opener");
+    check(/\bopenPaymentUrl\s*\(\s*payload\.url\s*\)/.test(manageSubscriptionSource), "portal URLs must pass through the payment safe opener", "safe-opener");
+    check(Boolean(paymentOpenerSource), "live payment navigation requires a dedicated payment opener", "safe-opener");
+    check(/openSafeExternalUrl\s*\(\s*url\s*,\s*\[\s*"checkout\.stripe\.com"\s*,\s*"buy\.stripe\.com"\s*\]\s*\)/.test(paymentOpenerSource), "payment links must use only the approved Stripe hosts", "safe-opener");
+    check(/parsed\.protocol\s*!==\s*"https:"/.test(safeOpenerSource), "the payment safe opener must require HTTPS", "safe-opener");
+    check(/allowedHosts\.length\s*&&\s*!allowedHosts\.includes\(parsed\.hostname\)/.test(safeOpenerSource), "the payment safe opener must reject unapproved hosts", "safe-opener");
+    check(/throw new Error\("This link is not on the approved host list\."\)/.test(safeOpenerSource), "the payment safe opener must fail closed on an unapproved host", "safe-opener");
+    check(/window\.open\(parsed\.toString\(\),\s*"_blank",\s*"noopener,noreferrer"\)/.test(safeOpenerSource), "approved payment links must open with noopener and noreferrer", "safe-opener");
+    check(/catch\s*\(error\)\s*\{[\s\S]*alert\(error\.message/.test(safeOpenerSource), "payment opener failures must not fall back to unsafe navigation", "safe-opener");
+    check(!directNavigationSink.test(paymentHandlersSource), "payment handlers must not navigate around the approved-host opener", "safe-opener");
+    check(!directNavigationSink.test(paymentOpenerSource), "the dedicated payment opener must delegate instead of navigating directly", "safe-opener");
+    check(checkoutHostMentions === 1 && buyHostMentions === 1, "approved payment hosts must not be reused as alternate navigation paths", "safe-opener");
+    check(Boolean(checkoutRequestSource) && !/\bpaymentLink\b/i.test(checkoutRequestSource), "browser-provided paymentLink values must not become checkout authority", "safe-opener");
+    check(!appSource.includes('id="paymentLinkInput"'), "live payment mode must not accept a browser-provided payment link", "safe-opener");
+    return result;
+  }
+
+  let modelSeed;
+  try {
+    modelSeed = JSON.parse(modelSeedSource);
+  } catch {
+    throw new Error("fail-closed payment mode requires a valid model seed");
+  }
+  const pricingPresentationSource = namedFunctionSection(serverSource, "currentPricingPresentation", ["unavailablePricingEnvelope"]);
+  const checkoutUnavailable = /checkout\s*:\s*\{\s*available\s*:\s*false\s*,\s*status\s*:\s*"unavailable"\s*\}/.test(pricingPresentationSource);
+  const activationUnavailable = /billingActivation\s*:\s*\{\s*available\s*:\s*false\s*,\s*status\s*:\s*"unavailable"\s*\}/.test(pricingPresentationSource);
+  const inertHandler = source => Boolean(source)
+    && /button\.disabled\s*=\s*true/.test(source)
+    && /unavailable/i.test(source)
+    && !/(?:authedFetch|fetch)\s*\(/.test(source)
+    && !/\b(?:openPaymentUrl|openSafeExternalUrl|window\.open)\s*\(/.test(source)
+    && !/(?:window\.)?location(?:\.href\s*=|\.(?:assign|replace)\s*\()/.test(source);
+  check(!activeCheckoutRequest && !appSource.includes('/api/billing/checkout'), "fail-closed payment mode must not request checkout", "fail-closed");
+  check(!activePortalRequest && !appSource.includes('/api/billing/portal'), "fail-closed payment mode must not request the billing portal", "fail-closed");
+  check(!paymentUrlConsumed && !/\b(?:result|payload)\.url\b/.test(paymentHandlersSource), "fail-closed payment handlers must not consume a payment URL", "fail-closed");
+  check(!paymentLinkAuthority && !/\bpaymentLink\b/i.test(appSource), "fail-closed browser code must not consume paymentLink authority", "fail-closed");
+  check(!paymentHostPresent, "fail-closed browser code must not contain a Stripe checkout host", "fail-closed");
+  check(!directNavigationSink.test(paymentHandlersSource), "fail-closed payment handlers must not navigate directly", "fail-closed");
+  check((!checkoutControl.present || checkoutControl.disabled) && (!portalControl.present || portalControl.disabled), "fail-closed payment controls must be absent or disabled", "fail-closed");
+  check((!checkoutControl.present || /checkoutButton\.disabled\s*=\s*true/.test(renderBillingSource)) && (!portalControl.present || /portalButton\.disabled\s*=\s*true/.test(renderBillingSource)), "rendering must keep payment controls disabled", "fail-closed");
+  check(!checkoutControl.present || inertHandler(createCheckoutSource), "the disabled checkout handler must remain inert", "fail-closed");
+  check(!portalControl.present || inertHandler(manageSubscriptionSource), "the disabled billing-portal handler must remain inert", "fail-closed");
+  check(serverSource.includes('url.pathname === "/api/pricing" && req.method === "GET"'), "fail-closed pricing must come from the public pricing API", "fail-closed");
+  check(checkoutUnavailable, "the pricing API must mark checkout unavailable", "fail-closed");
+  check(activationUnavailable, "the pricing API must mark billing activation unavailable", "fail-closed");
+  check(!portalPageControl.present || portalPageControl.disabled, "the account portal payment control must remain absent or disabled", "fail-closed");
+  check(modelSeed?.billing?.checkoutMode === "unavailable", "the model seed must mark checkout unavailable", "fail-closed");
+  check(!Object.hasOwn(modelSeed?.billing || {}, "paymentLink"), "the model seed must not carry a payment link", "fail-closed");
+  check(!/\b(?:STRIPE_PRICE_[A-Z0-9_]+|price_[A-Za-z0-9_]+)\b/.test(appSource), "the browser presentation must not contain a Stripe price ID", "fail-closed");
+  check(!/(?:checkout|buy)\.stripe\.com/i.test(`${appSource}\n${modelSeedSource}`), "the browser presentation and seed must not contain a payment URL", "fail-closed");
+  return result;
+}
+
+function assertBrowserPaymentSafetyMutations(sources, mode) {
+  let checks = 0;
+  const reject = (label, mutatedSources) => {
+    checks += 1;
+    try {
+      browserPaymentSafetyContract(mutatedSources);
+    } catch {
+      return;
+    }
+    throw new Error(`payment safety contract accepted unsafe mutation: ${label}`);
+  };
+  const appSource = sources.appSource;
+  if (mode === "payment-navigation") {
+    const paymentOpenerSource = namedFunctionSection(appSource, "openPaymentUrl", ["copyTextValue"]);
+    reject("payment opener removed while navigation remains", { ...sources, appSource: appSource.replace(paymentOpenerSource, "") });
+    reject("checkout response paymentLink opened directly", { ...sources, appSource: appSource.replace("openPaymentUrl(result.url);", 'window.open(result.paymentLink, "_blank");') });
+    reject("approved payment hosts replaced", { ...sources, appSource: appSource.replace('["checkout.stripe.com", "buy.stripe.com"]', '["payments.example"]') });
+    reject("host rejection removed", { ...sources, appSource: appSource.replace("if (allowedHosts.length && !allowedHosts.includes(parsed.hostname))", "if (false)") });
+    reject("only portal navigation remains active", { ...sources, appSource: appSource.replace('/api/billing/checkout', '/api/billing/status') });
+    return checks;
+  }
+
+  reject("checkout request restored without a safe opener", { ...sources, appSource: appSource.replace('showAppResult("Checkout unavailable"', 'authedFetch("/api/billing/checkout"); showAppResult("Checkout unavailable"') });
+  reject("paymentLink consumed directly", { ...sources, appSource: appSource.replace('showAppResult("Checkout unavailable"', 'window.open(model.billing.paymentLink, "_blank"); showAppResult("Checkout unavailable"') });
+  reject("checkout control enabled without navigation safety", { ...sources, appSource: appSource.replace('id="createCheckout" disabled', 'id="createCheckout"') });
+  reject("portal alone restored while checkout stays disabled", { ...sources, appSource: appSource.replace('showAppResult("Billing portal unavailable"', 'authedFetch("/api/billing/portal"); showAppResult("Billing portal unavailable"') });
+  reject("pricing API claims checkout is available", { ...sources, serverSource: sources.serverSource.replaceAll('checkout: { available: false, status: "unavailable" }', 'checkout: { available: true, status: "available" }') });
+  reject("unavailable labels used without seed and activation proof", {
+    ...sources,
+    serverSource: sources.serverSource.replace('billingActivation: { available: false, status: "unavailable" }', 'billingActivation: { available: true, status: "available" }'),
+    modelSeedSource: sources.modelSeedSource.replace('"checkoutMode": "unavailable"', '"checkoutMode": "available"')
+  });
+  return checks;
+}
+
+function discordQueuedAnnouncementAdapterIsNative(source) {
+  const discoverySource = boundedSourceSection(source, "async function discoverWorkerJobs", "async function claimWorkerJobs");
+  const scheduledWorkerSource = boundedSourceSection(source, "async function processScheduledPublishWorkerJob", "async function processProviderPublishStatusWorkerJob");
+  const workerDispatchSource = boundedSourceSection(source, "async function processWorkerJob", "async function runDurableWorkerTick");
+  const adapterSource = boundedSourceSection(source, "async function attemptQueuedVariantPublish", "function rememberPublishAttempt");
+  const discordSource = boundedSourceSection(adapterSource, 'if (item.variant.platform === "discord")', 'if (item.variant.platform === "linkedin")');
+  if (!discoverySource || !scheduledWorkerSource || !workerDispatchSource || !discordSource) return false;
+
+  return (
+    /kind\s*:\s*"scheduled_publish"/.test(discoverySource)
+    && /platform\s*:\s*row\.platform/.test(discoverySource)
+    && /attemptQueuedVariantPublish\(\s*model\s*,\s*item\s*,\s*\{\s*live\s*:\s*true\s*,\s*user\s*\}\s*\)/.test(scheduledWorkerSource)
+    && /job\.kind\s*===\s*"scheduled_publish"\s*\)\s*return\s+processScheduledPublishWorkerJob\(\s*job\s*,\s*registry\s*\)\s*;/.test(workerDispatchSource)
+    && /selectedProviderAccount\(\s*model\s*,\s*"discord"\s*,\s*options\.user\s*\|\|\s*null\s*\)/.test(discordSource)
+    && /!account\s*\|\|\s*!isRealConnectedAccount\(account\)\s*\|\|\s*!tokenForDiscordAccount\(account\)/.test(discordSource)
+    && /if\s*\(\s*!discordBotToken\s*\)/.test(discordSource)
+    && /target\s*=\s*discordSavedTarget\(\s*account\s*,\s*\{\s*\}\s*\)/.test(discordSource)
+    && /if\s*\(\s*live\s*\)\s*await\s+authorizedDiscordGuild\(\s*tokenForDiscordAccount\(account\)\s*,\s*target\.guildId/.test(discordSource)
+    && /if\s*\(\s*!live\s*\)\s*return\s*\{\s*ok\s*:\s*true\s*,\s*provider\s*:\s*"discord"\s*,\s*dryRun\s*:\s*true\b/.test(discordSource)
+    && /discordApi\(\s*`\/channels\/\$\{target\.channelId\}\/messages`\s*,/.test(discordSource)
+    && /allowed_mentions\s*:\s*\{\s*parse\s*:\s*\[\s*\]\s*\}/.test(discordSource)
+    && /\{\s*method\s*:\s*"POST"\s*,\s*authScheme\s*:\s*"Bot"\s*\}/.test(discordSource)
+    && /provider\s*:\s*"discord"\s*,\s*dryRun\s*:\s*false\b/.test(discordSource)
+    && /providerPostId\s*:\s*response\.id\s*\|\|\s*null/.test(discordSource)
+  );
 }
 
 async function waitForServer() {
@@ -157,6 +6423,7 @@ try {
   if (appHtml.includes('id="billingStatusInput"') || appHtml.includes('id="paymentLinkInput"')) throw new Error("customer billing must not expose editable backend setup fields");
   const serverSource = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
   const packageSource = await readFile(new URL("./package.json", import.meta.url), "utf8");
+  const modelSeedSource = await readFile(new URL("./social-cues-model-seed.json", import.meta.url), "utf8");
   const perUserMigrationSource = await readFile(new URL("./SUPABASE-PER-USER-MIGRATION.sql", import.meta.url), "utf8");
   const durableWorkerMigrationSource = await readFile(new URL("./SUPABASE-DURABLE-WORKERS.sql", import.meta.url), "utf8");
   const manychatIsolationMigrationSource = await readFile(new URL("./SUPABASE-MANYCHAT-ISOLATION.sql", import.meta.url), "utf8");
@@ -169,7 +6436,6 @@ try {
   const responseIntelligenceMigrationSource = await readFile(new URL("./SUPABASE-RESPONSE-INTELLIGENCE.sql", import.meta.url), "utf8");
   const envExampleSource = await readFile(new URL("./.env.example", import.meta.url), "utf8");
   const envSyncSource = await readFile(new URL("./scripts/sync-vercel-env.mjs", import.meta.url), "utf8");
-  const productionEnvAudit = await readFile(new URL("./PRODUCTION-ENV-AUDIT-2026-06-28.md", import.meta.url), "utf8");
   const implementedRoutes = new Set([...serverSource.matchAll(/url\.pathname\s*===\s*"([^"]+)"/g)].map(match => match[1]));
   const declaredEndpoints = [...serverSource.matchAll(/endpoint:\s*"([^"]+)"/g)]
     .map(match => match[1].split("?")[0])
@@ -197,7 +6463,32 @@ try {
   if (!serverSource.includes("promo.email !== normalizedEmail") || !serverSource.includes("memberOnly: Boolean(promo.memberOnly)") || !serverSource.includes("if (entitlement.memberOnly) return \"Member\"") || !serverSource.includes("const assignedMemberPromo = testPromoCodes.find")) throw new Error("email-bound member promo codes must not inherit owner/admin access");
   if (!serverSource.includes("REDDIT_DEVVIT_PROJECT_READY") || !serverSource.includes("redditDevvitProjectDeclaredReady") || !serverSource.includes('if (runtimeMode === "vercel") return redditDevvitProjectDeclaredReady')) throw new Error("production Reddit readiness must use verified flags instead of packaging the Devvit toolchain");
   if (serverSource.includes("promoFromSupabaseUser") || /raw_user_meta_data[\s\S]{0,400}promo/i.test(serverSource)) throw new Error("user-editable Supabase metadata must never grant promo authorization");
-  if (!serverSource.includes('if (runtimeMode === "vercel") {\n        return { ok: false, status: 401, error: "Email or password did not match a verified Social Cues account." };')) throw new Error("hosted Supabase login must never fall back to a legacy local password hash");
+  const authPolicyStart = serverSource.indexOf("function authenticationExecutionMode");
+  const authPolicyEnd = serverSource.indexOf("function supabaseAuthEnabled", authPolicyStart);
+  const authPolicySource = serverSource.slice(authPolicyStart, authPolicyEnd);
+  const upsertSupabaseStart = serverSource.indexOf("function upsertSupabaseAppUser");
+  const createAccountStart = serverSource.indexOf("async function createAppAccount", upsertSupabaseStart);
+  const loginAccountStart = serverSource.indexOf("async function loginAppAccount", createAccountStart);
+  const deviceSessionStart = serverSource.indexOf("function upsertDeviceSession", loginAccountStart);
+  const providerUserSource = serverSource.slice(upsertSupabaseStart, createAccountStart);
+  const createAccountSource = serverSource.slice(createAccountStart, loginAccountStart);
+  const loginAccountSource = serverSource.slice(loginAccountStart, deviceSessionStart);
+  const sessionValidatorStart = serverSource.indexOf("function requireSupabaseAuthenticatedSession");
+  const signupValidatorStart = serverSource.indexOf("function requireSupabaseSignupResult", sessionValidatorStart);
+  const failureMapperStart = serverSource.indexOf("function publicAuthenticationFailure", signupValidatorStart);
+  const sessionValidatorSource = serverSource.slice(sessionValidatorStart, signupValidatorStart);
+  const signupValidatorSource = serverSource.slice(signupValidatorStart, failureMapperStart);
+  if ([authPolicyStart, authPolicyEnd, upsertSupabaseStart, createAccountStart, loginAccountStart, deviceSessionStart, sessionValidatorStart, signupValidatorStart, failureMapperStart].some(index => index < 0)) throw new Error("hosted authentication security boundaries are missing");
+  if (!serverSource.includes('const authProvider = String(process.env.AUTH_PROVIDER || "supabase")')) throw new Error("local password authentication must require an explicit alpha-local provider selection");
+  if (!authPolicySource.includes('runtimeMode === "vercel"') || !authPolicySource.includes('supabaseAuthReady() ? "supabase" : "unavailable"') || !authPolicySource.includes('authProvider === "supabase"')) throw new Error("hosted and explicitly selected Supabase authentication must fail closed when readiness is incomplete");
+  if (createAccountSource.indexOf('authMode === "unavailable"') < 0 || createAccountSource.indexOf('authMode === "unavailable"') > createAccountSource.indexOf("hashPassword(password)")) throw new Error("signup must reject unavailable hosted authentication before local hashing");
+  if (createAccountSource.split("hashPassword(password)").length !== 2 || createAccountSource.indexOf('if (authMode === "local-password")') > createAccountSource.indexOf("hashPassword(password)")) throw new Error("signup hashing must exist only in the explicit local-password branch");
+  if (loginAccountSource.split("verifyPassword(password").length !== 2 || loginAccountSource.indexOf('if (authMode === "local-password")') > loginAccountSource.indexOf("verifyPassword(password")) throw new Error("password verification must exist only in the explicit local-password branch");
+  if (!loginAccountSource.includes('return publicAuthenticationFailure("login", error);') || loginAccountSource.indexOf('return publicAuthenticationFailure("login", error);') > loginAccountSource.indexOf('if (authMode === "local-password")')) throw new Error("Supabase login failures must return before the local-password branch");
+  if (!providerUserSource.includes("requireSupabaseUserIdentity(supabaseUser)") || providerUserSource.includes('supabaseUser?.id || uid("user")') || providerUserSource.includes("supabaseUser?.email || input.email")) throw new Error("provider persistence must require a validated identity without synthesized ids or email fallbacks");
+  if (!sessionValidatorSource.includes("requireSupabaseUserIdentity(value.user") || !sessionValidatorSource.includes("value.access_token") || !sessionValidatorSource.includes("!accessToken")) throw new Error("hosted login must require a provider user and nonblank access token");
+  if (!signupValidatorSource.includes("needsEmailVerification: true") || !signupValidatorSource.includes("if (!accessToken)") || !signupValidatorSource.includes("if (!confirmed)")) throw new Error("verification-required signup must remain separate from authenticated signup");
+  if (serverSource.includes("Supabase failed, so try the local password.")) throw new Error("provider failures must never introduce a local-password fallback");
   if (!serverSource.includes('ready: checkoutReady && webhookReady') || !serverSource.includes('if (runtimeMode === "vercel" && !stripeWebhookSecret)')) throw new Error("Stripe must not accept hosted checkout before signed entitlement webhooks are configured");
   if (serverSource.includes("Stripe Checkout is live") || !serverSource.includes('id="portalCheckout" disabled') || !serverSource.includes('button.textContent = billing.ready ? "Pay or manage checkout" : "Payments opening soon"')) throw new Error("public payment controls must reflect verified billing readiness instead of exposing a dead checkout");
   if (/localStorage\.setItem\(STORAGE_KEY,\s*JSON\.stringify\(model\)\)/.test(appHtml) || /body:\s*JSON\.stringify\(model\)/.test(appHtml)) throw new Error("browser model persistence must use sanitized snapshots");
@@ -206,13 +6497,16 @@ try {
   if (!responseIntelligenceMigrationSource.includes("create table if not exists public.response_events") || !responseIntelligenceMigrationSource.includes("create policy server_only_deny_all") || !responseIntelligenceMigrationSource.includes("revoke all on table public.response_events from public, anon, authenticated")) throw new Error("response intelligence storage must remain explicitly server-only");
   if (!serverSource.includes('url.pathname === "/api/push/subscribe"') || !serverSource.includes("encrypted_subscription: encryptedToken") || !appHtml.includes('id="togglePushNotifications"') || !serviceWorkerSource.includes('self.addEventListener("push"')) throw new Error("encrypted per-device push notifications are incomplete");
   if (!serverSource.includes('job.kind === "analytics_collection"') || !serverSource.includes('job.kind === "audience_brief"') || !serverSource.includes("social-cues-evidence-rules-v1")) throw new Error("scheduled analytics and evidence-only audience brief workers are incomplete");
-  if (!appHtml.includes("openPaymentUrl") || !appHtml.includes('"checkout.stripe.com", "buy.stripe.com"') || !appHtml.includes('window.open(parsed.toString(), "_blank", "noopener,noreferrer")')) throw new Error("payment links must use the approved-host safe opener");
+  const paymentSafetySources = { appSource: appHtml, serverSource, modelSeedSource };
+  const paymentSafety = browserPaymentSafetyContract(paymentSafetySources);
+  const paymentSafetyMutationChecks = assertBrowserPaymentSafetyMutations(paymentSafetySources, paymentSafety.mode);
+  console.log(JSON.stringify({ paymentSafety: { ...paymentSafety, mutationChecks: paymentSafetyMutationChecks } }));
   if (!appHtml.includes('.replaceAll("\'", "&#39;")')) throw new Error("HTML escaping must encode apostrophes");
   if (!serverSource.includes("SOCIAL_CUES_DATA_DIR") || !serverSource.includes("model.invalid-") || !serverSource.includes("await rename(tempPath, modelPath)") || !serverSource.includes("Recovered malformed local model.json")) throw new Error("local model persistence should isolate tests, recover malformed JSON, and write atomically");
   if (!serverSource.includes("function normalizeBrandHashtags") || !serverSource.includes("brandKitTagList") || !serverSource.includes("model.brandKit || {}")) throw new Error("server-side brand kit copy support is missing");
   if (!serverSource.includes("function resolvedAppUserRole")) throw new Error("resolved app-user role helper is missing");
   if (!/workspace_members\?on_conflict=workspace_id,user_id"[\s\S]{0,320}role: "owner"/.test(serverSource)) throw new Error("private workspace persistence must keep the account owner as the workspace owner");
-  if (!serverSource.includes("ownsPrivateWorkspace") || !serverSource.includes("workspaceId === ownerUserId")) throw new Error("private workspace owners must retain member-management authority regardless of subscription label");
+  if (!serverSource.includes("async function requireWorkspaceManagementAccess") || !serverSource.includes("&user_id=eq.${encodeURIComponent(userId)}") || !serverSource.includes("managementAccess.workspaceId")) throw new Error("workspace management must require the active user's exact owner or admin membership");
   if (!serverSource.includes("merged.workspace = workspaceForUser(workspaceModel, user)")) throw new Error("session hydration must keep the private workspace identity instead of replacing it with the shared registry label");
   if (!appHtml.includes("Account health") || !appHtml.includes('id="accountHealthSummary"') || !appHtml.includes("Refresh insights")) throw new Error("account page should use the customer-facing account health summary");
   if (!appHtml.includes('data-manychat-connect') || !appHtml.includes('type="password"') || !appHtml.includes('authedFetch("/api/manychat/connect"')) throw new Error("Manychat should connect through an authenticated password-style key control");
@@ -248,7 +6542,7 @@ try {
   if (!serverSource.includes('claims.methods.includes("recovery")') || !serverSource.includes("claimPasswordRecoveryInstance") || !serverSource.includes("finishPasswordRecoveryInstance")) throw new Error("password updates must require and consume a Supabase recovery instance");
   if (!/url\.pathname === "\/api\/auth\/logout"[\s\S]{0,500}session\.device\.revokedAt[\s\S]{0,300}persistNormalizedDeviceAuthState\(session\.device\)/.test(serverSource)) throw new Error("logout must durably revoke the normalized device session");
   if (!serverSource.includes("function normalizedDeviceSessionsForUser") || !serverSource.includes("deviceRevokeMatch") || !serverSource.includes("persistNormalizedDeviceAuthState(target)")) throw new Error("device management must read durable sessions and revoke a selected non-current device");
-  if (!/async function sessionFromRequest[\s\S]{0,500}if \(supabaseAuthEnabled\(\)\) \{[\s\S]{0,200}normalizedDeviceSessionByTokenHash/.test(serverSource)) throw new Error("Supabase sessions must trust the normalized device record before any stale shared registry entry");
+  if (!/async function sessionFromRequest[\s\S]{0,300}const authMode = authenticationExecutionMode\(\);[\s\S]{0,300}if \(authMode === "supabase"\) \{[\s\S]{0,200}normalizedDeviceSessionByTokenHash/.test(serverSource)) throw new Error("Supabase sessions must trust the normalized device record before any stale shared registry entry");
   if (!/async function persistNormalizedDeviceAuthState[\s\S]{0,4000}on_conflict=user_id,device_id/.test(serverSource) || !/async function persistNormalizedDeviceAuthState[\s\S]{0,800}preserveDurableRevocation/.test(serverSource)) throw new Error("device auth writes must create new devices without resurrecting durable revocations");
   if (!/async function persistNormalizedDeviceAuthState[\s\S]{0,3200}method: "PATCH"[\s\S]{0,500}return=representation[\s\S]{0,500}Device session revocation did not persist/.test(serverSource)) throw new Error("existing device changes must use a verified owner-and-device update");
   if (!/normalizedDeviceSessionByTokenHash[\s\S]{0,500}model\.deviceSessions = \[[\s\S]{0,500}\.filter\(item =>/.test(serverSource)) throw new Error("normalized session lookup must replace a stale registry copy instead of duplicating the device");
@@ -262,7 +6556,7 @@ try {
   if (!/activeCampaignId: "",\s*campaigns: \[\]/.test(appHtml)) throw new Error("the browser default must not invent a starter campaign");
   if (/const first = defaultModel\.campaigns\[0\]/.test(appHtml)) throw new Error("browser boot must not generate content from a nonexistent starter campaign");
   if (!serverSource.includes('safe.deviceSessions = [];') || !serverSource.includes('source: "client-isolated-workspace"')) throw new Error("workspace snapshots must exclude device security records and remain explicitly isolated");
-  if (!appHtml.includes('if (SERVER_MODE) {\n        // Hosted workspaces are authoritative on the server.') || !appHtml.includes("function hostedSessionShell")) throw new Error("hosted browsers must not persist a cross-account workspace cache");
+  if (!hostedWorkspaceCacheIsIsolated(appHtml)) throw new Error("hosted browsers must not persist a cross-account workspace cache");
   if (!/if \(SERVER_MODE\)\s*\{\s*persistModelSnapshot\(model\);\s*render\(\);\s*\} else \{\s*saveModel\("Initialized Social Cues model\."\)/.test(appHtml)) throw new Error("a fresh hosted browser must not overwrite the customer workspace with the starter model");
   if (!passwordRecoveryMigrationSource.includes("create table if not exists public.password_recovery_instances") || !passwordRecoveryMigrationSource.includes("enable row level security") || !passwordRecoveryMigrationSource.includes("revoke all on table public.password_recovery_instances from public, anon, authenticated")) throw new Error("password recovery replay protection must be durable and service-role only");
   if (!appHtml.includes('href="/portal?mode=forgot-password"')) throw new Error("the app login screen must expose the password recovery request lane");
@@ -352,7 +6646,7 @@ try {
   if (!serverSource.includes("cleanupNormalizedProviderPlaceholders") || !serverSource.includes("reconcileProviderAccountEvidence")) throw new Error("provider persistence must remove invalid placeholder siblings after a verified identity is stored");
   if (!serverSource.includes("connectionReason: connectionState.reason") || !serverSource.includes("scopeEvidence: { requested: requestedScopes, granted: grantedScopes, missing: missingScopes }") || !serverSource.includes("credentialFamily: providerCredentialFamily(account)")) throw new Error("public account truth must expose safe reason, scope, provider-family, and asset evidence");
   if (!serverSource.includes("function scrubPublicAccountValue") || !serverSource.includes("nested]) => [key, scrubPublicAccountValue(nested)]")) throw new Error("public account secret scrubber must recursively remove nested secret fields");
-  for (const secretField of ["encryptedtoken", "encryptedrefreshtoken", "clientsecret", "appsecret", "codeverifier", "sessiontokenhash"]) {
+  for (const secretField of ["encryptedtoken", "encryptedcredential", "encryptedrefreshtoken", "clientsecret", "appsecret", "codeverifier", "sessiontokenhash"]) {
     if (!serverSource.includes(`"${secretField}"`)) throw new Error(`public account secret scrubber missing ${secretField}`);
   }
   if (!serverSource.includes('!item.providerAccountId && String(item.id || "") === String(publicProfile.id || "")')) throw new Error("normalized provider rehydration must not let a stale card id overwrite a real provider account identity");
@@ -439,10 +6733,12 @@ try {
     if (!serverSource.includes(envName) || !serverSource.includes("acceptedEnv: envAcceptedMap")) throw new Error("OAuth status endpoints should expose missing env names and accepted aliases");
   }
   if ((serverSource.match(/providerId === "discord"/g) || []).length !== 1) throw new Error("Discord live probe should have one canonical implementation");
-  if (!packageSource.includes("vercel:env:audit") || !packageSource.includes("vercel:env:sync")) throw new Error("Vercel env sync scripts missing from package.json");
+  const packageScripts = JSON.parse(packageSource).scripts || {};
+  if (packageScripts["vercel:env:audit"] !== "node scripts/sync-vercel-env.mjs --dry-run") throw new Error("vercel:env:audit must remain the explicit dry-run command");
+  if (packageScripts["vercel:env:sync"] !== "node scripts/sync-vercel-env.mjs") throw new Error("vercel:env:sync must remain the explicit synchronization command");
   if (!envSyncSource.includes("Secret values are never printed.") || !envSyncSource.includes("defaultTargets") || !envSyncSource.includes("MISSING_LOCAL") || !envSyncSource.includes("WOULD_ADD") || !envSyncSource.includes("ADDED")) throw new Error("Vercel env sync script should be dry-run safe and name-only");
   if (!envSyncSource.includes("ETSY_CLIENT_SECRET") || !envSyncSource.includes("LINKEDIN_CLIENT_SECRET") || !envSyncSource.includes("DISCORD_CLIENT_ID") || !envSyncSource.includes("CANVA_CLIENT_SECRET")) throw new Error("Vercel env sync script missing prioritized provider targets");
-  if (!productionEnvAudit.includes("npm run vercel:env:audit") || !productionEnvAudit.includes("npm run vercel:env:sync -- --apply --names ETSY_CLIENT_SECRET")) throw new Error("production env audit missing safe sync loop");
+  if (!envSyncSource.includes('const args = { apply: false, environment: "production", names: [], envFile: ".env" };') || !envSyncSource.includes('if (arg === "--apply") args.apply = true;') || (envSyncSource.match(/args\.apply\s*=\s*true/g) || []).length !== 1 || !envSyncSource.includes('else if (arg === "--names") args.names = (argv[++index] || "").split(",").map(item => item.trim()).filter(Boolean);') || !/if \(!args\.apply\) \{[\s\S]*?WOULD_ADD[\s\S]*?continue;[\s\S]*?\}\s*try \{\s*await addEnvironmentVariable\(/.test(envSyncSource)) throw new Error("Vercel env sync mutation must require explicit --apply while preserving focused --names handling");
   for (const route of ["/api/twitch/clips", "/api/twitch/videos", "/api/twitch/stream", "/api/twitch/schedule", "/api/twitch/followers"]) {
     if (!appHtml.includes(route)) throw new Error(`Twitch expansion route missing from function suite: ${route}`);
     if (!serverSource.includes(`url.pathname === "${route}"`)) throw new Error(`Twitch expansion route missing backend handler: ${route}`);
@@ -545,7 +6841,7 @@ try {
   if (!serverSource.includes("function requireProviderOperator") || !serverSource.includes("Only the Social Cues owner can register application commands")) throw new Error("Discord application-level diagnostics and command registration must be operator-only in production");
   if (!serverSource.includes("function existingDiscordActionReceipt") || !serverSource.includes("function recordDiscordActionReceipt") || !serverSource.includes('req.headers["idempotency-key"]')) throw new Error("Discord direct writes need durable idempotency receipts");
   if (!/url\.pathname === "\/api\/discord\/announcement"[\s\S]*?allowed_mentions:\s*\{ parse: \[\] \}/.test(serverSource)) throw new Error("Discord announcements must suppress mass mentions");
-  if (!serverSource.includes('item.variant.platform === "discord"') || !serverSource.includes('provider: "discord",\n        dryRun: false')) throw new Error("Discord capability truth requires a native queued announcement adapter");
+  if (!discordQueuedAnnouncementAdapterIsNative(serverSource)) throw new Error("Discord capability truth requires a native queued announcement adapter");
   if (serverSource.includes("Message captured for the Social Cues community response workflow") || serverSource.includes("Community profile handoff created")) throw new Error("Discord context commands must not claim durable capture before a workspace mapping exists");
   if (!serverSource.includes("escapeHtml(error)") || !serverSource.includes("escapeHtml(stateCheck.error)")) throw new Error("Discord callback errors must be HTML escaped");
   if (!appHtml.includes("data-discord-save-target") || !appHtml.includes("data-discord-message-reply") || !appHtml.includes("data-discord-message-moderate")) throw new Error("Discord community target, reply, and moderation controls should be present in Responses");
@@ -688,13 +6984,77 @@ try {
   const forgedMedia = await forgedMediaResponse.json();
   if (forgedMediaResponse.status !== 403 || !/invalid or expired/i.test(forgedMedia.error || "")) throw new Error("forged provider media capability should be rejected before storage access");
 
-  const model = await request("/api/model");
+  const coreModelRequestsBefore = (await externalHttpRequestAttempts()).length;
+  const anonymousModelResponse = await fetch(base + "/api/model");
+  const anonymousModel = await anonymousModelResponse.json();
+  const anonymousModelSource = JSON.stringify(anonymousModel);
+  const anonymousForbiddenFields = [
+    "workspace", "workspaces", "campaigns", "quickPosts", "connectedAccounts",
+    "authUsers", "authPromoClaims", "oauthStates", "oauthEvents"
+  ];
+  if (anonymousModelResponse.status !== 401 || anonymousModel.ok !== false || !/sign in/i.test(anonymousModel.error || "")) {
+    throw new Error("anonymous model read must fail closed with a sanitized authentication-required response");
+  }
+  if (anonymousForbiddenFields.some(field => Object.prototype.hasOwnProperty.call(anonymousModel, field))
+    || anonymousModelSource.includes('"token":')
+    || anonymousModelSource.includes('"accessToken":')
+    || anonymousModelSource.includes('"refreshToken":')) {
+    throw new Error("anonymous model denial exposed public workspace or private model data");
+  }
+
+  const ownerGateEmail = `mr.barton+owner-gate-test-${Date.now()}@socialcuesapp.com`;
+  const ownerSignup = await request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Cory Barton", email: ownerGateEmail, password: "test-password-2026", workspaceName: "Owner Workspace" })
+  });
+  if (!ownerSignup.ok || ownerSignup.entitlement?.source !== "owner-allowlist" || !ownerSignup.entitlement?.subscriptionPaid || !ownerSignup.entitlement?.appFeePaid) throw new Error("owner email signup should bypass invite lock and receive full access");
+  if (ownerSignup.user?.role !== "Owner" || !ownerSignup.session?.token) throw new Error("owner signup should resolve to the Owner role with a local session");
+
+  const authenticatedModelResponse = await fetch(base + "/api/model", {
+    headers: { Authorization: `Bearer ${ownerSignup.session.token}` }
+  });
+  const model = await authenticatedModelResponse.json();
+  if (authenticatedModelResponse.status !== 200) throw new Error("authenticated owner could not load the public workspace model");
+  if (model.workspace?.id !== ownerSignup.workspace?.id
+    || model.currentUser?.id !== ownerSignup.user?.id
+    || (model.workspaces || []).some(workspace => workspace.id !== ownerSignup.workspace?.id)) {
+    throw new Error("authenticated model was not limited to the signed-in owner workspace");
+  }
   if (!model.workspace || !Array.isArray(model.campaigns) || !Array.isArray(model.quickPosts)) throw new Error("bad model shape");
   if (!Array.isArray(model.connectedAccounts)) throw new Error("bad accounts shape");
+  const privateAccountFields = ["credential", "refreshCredential", "token", "accessToken", "refreshToken", "encryptedToken", "encryptedCredential"];
+  if (model.connectedAccounts.some(account => privateAccountFields.some(field => Object.prototype.hasOwnProperty.call(account, field)))) throw new Error("model exposed a private connected-account credential field");
   if (Object.prototype.hasOwnProperty.call(model, "authUsers")) throw new Error("model exposed auth user ledger");
+  if (Object.prototype.hasOwnProperty.call(model, "authPromoClaims")) throw new Error("model exposed promo claim ledger");
   if (JSON.stringify(model).includes('"token":') || JSON.stringify(model).includes('"accessToken":') || JSON.stringify(model).includes('"refreshToken":')) throw new Error("model leaked token material");
   if (JSON.stringify(model).includes('"oauthStates"')) throw new Error("model leaked oauth state ledger");
   if (JSON.stringify(model).includes('"oauthEvents"')) throw new Error("model leaked OAuth debug event ledger");
+  const coreModelExternalRequests = (await externalHttpRequestAttempts()).length - coreModelRequestsBefore;
+  if (coreModelExternalRequests !== 0) throw new Error("core model authentication fixture attempted an external request");
+  const coreModelFixture = {
+    anonymousStatus: anonymousModelResponse.status,
+    anonymousContentType: anonymousModelResponse.headers.get("content-type") || "",
+    anonymousClassification: "authentication_required",
+    anonymousSessionPresent: false,
+    authenticatedStatus: authenticatedModelResponse.status,
+    authenticatedContentType: authenticatedModelResponse.headers.get("content-type") || "",
+    authenticatedSessionPresent: Boolean(ownerSignup.session?.token),
+    workspaceIdEqual: model.workspace?.id === ownerSignup.workspace?.id,
+    foreignWorkspaceVisible: (model.workspaces || []).some(workspace => workspace.id !== ownerSignup.workspace?.id),
+    publicShape: {
+      workspace: Boolean(model.workspace),
+      campaigns: Array.isArray(model.campaigns),
+      quickPosts: Array.isArray(model.quickPosts),
+      connectedAccounts: Array.isArray(model.connectedAccounts)
+    },
+    privateDataAbsent: true,
+    externalRequests: coreModelExternalRequests
+  };
+
+  if (coreModelFixtureOnly) {
+    console.log(JSON.stringify({ ok: true, coreModel: coreModelFixture }));
+  } else {
   if (!serverSource.includes("async function hydrateNormalizedSupabaseAccountState") || !serverSource.includes("/billing_entitlements?user_id=eq.") || !serverSource.includes("await hydrateNormalizedSupabaseAccountState(model, user)")) {
     throw new Error("Supabase login/session restoration must hydrate the durable profile and billing entitlement before enforcing the paywall");
   }
@@ -709,15 +7069,6 @@ try {
   });
   const blockedSignup = await blockedSignupResponse.json();
   if (blockedSignupResponse.status !== 403 || !blockedSignup.signupLocked || !/invite-only/i.test(blockedSignup.error || "")) throw new Error("public signup without owner email or promo code should be locked");
-
-  const ownerGateEmail = `mr.barton+owner-gate-test-${Date.now()}@socialcuesapp.com`;
-  const ownerSignup = await request("/api/auth/signup", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "Cory Barton", email: ownerGateEmail, password: "test-password-2026", workspaceName: "Owner Workspace" })
-  });
-  if (!ownerSignup.ok || ownerSignup.entitlement?.source !== "owner-allowlist" || !ownerSignup.entitlement?.subscriptionPaid || !ownerSignup.entitlement?.appFeePaid) throw new Error("owner email signup should bypass invite lock and receive full access");
-  if (ownerSignup.user?.role !== "Owner") throw new Error("owner signup should resolve to the Owner role");
 
   const missingMemberPromoResponse = await fetch(base + "/api/auth/signup", {
     method: "POST",
@@ -832,6 +7183,27 @@ try {
   const blankWorkspaceCollections = ["campaigns", "actions", "proof", "mediaAssets", "mediaRenderJobs", "publishQueue", "analyticsSnapshots", "providerStateSnapshots", "connectedAccounts", "activity"];
   if (blankWorkspaceCollections.some(key => (firstUserModel[key] || []).length) || firstUserModel.activeCampaignId || (firstUserModel.analytics?.metrics || []).length) {
     throw new Error("new first-user workspace was not completely blank");
+  }
+  if (!firstUserModel.persistence?.conditionalSave || !firstUserModel.persistence.revision) {
+    throw new Error("signed-in local workspace did not expose revisioned save capability");
+  }
+  const modelFilePath = path.join(testDataDir, "model.json");
+  const bareSaveStateBefore = await readFile(modelFilePath);
+  const bareSaveRequestsBefore = (await externalHttpRequestAttempts()).length;
+  const bareSaveResponse = await fetch(base + "/api/model", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    body: JSON.stringify(firstUserModel)
+  });
+  const bareSave = await bareSaveResponse.json();
+  if (bareSaveResponse.status !== 428 || bareSave.code !== "workspace_revision_required" || bareSave.commitStatus !== "not_committed") {
+    throw new Error("bare authenticated model save did not fail closed on the missing revision envelope");
+  }
+  if (!bareSaveStateBefore.equals(await readFile(modelFilePath))) {
+    throw new Error("rejected bare model save changed durable workspace state");
+  }
+  if ((await externalHttpRequestAttempts()).length !== bareSaveRequestsBefore) {
+    throw new Error("rejected bare model save attempted an external provider request");
   }
   firstUserModel.connectedAccounts = [
     ...(firstUserModel.connectedAccounts || []),
@@ -1012,27 +7384,120 @@ try {
       oauthProvider: "threads",
       providerAccountId: "test-threads-user-1",
       credential: "fake-test-token-marker",
+      encryptedCredential: "encrypted-credential-regression-marker",
       scopes: ["threads_basic", "threads_content_publish", "threads_manage_insights", "threads_manage_replies"],
       profile: { biography: "safe public field", accessToken: "nested-secret-regression-marker" }
     }
   ];
-  firstUserModel.integrations = {
-    ...(firstUserModel.integrations || {}),
-    youtube: "YouTube token exchange failed: Unauthorized",
-    facebook: "No pages returned by current permissions"
-  };
-  const savedFirstUserModel = await request("/api/model", {
+  const browserCredentialInjectionEnvelope = revisionedModelSaveEnvelope(firstUserModel);
+  const browserCredentialInjection = await request("/api/model", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
-    body: JSON.stringify(firstUserModel)
+    body: JSON.stringify(browserCredentialInjectionEnvelope)
   });
+  if (browserCredentialInjection.receipt?.operationId !== browserCredentialInjectionEnvelope.operationId
+    || !browserCredentialInjection.receipt?.committedRevision) {
+    throw new Error("revisioned browser credential-injection control did not return a durable save receipt");
+  }
+  const browserInjectionMarkers = ["fake-test-token-marker", "fake-stale-threads-token", "encrypted-credential-regression-marker", "nested-secret-regression-marker"];
+  const browserInjectionDisk = await readFile(modelFilePath, "utf8");
+  if (browserInjectionMarkers.some(marker => browserInjectionDisk.includes(marker))
+    || browserInjectionMarkers.some(marker => JSON.stringify(browserCredentialInjection).includes(marker))) {
+    throw new Error("browser model save injected a provider credential into private storage or public output");
+  }
+
+  const providerFixtureRequestsBefore = (await externalHttpRequestAttempts()).length;
+  await stopMainTestServer();
+  const workspaceLockPath = path.join(testDataDir, ".workspace-content.lock");
+  if (await access(workspaceLockPath).then(() => true, error => error?.code !== "ENOENT")) {
+    throw new Error("main test server did not release the local workspace lock before provider fixture setup");
+  }
+  await mutateProviderStateFixture({
+    user: login.user,
+    workspaceId: login.workspace.id,
+    mutate(model, owner) {
+      model.connectedAccounts = providerStateFixtureAccounts(owner);
+      model.integrations = {
+        ...(model.integrations || {}),
+        youtube: "YouTube token exchange failed: Unauthorized",
+        facebook: "No pages returned by current permissions"
+      };
+    }
+  });
+  startMainTestServer();
+  await waitForServer();
+  const savedFirstUserModel = await request("/api/model", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
+  const providerFixturePlatformIds = (savedFirstUserModel.connectedAccounts || [])
+    .map(account => `${account.platform}:${account.providerAccountId || ""}`).sort();
+  const providerFixtureStored = JSON.parse(await readFile(modelFilePath, "utf8"));
+  const storedProviderAccounts = providerFixtureStored.workspaces?.[login.workspace.id]?.content?.connectedAccounts || [];
+  if (storedProviderAccounts.length !== 14
+    || storedProviderAccounts.some(account => account.ownerUserId !== login.user.id || account.workspaceId !== login.workspace.id)
+    || storedProviderAccounts.some(account => account.credential?.alg !== "aes-256-gcm")) {
+    throw new Error("server-private provider fixture was not stored with canonical ownership and encrypted credentials");
+  }
+  if (browserInjectionMarkers.some(marker => JSON.stringify(providerFixtureStored).includes(marker))) {
+    throw new Error("provider fixture storage retained a plaintext credential marker");
+  }
+  if (savedFirstUserModel.workspace?.id !== login.workspace.id
+    || (savedFirstUserModel.workspaces || []).some(workspace => workspace.id !== login.workspace.id)
+    || containsCredentialLikeOwnershipField(savedFirstUserModel.connectedAccounts)) {
+    throw new Error("restarted public model did not preserve workspace isolation and provider secret absence");
+  }
+  const isolatedMemberProviderModel = await request("/api/model", {
+    headers: { Authorization: `Bearer ${memberPromoSignup.session.token}` }
+  });
+  if ((isolatedMemberProviderModel.connectedAccounts || []).length
+    || isolatedMemberProviderModel.workspace?.id === login.workspace.id) {
+    throw new Error("server-private provider fixture crossed into another signed-in workspace");
+  }
+  if ((await externalHttpRequestAttempts()).length !== providerFixtureRequestsBefore) {
+    throw new Error("provider-state fixture setup or restart attempted an external provider request");
+  }
+  const providerStateFixtureEvidence = {
+    bareSaveStatus: bareSaveResponse.status,
+    bareSaveCode: bareSave.code,
+    bareSaveCommitStatus: bareSave.commitStatus,
+    bareSaveStateUnchanged: true,
+    revisionCapabilityPresent: true,
+    browserCredentialInjectionCommitted: true,
+    browserCredentialInjectionStored: false,
+    accountCount: savedFirstUserModel.connectedAccounts.length,
+    platformIds: providerFixturePlatformIds,
+    workspaceIdEqual: savedFirstUserModel.workspace?.id === login.workspace.id,
+    foreignWorkspaceVisible: false,
+    privateFieldsAbsent: true,
+    externalRequests: (await externalHttpRequestAttempts()).length - providerFixtureRequestsBefore
+  };
   if (JSON.stringify(savedFirstUserModel).includes("nested-secret-regression-marker")) throw new Error("public model leaked a nested provider secret field");
   const twitchProviderAccounts = await request("/api/provider/accounts?platform=twitch", {
     headers: { Authorization: `Bearer ${login.session.token}` }
   });
   const twitchSelectionRow = twitchProviderAccounts.rows?.[0];
+  const twitchSelectionEvidence = {
+    rowCount: twitchProviderAccounts.rows?.length || 0,
+    accountCount: twitchSelectionRow?.accounts?.length || 0,
+    credentialPathCount: twitchSelectionRow?.credentialPathCount || 0,
+    assetCount: twitchProviderAccounts.assetCount || 0
+  };
   if (!twitchProviderAccounts.ok || twitchSelectionRow?.accounts?.length !== 1 || twitchSelectionRow?.credentialPathCount !== 2 || twitchProviderAccounts.assetCount !== 1) {
-    throw new Error("provider account selection did not collapse duplicate credential paths into one posting identity");
+    throw new Error(`provider account selection did not collapse duplicate credential paths into one posting identity: ${JSON.stringify(twitchSelectionEvidence)}`);
+  }
+  if (providerStateFixtureOnly) {
+    await stopMainTestServer();
+    await rm(testDataDir, { recursive: true, force: true });
+    let cleanupComplete = false;
+    try {
+      await access(testDataDir);
+    } catch (error) {
+      if (error?.code === "ENOENT") cleanupComplete = true;
+      else throw error;
+    }
+    if (!cleanupComplete) throw new Error("provider-state focused fixture cleanup was incomplete");
+    console.log(JSON.stringify({ ok: true, providerState: { ...providerStateFixtureEvidence, twitchSelection: twitchSelectionEvidence, cleanupComplete } }));
+    process.exit(0);
   }
   const signedInTwitchReady = await request("/api/twitch/readiness", {
     headers: { Authorization: `Bearer ${login.session.token}` }
@@ -1253,13 +7718,20 @@ try {
     headers: { Authorization: `Bearer ${login.session.token}` }
   });
   const refreshableXAccount = refreshableXModel.connectedAccounts?.find(account => account.providerAccountId === "test-x-user-1");
-  refreshableXAccount.refreshCredential = "fake-test-refresh-marker";
-  refreshableXAccount.tokenExpiresAt = "2026-01-02T00:00:00.000Z";
-  await request("/api/model", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
-    body: JSON.stringify(refreshableXModel)
+  if (!refreshableXAccount) throw new Error("X refresh fixture could not find the server-owned account");
+  await stopMainTestServer();
+  await mutateProviderStateFixture({
+    user: login.user,
+    workspaceId: login.workspace.id,
+    mutate(model) {
+      const account = model.connectedAccounts?.find(item => item.providerAccountId === "test-x-user-1");
+      if (!account) throw new Error("X refresh fixture could not find the private provider account");
+      account.refreshCredential = encryptedShopifyFixtureToken("fake-test-refresh-marker", providerStateFixtureEncryptionKey);
+      account.tokenExpiresAt = "2026-01-02T00:00:00.000Z";
+    }
   });
+  startMainTestServer();
+  await waitForServer();
   const signedInProviderAssetMap = await request("/api/provider/asset-map", {
     headers: { Authorization: `Bearer ${login.session.token}` }
   });
@@ -1269,13 +7741,19 @@ try {
   if (!facebookAssetMap?.assetKind || !facebookAssetMap?.loginIdentity?.source || !facebookAssetMap?.setupNote || !facebookAssetMap?.postingIdentity?.label?.startsWith("Facebook")) throw new Error("provider asset map did not separate posting identity, login identity, and setup guidance");
   if (!facebookAssetMap?.permissionExplainer?.summary || !facebookAssetMap?.permissionExplainer?.nextAction) throw new Error("provider asset map did not include a plain-language permission explainer");
   if (xAssetMap?.status !== "needs-refresh" || !xAssetMap?.gates?.tokenStored || !xAssetMap?.account?.tokenStored || !["setup", "reconnect"].includes(xAssetMap?.permissionExplainer?.severity)) throw new Error(`expired X token evidence must remain visible as needs-refresh instead of no-token or needs-oauth: ${JSON.stringify(xAssetMap)}`);
-  delete refreshableXAccount.refreshCredential;
-  delete refreshableXAccount.tokenExpiresAt;
-  await request("/api/model", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
-    body: JSON.stringify(refreshableXModel)
+  await stopMainTestServer();
+  await mutateProviderStateFixture({
+    user: login.user,
+    workspaceId: login.workspace.id,
+    mutate(model) {
+      const account = model.connectedAccounts?.find(item => item.providerAccountId === "test-x-user-1");
+      if (!account) throw new Error("X refresh cleanup fixture could not find the private provider account");
+      delete account.refreshCredential;
+      delete account.tokenExpiresAt;
+    }
   });
+  startMainTestServer();
+  await waitForServer();
   const signedInPermissionGaps = await request("/api/provider/permission-gaps", {
     headers: { Authorization: `Bearer ${login.session.token}` }
   });
@@ -1283,7 +7761,17 @@ try {
   const signedInAcceptanceLedger = await request("/api/provider/acceptance-ledger", {
     headers: { Authorization: `Bearer ${login.session.token}` }
   });
-  if (!signedInAcceptanceLedger.ok || signedInAcceptanceLedger.summary.total < 10 || !signedInAcceptanceLedger.rows.some(row => row.id === "twitch" && row.gates.devConfigured && row.gates.oauthConnected)) throw new Error("provider acceptance ledger failed signed-in workspace proof");
+  const twitchAcceptanceRow = signedInAcceptanceLedger.rows.find(row => row.id === "twitch");
+  if (
+    !signedInAcceptanceLedger.ok
+    || signedInAcceptanceLedger.summary.total < 10
+    || signedInAcceptanceLedger.workspaceId !== login.workspace.id
+    || !twitchAcceptanceRow?.gates?.oauthConnected
+    || twitchAcceptanceRow.account?.providerAccountId !== "test-twitch-user-1"
+    || twitchAcceptanceRow.account?.ownerUserId !== login.user.id
+    || twitchAcceptanceRow.account?.workspaceId !== login.workspace.id
+  ) throw new Error("provider acceptance ledger failed signed-in workspace proof");
+  if (twitchAcceptanceRow.gates.devConfigured || !twitchAcceptanceRow.missing?.includes("devConfigured")) throw new Error("provider acceptance ledger did not preserve missing Twitch developer credentials");
   if (!signedInAcceptanceLedger.nextProviderActions.some(row => row.id === "instagram")) throw new Error("provider acceptance ledger did not preserve next provider actions");
   const signedInConnectionLog = await request("/api/provider/connection-log", {
     headers: { Authorization: `Bearer ${login.session.token}` }
@@ -1295,9 +7783,22 @@ try {
   const signedInOwnershipQueue = await request("/api/provider/ownership-queue", {
     headers: { Authorization: `Bearer ${login.session.token}` }
   });
-  if (!signedInOwnershipQueue.ok || signedInOwnershipQueue.summary.total < 10 || !signedInOwnershipQueue.rows.some(row => row.id === "twitch" && row.executable)) throw new Error("provider ownership queue failed signed-in workspace proof");
   const twitchOwnershipRow = signedInOwnershipQueue.rows.find(row => row.id === "twitch");
-  if (twitchOwnershipRow?.currentStep?.id !== "read") throw new Error("connected Twitch should be ready to bank a creator-signal read proof before waiting on deeper analytics review");
+  if (
+    !signedInOwnershipQueue.ok
+    || signedInOwnershipQueue.summary.total < 10
+    || signedInOwnershipQueue.workspaceId !== login.workspace.id
+    || twitchOwnershipRow?.status !== "connected"
+    || !twitchOwnershipRow.banked
+    || twitchOwnershipRow.account?.providerAccountId !== "test-twitch-user-1"
+    || JSON.stringify(twitchOwnershipRow.account).includes("fake-test-token-marker")
+  ) throw new Error("provider ownership queue failed signed-in workspace proof");
+  if (
+    twitchOwnershipRow.executable
+    || twitchOwnershipRow.phase !== "Configure"
+    || twitchOwnershipRow.currentStep?.id !== "developer"
+    || twitchOwnershipRow.currentStep?.state !== "blocked"
+  ) throw new Error("provider ownership queue did not preserve missing Twitch developer credentials");
   if (!signedInOwnershipQueue.next || !signedInOwnershipQueue.next.phase || !Object.prototype.hasOwnProperty.call(signedInOwnershipQueue.summary, "executable")) throw new Error("provider ownership queue did not rank next provider work");
   const signedInOwnershipReport = await request("/api/provider/ownership-report", {
     headers: { Authorization: `Bearer ${login.session.token}` }
@@ -1308,16 +7809,93 @@ try {
   });
   const signedInOwnershipReportMarkdown = await signedInOwnershipReportMarkdownResponse.text();
   if (!signedInOwnershipReportMarkdownResponse.ok || !signedInOwnershipReportMarkdown.includes("# Social Cues Provider Ownership Report") || !signedInOwnershipReportMarkdown.includes("## Executable Now")) throw new Error("provider ownership markdown report failed");
-  const twitchOwnershipRun = await request("/api/provider/ownership-run", {
+  const unauthorizedOwnershipRunResponse = await fetch(base + "/api/provider/ownership-run", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    headers: { "Content-Type": "application/json", Authorization: "Bearer invalid-ownership-session" },
     body: JSON.stringify({ providerId: "twitch" })
   });
-  if (!twitchOwnershipRun.ok || twitchOwnershipRun.providerId !== "twitch" || !twitchOwnershipRun.readResult || !twitchOwnershipRun.publishProbe || !twitchOwnershipRun.providerOwnershipQueue?.rows?.some(row => row.id === "twitch")) throw new Error("provider ownership run did not return read, publish, queue, and provider evidence");
-  const ownershipRunModel = await request("/api/model", {
-    headers: { Authorization: `Bearer ${login.session.token}` }
+  const unauthorizedOwnershipRun = await unauthorizedOwnershipRunResponse.json();
+  if (
+    unauthorizedOwnershipRunResponse.status !== 401
+    || unauthorizedOwnershipRun.ok !== false
+    || unauthorizedOwnershipRun.providerOwnershipQueue
+    || containsCredentialLikeOwnershipField(unauthorizedOwnershipRun)
+  ) throw new Error("provider ownership run must reject an invalid application session without returning workspace state");
+
+  const ownershipEvidence = {
+    workspaceId: twitchAcceptanceRow.account?.workspaceId || "",
+    ownerUserId: twitchAcceptanceRow.account?.ownerUserId || "",
+    providerAccountId: twitchAcceptanceRow.account?.providerAccountId || "",
+    connected: twitchAcceptanceRow.account?.connected === true && twitchOwnershipRow?.status === "connected",
+    banked: twitchOwnershipRow?.banked === true
+  };
+  const runExpectedManualOwnershipHandoff = async input => {
+    const beforeModel = await request("/api/model", {
+      headers: { Authorization: `Bearer ${login.session.token}` }
+    });
+    const requestsBefore = await externalHttpRequestAttempts();
+    const response = await fetch(base + "/api/provider/ownership-run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+      body: JSON.stringify(input)
+    });
+    const result = await response.json();
+    const requestsAfter = await externalHttpRequestAttempts();
+    const afterModel = await request("/api/model", {
+      headers: { Authorization: `Bearer ${login.session.token}` }
+    });
+    const fixture = {
+      authenticated: true,
+      httpStatus: response.status,
+      result,
+      expectedProviderId: "twitch",
+      expectedProviderAccountId: "test-twitch-user-1",
+      expectedWorkspaceId: login.workspace.id,
+      expectedUserId: login.user.id,
+      ownershipEvidence,
+      providerRequestCount: requestsAfter.length - requestsBefore.length,
+      stateDelta: providerOwnershipRunStateDelta(beforeModel, afterModel, {
+        providerId: "twitch",
+        providerAccountId: "test-twitch-user-1",
+        workspaceId: login.workspace.id,
+        userId: login.user.id
+      })
+    };
+    if (!manualProviderOwnershipHandoffIsSafe(fixture)) {
+      throw new Error(`provider ownership run did not preserve the exact authenticated manual-step contract: HTTP ${response.status}`);
+    }
+    return fixture;
+  };
+
+  const twitchOwnershipRunFixture = await runExpectedManualOwnershipHandoff({ providerId: "twitch" });
+  await runExpectedManualOwnershipHandoff({
+    providerId: "twitch",
+    workspaceId: "foreign-workspace-id",
+    queueId: "foreign-queue-id",
+    providerAccountId: "foreign-twitch-account",
+    twitchUserId: "foreign-twitch-user"
   });
-  if (ownershipRunModel.functionChecks?.twitch?.route !== "/api/provider/ownership-run" || !ownershipRunModel.activity?.some(item => item.type === "provider-ownership-run")) throw new Error("provider ownership run was not stored in the user workspace");
+
+  const manualOwnershipMutations = [
+    ["HTTP 200 success", fixture => { fixture.httpStatus = 200; fixture.result.ok = true; }],
+    ["wrong manual-step category", fixture => { fixture.result.status = "blocked"; }],
+    ["executable provider row", fixture => { fixture.result.providerOwnershipQueue.rows.find(row => row.id === "twitch").executable = true; }],
+    ["foreign workspace", fixture => { fixture.result.providerOwnershipQueue.workspaceId = "foreign-workspace"; }],
+    ["foreign connected account", fixture => { fixture.result.providerOwnershipQueue.rows.find(row => row.id === "twitch").account.providerAccountId = "foreign-account"; }],
+    ["missing ownership proof", fixture => { fixture.ownershipEvidence.ownerUserId = ""; }],
+    ["provider request attempted", fixture => { fixture.providerRequestCount = 1; }],
+    ["provider receipt created", fixture => { fixture.stateDelta.providerReceiptCreated = true; }],
+    ["credential-like response field", fixture => { fixture.result.providerOwnershipQueue.rows.find(row => row.id === "twitch").account.credential = "synthetic-secret"; }],
+    ["incorrect phase and step", fixture => { fixture.result.phase = "Prove"; fixture.result.currentStep.id = "read"; }],
+    ["provider label without account ownership", fixture => { fixture.result.providerOwnershipQueue.rows.find(row => row.id === "twitch").account = null; }],
+    ["anonymous response state", fixture => { fixture.authenticated = false; }],
+    ["unsupported action queued", fixture => { fixture.stateDelta.actionChanged = true; }]
+  ];
+  for (const [label, mutate] of manualOwnershipMutations) {
+    const mutation = structuredClone(twitchOwnershipRunFixture);
+    mutate(mutation);
+    if (manualProviderOwnershipHandoffIsSafe(mutation)) throw new Error(`provider ownership manual-step assertion accepted mutation: ${label}`);
+  }
   const ownershipSweep = await request("/api/provider/ownership-sweep", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
@@ -1329,13 +7907,137 @@ try {
   });
   if (!sweepModel.activity?.some(item => item.type === "provider-ownership-sweep")) throw new Error("provider ownership sweep was not stored in the user workspace");
   if (sweepModel.actions?.some(item => item.providerId === "twitch" && item.status === "active" && (item.providerGate === "oauthConnected" || /connect (oauth|account|provider)/i.test(item.title || "")))) throw new Error("provider task reconciliation left a stale Twitch connect task active after OAuth was proven");
+  const providerContractRequestsBefore = await externalHttpRequestAttempts();
+  const unauthorizedProviderContractsResponse = await fetch(base + "/api/provider/contracts", {
+    headers: { Authorization: "Bearer invalid-provider-contract-session" }
+  });
+  const unauthorizedProviderContracts = await unauthorizedProviderContractsResponse.json();
+  if (
+    unauthorizedProviderContractsResponse.status !== 401
+    || unauthorizedProviderContracts.ok !== false
+    || unauthorizedProviderContracts.workspaceId
+    || unauthorizedProviderContracts.rows
+    || containsCredentialLikeOwnershipField(unauthorizedProviderContracts)
+  ) throw new Error("provider contracts must reject an invalid application session without returning workspace state");
   const signedInProviderContracts = await request("/api/provider/contracts", {
     headers: { Authorization: `Bearer ${login.session.token}` }
   });
+  const forgedSelectorProviderContracts = await request("/api/provider/contracts?workspaceId=foreign-workspace&providerAccountId=foreign-twitch-account&twitchUserId=foreign-twitch-user", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
+  const providerContractRequestsAfter = await externalHttpRequestAttempts();
   if (!signedInProviderContracts.ok || signedInProviderContracts.summary.total < 10 || !Array.isArray(signedInProviderContracts.nextContractActions)) throw new Error("provider contracts failed signed-in workspace proof");
   const twitchContract = signedInProviderContracts.rows.find(row => row.id === "twitch");
-  if (!twitchContract?.gates?.envReady || !twitchContract?.gates?.oauthConnected || !Object.prototype.hasOwnProperty.call(twitchContract.gates, "publishDryRunProven")) throw new Error("provider contracts missing Twitch ownership gates");
-  if (!twitchContract.gates.analyticsLaneReady) throw new Error("connected Twitch should expose its Helix creator-signal read lane as analytics/read ready");
+  const twitchContractFixture = {
+    authenticated: true,
+    developerCredentialsPresent: false,
+    response: signedInProviderContracts,
+    contract: twitchContract,
+    ownershipQueueRow: twitchOwnershipRow,
+    expectedWorkspaceId: login.workspace.id,
+    expectedUserId: login.user.id,
+    expectedProviderAccountId: "test-twitch-user-1",
+    providerRequestCount: providerContractRequestsAfter.length - providerContractRequestsBefore.length
+  };
+  if (!twitchProviderContractOwnershipIsTruthful(twitchContractFixture)) throw new Error("provider contracts did not separate Twitch workspace ownership from developer and adapter readiness");
+  const forgedSelectorTwitchContract = forgedSelectorProviderContracts.rows?.find(row => row.id === "twitch");
+  if (!twitchProviderContractOwnershipIsTruthful({
+    ...twitchContractFixture,
+    response: forgedSelectorProviderContracts,
+    contract: forgedSelectorTwitchContract
+  })) throw new Error("provider contract selectors overrode the authenticated Twitch workspace");
+
+  const twitchContractMutations = [
+    ["foreign contract workspace", fixture => { fixture.response.workspaceId = "foreign-workspace"; }],
+    ["foreign account owner", fixture => { fixture.contract.account.ownerUserId = "foreign-owner"; }],
+    ["foreign account workspace", fixture => { fixture.contract.account.workspaceId = "foreign-workspace"; }],
+    ["wrong provider account", fixture => { fixture.contract.account.providerAccountId = "foreign-twitch-account"; }],
+    ["missing ownership gate", fixture => { fixture.contract.gates.oauthConnected = false; }],
+    ["falsified developer readiness", fixture => { fixture.contract.gates.envReady = true; }],
+    ["executable without developer readiness", fixture => { fixture.ownershipQueueRow.executable = true; }],
+    ["provider label without tenant proof", fixture => { fixture.contract.account = { name: "Twitch" }; }],
+    ["unsupported Twitch write marked supported", fixture => { fixture.contract.gates.publishDryRunProven = true; fixture.contract.ledger.publishProbe.ok = true; }],
+    ["credential-like public field", fixture => { fixture.contract.account.refreshToken = "synthetic-secret"; }],
+    ["anonymous contract state", fixture => { fixture.authenticated = false; }],
+    ["missing banked connection evidence", fixture => { fixture.contract.account.connected = false; fixture.ownershipQueueRow.banked = false; }]
+  ];
+  for (const [label, mutate] of twitchContractMutations) {
+    const mutation = structuredClone(twitchContractFixture);
+    mutate(mutation);
+    if (twitchProviderContractOwnershipIsTruthful(mutation)) throw new Error(`provider contract ownership assertion accepted mutation: ${label}`);
+  }
+
+  const twitchPortalRequestsBefore = (await externalHttpRequestAttempts()).length;
+  const portalTwitchReady = await request("/api/twitch/readiness", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
+  const portalTwitchStatus = await request("/api/oauth/twitch/status", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
+  const portalProviderTruth = await request("/api/provider/truth", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
+  const portalProviderContracts = await request("/api/provider/contracts", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
+  const portalOwnershipQueue = await request("/api/provider/ownership-queue", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
+  const signedInTwitchPortalAudit = await request("/api/dev-portal/audit", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
+  const twitchPortalRequestsAfter = (await externalHttpRequestAttempts()).length;
+  const portalTruthRow = portalProviderTruth.rows?.find(row => row.id === "twitch");
+  const portalContractRow = portalProviderContracts.rows?.find(row => row.id === "twitch");
+  const portalOwnershipRow = portalOwnershipQueue.rows?.find(row => row.id === "twitch");
+  const twitchPortalRow = signedInTwitchPortalAudit.rows?.find(row => row.id === "twitch");
+  const missingApplicationFixture = {
+    expectedDecision: "application-credentials",
+    authenticated: Boolean(login.session?.token),
+    workspaceContext: twitchPortalRow?.workspaceContext,
+    workspaceIdMatches: portalContractRow?.account?.workspaceId === login.workspace.id
+      && portalContractRow?.account?.ownerUserId === login.user.id,
+    foreignMetadataPresent: false,
+    configured: portalTwitchStatus.configured,
+    readinessConfigured: portalTwitchReady.configured,
+    envReady: portalContractRow?.gates?.envReady,
+    missingEnv: portalTwitchStatus.missingEnv,
+    accountPresent: twitchPortalRow?.accountPresent,
+    connected: twitchPortalRow?.connected,
+    banked: twitchPortalRow?.banked,
+    portal: twitchPortalRow,
+    executable: Boolean(portalContractRow?.owned),
+    proofRunnable: Boolean(portalOwnershipRow?.executable),
+    requiredProviderGatesMissing: Boolean(portalContractRow?.missing?.length),
+    externalRequests: twitchPortalRequestsAfter - twitchPortalRequestsBefore,
+    publicPayload: { portal: twitchPortalRow, account: portalTwitchReady.account }
+  };
+  if (!twitchPortalIntegrationStateIsTruthful(missingApplicationFixture)
+    || signedInTwitchPortalAudit.ok !== true
+    || portalTwitchReady.ready !== false
+    || portalTwitchReady.connected !== true
+    || portalTwitchStatus.connected !== true
+    || portalTruthRow?.configured !== false
+    || portalTruthRow?.connected !== true
+    || portalTruthRow?.tokenStored !== true
+    || portalContractRow?.gates?.oauthConnected !== true
+    || portalContractRow?.owned !== false
+    || portalOwnershipRow?.executable !== false
+    || portalOwnershipRow?.banked !== true) {
+    throw new Error("Twitch portal audit should preserve banked workspace evidence while requiring application credentials");
+  }
+  assertTwitchCredentialValuesAbsent(
+    [signedInTwitchPortalAudit, portalTwitchReady, portalTwitchStatus, portalTruthRow, portalContractRow, portalOwnershipRow],
+    ["fake-test-token-marker", "fake-test-token-marker-alternate"],
+    "signed-in missing-application-credential surfaces"
+  );
+  const twitchPortalMutationChecks = assertTwitchPortalIntegrationMutations(
+    missingApplicationFixture,
+    twitchPortalCredentialFixture.beforeCallback,
+    twitchPortalCredentialFixture.afterCallback
+  );
+  if (twitchPortalMutationChecks !== 10) throw new Error("Twitch portal integration mutation coverage was incomplete");
+
   if (!signedInProviderContracts.nextContractActions.some(row => row.id === "instagram" && row.missing?.includes("oauthConnected"))) throw new Error("provider contracts did not preserve missing ownership gates");
   const twitchContractCheck = await request("/api/provider/contract-check", {
     method: "POST",
@@ -1397,6 +8099,18 @@ try {
   });
   if (secondProviderTruth.rows.find(row => row.id === "twitch")?.connected) throw new Error("second user's provider truth can see first user's Twitch connection");
   if (secondProviderTruth.bankedSuccesses.some(row => row.id === "twitch")) throw new Error("second user's banked successes can see first user's Twitch connection");
+  const secondProviderContracts = await request("/api/provider/contracts?workspaceId=" + encodeURIComponent(login.workspace.id) + "&providerAccountId=test-twitch-user-1&twitchUserId=test-twitch-user-1", {
+    headers: { Authorization: `Bearer ${secondSignup.session.token}` }
+  });
+  const secondTwitchContract = secondProviderContracts.rows?.find(row => row.id === "twitch");
+  if (
+    secondProviderContracts.workspaceId !== secondUserModel.workspace.id
+    || secondTwitchContract?.account
+    || secondTwitchContract?.gates?.oauthConnected
+    || secondTwitchContract?.truth?.connected
+    || secondTwitchContract?.truth?.tokenStored
+    || containsCredentialLikeOwnershipField(secondProviderContracts)
+  ) throw new Error("provider contract selectors exposed another workspace's Twitch ownership evidence");
   const secondConnectionLog = await request("/api/provider/connection-log", {
     headers: { Authorization: `Bearer ${secondSignup.session.token}` }
   });
@@ -1540,11 +8254,16 @@ try {
       source: "automated-test"
     }
   ];
-  await request("/api/model", {
+  const scheduledSaveEnvelope = revisionedModelSaveEnvelope(scheduledModel);
+  const scheduledSave = await request("/api/model", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
-    body: JSON.stringify(scheduledModel)
+    body: JSON.stringify(scheduledSaveEnvelope)
   });
+  if (scheduledSave.receipt?.operationId !== scheduledSaveEnvelope.operationId
+    || JSON.stringify(scheduledSave.receipt?.committedRevision) !== JSON.stringify(scheduledSave.persistence?.revision)) {
+    throw new Error("scheduled campaign save did not return its committed workspace revision");
+  }
   const duePublish = await request("/api/publish/due", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
@@ -1610,11 +8329,16 @@ try {
       copy: "Newer stale duplicate without provider evidence."
     }
   );
-  await request("/api/model", {
+  const historicalSaveEnvelope = revisionedModelSaveEnvelope(historicalModel);
+  const historicalSave = await request("/api/model", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
-    body: JSON.stringify(historicalModel)
+    body: JSON.stringify(historicalSaveEnvelope)
   });
+  if (historicalSave.receipt?.operationId !== historicalSaveEnvelope.operationId
+    || JSON.stringify(historicalSave.receipt?.committedRevision) !== JSON.stringify(historicalSave.persistence?.revision)) {
+    throw new Error("historical campaign save did not return its committed workspace revision");
+  }
 
   const publishQueue = await request("/api/publish/queue", {
     headers: { Authorization: `Bearer ${login.session.token}` }
@@ -1740,24 +8464,66 @@ try {
     if (!requestedScopes.includes("instagram_business_basic") || !requestedScopes.includes("instagram_business_content_publish") || !requestedScopes.includes("instagram_business_manage_messages")) throw new Error("instagram start should request Instagram Login business scopes");
   }
 
-  const metaFacebookStartResponse = await fetch(base + "/api/oauth/meta/start?platform=facebook", { redirect: "manual" });
-  if (![200, 302].includes(metaFacebookStartResponse.status)) throw new Error("facebook meta start failed");
-  if (metaFacebookStartResponse.status === 302) {
-    const location = metaFacebookStartResponse.headers.get("location") || "";
-    const facebookStartUrl = new URL(location);
-    const requestedScopes = facebookStartUrl.searchParams.get("scope") || "";
-    if (requestedScopes.includes("pages_manage_posts")) throw new Error("facebook Meta start should not request pages_manage_posts before App Review approval");
-    if (facebookStartUrl.searchParams.get("auth_type") !== "rerequest") throw new Error("facebook Meta start should force a permission re-prompt");
+  const metaStartRequestsBefore = await externalHttpRequestAttempts();
+  const anonymousMetaFacebookStart = await fetch(base + "/api/oauth/meta/start?platform=facebook", { redirect: "manual" });
+  const anonymousMetaFacebookText = await anonymousMetaFacebookStart.text();
+  if (anonymousMetaFacebookStart.status !== 401
+    || !/sign in required/iu.test(anonymousMetaFacebookText)
+    || anonymousMetaFacebookStart.headers.get("location")
+    || /workspace_writer_unclassified|commitStatus/iu.test(anonymousMetaFacebookText)) {
+    throw new Error("anonymous Facebook Meta start should fail closed with a sanitized sign-in requirement");
+  }
+  const tamperedMetaFacebookStart = await fetch(base + "/api/oauth/meta/start?platform=facebook", {
+    redirect: "manual",
+    headers: { Authorization: "Bearer invalid-meta-start-session" }
+  });
+  const tamperedMetaFacebookText = await tamperedMetaFacebookStart.text();
+  if (tamperedMetaFacebookStart.status !== 401
+    || !/sign in required/iu.test(tamperedMetaFacebookText)
+    || /workspace_writer_unclassified|commitStatus/iu.test(tamperedMetaFacebookText)) {
+    throw new Error("invalid-session Facebook Meta start should fail closed before persistence");
   }
 
-  const metaFacebookTestingStartResponse = await fetch(base + "/api/oauth/meta/start?platform=facebook&testing=pages", { redirect: "manual" });
-  if (![200, 302].includes(metaFacebookTestingStartResponse.status)) throw new Error("facebook meta testing start failed");
-  if (metaFacebookTestingStartResponse.status === 302) {
-    const location = metaFacebookTestingStartResponse.headers.get("location") || "";
-    const facebookTestingStartUrl = new URL(location);
-    const requestedScopes = facebookTestingStartUrl.searchParams.get("scope") || "";
-    if (!requestedScopes.includes("pages_manage_posts") || !requestedScopes.includes("pages_manage_metadata") || !requestedScopes.includes("business_management")) throw new Error("facebook testing Meta start should request Ready for testing Page scopes");
-    if (facebookTestingStartUrl.searchParams.get("enable_profile_selector") !== "1") throw new Error("facebook testing Meta start should force account/page selection");
+  const metaFacebookStartResponse = await fetch(base + "/api/oauth/meta/start?platform=facebook", {
+    redirect: "manual",
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
+  if (metaFacebookStartResponse.status !== 302) throw new Error("authenticated facebook meta start failed");
+  const facebookStartLocation = metaFacebookStartResponse.headers.get("location") || "";
+  const facebookStartUrl = new URL(facebookStartLocation);
+  const facebookRequestedScopes = (facebookStartUrl.searchParams.get("scope") || "").split(",").filter(Boolean);
+  if (facebookRequestedScopes.includes("pages_manage_posts")) throw new Error("facebook Meta start should not request pages_manage_posts before App Review approval");
+  if (facebookStartUrl.searchParams.get("auth_type") !== "rerequest") throw new Error("facebook Meta start should force a permission re-prompt");
+  if (facebookStartUrl.searchParams.has("enable_profile_selector")) throw new Error("normal Facebook Meta start should not force the Page testing selector");
+
+  const metaFacebookTestingStartResponse = await fetch(base + "/api/oauth/meta/start?platform=facebook&testing=pages", {
+    redirect: "manual",
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
+  if (metaFacebookTestingStartResponse.status !== 302) throw new Error("authenticated facebook meta testing start failed");
+  const facebookTestingLocation = metaFacebookTestingStartResponse.headers.get("location") || "";
+  const facebookTestingStartUrl = new URL(facebookTestingLocation);
+  const facebookTestingRequestedScopes = (facebookTestingStartUrl.searchParams.get("scope") || "").split(",").filter(Boolean);
+  if (!["pages_manage_posts", "pages_manage_metadata", "business_management"].every(scope => facebookTestingRequestedScopes.includes(scope))) throw new Error("facebook testing Meta start should request Ready for testing Page scopes");
+  if (facebookTestingStartUrl.searchParams.get("enable_profile_selector") !== "1") throw new Error("facebook testing Meta start should force account/page selection");
+
+  const rawMetaStartDocument = JSON.parse(await readFile(path.join(testDataDir, "model.json"), "utf8"));
+  const metaStartRecords = (rawMetaStartDocument.shared?.oauthStates || [])
+    .filter(record => record.provider === "meta" && record.platform === "facebook");
+  const normalMetaStartRecord = metaStartRecords.find(record => record.state === facebookStartUrl.searchParams.get("state"));
+  const testingMetaStartRecord = metaStartRecords.find(record => record.state === facebookTestingStartUrl.searchParams.get("state"));
+  const metaRecordMatchesOwner = record => record?.ownerUserId === login.user.id
+    && record?.userId === login.user.id
+    && record?.workspaceId === login.workspace.id;
+  if (metaStartRecords.length !== 2
+    || !metaRecordMatchesOwner(normalMetaStartRecord)
+    || !metaRecordMatchesOwner(testingMetaStartRecord)
+    || normalMetaStartRecord.testingPages !== false
+    || testingMetaStartRecord.testingPages !== true) {
+    throw new Error("Facebook Meta starts were not durably bound to the authenticated workspace owner");
+  }
+  if ((await externalHttpRequestAttempts()).length !== metaStartRequestsBefore.length) {
+    throw new Error("Facebook Meta start fixture attempted an external provider request");
   }
 
   const threadsStatus = await request("/api/oauth/threads/status");
@@ -1807,7 +8573,19 @@ try {
 
   const shopifyStatus = await request("/api/oauth/shopify/status");
   if (!shopifyStatus.ok || !shopifyStatus.redirectUri.includes("/api/oauth/shopify/callback") || !shopifyStatus.scopes.includes("read_products")) throw new Error("shopify status failed");
-  if (!shopifyStatus.configured || shopifyStatus.missingEnv?.includes("SHOPIFY_CLIENT_ID") || shopifyStatus.missingEnv?.includes("SHOPIFY_CLIENT_SECRET")) throw new Error("shopify alias credentials were not recognized");
+  if (!shopifyStatus.configured || !shopifyStatus.clientIdPresent || !shopifyStatus.clientSecretPresent || shopifyStatus.missingEnv?.length) throw new Error("shopify alias credentials were not recognized");
+  if (JSON.stringify(shopifyStatus.acceptedEnv?.SHOPIFY_CLIENT_ID) !== JSON.stringify(SHOPIFY_CLIENT_ID_ENV_NAMES)
+    || JSON.stringify(shopifyStatus.acceptedEnv?.SHOPIFY_CLIENT_SECRET) !== JSON.stringify(SHOPIFY_CLIENT_SECRET_ENV_NAMES)
+    || JSON.stringify(shopifyStatus.acceptedEnv?.SHOPIFY_SHOP_DOMAIN) !== JSON.stringify(SHOPIFY_SHOP_DOMAIN_ENV_NAMES)) {
+    throw new Error("shopify readiness did not preserve the exact application-credential alias allowlist");
+  }
+  const shopifyRuntimeReadiness = await request("/api/shopify/readiness");
+  if (!shopifyRuntimeReadiness.ok || !shopifyRuntimeReadiness.configured || shopifyRuntimeReadiness.missingEnv?.length) throw new Error("shopify runtime readiness disagreed with OAuth status");
+  assertShopifyCredentialValuesAbsent(
+    [shopifyStatus, shopifyRuntimeReadiness, readiness, signedInProviderTruth, signedInProviderContracts, unauthorizedProviderContracts, output],
+    [SYNTHETIC_SHOPIFY_APP_ID, SYNTHETIC_SHOPIFY_APP_SECRET],
+    "readiness, provider truth, provider contracts, logs, or errors"
+  );
 
   const etsyStatus = await request("/api/oauth/etsy/status");
   if (!etsyStatus.ok || !etsyStatus.redirectUri.includes("/api/oauth/etsy/callback") || !etsyStatus.scopes.includes("listings_r")) throw new Error("etsy status failed");
@@ -1896,31 +8674,159 @@ try {
   if (!diagnosticAgent.biggestMiss.includes("personal profile")) throw new Error("meta diagnostic agent missed personal profile/Page distinction");
   if (!diagnosticAgent.snapshot || !Array.isArray(diagnosticAgent.snapshot.blockedFeatures) || !diagnosticAgent.snapshot.retryOnlyAfter.includes("Facebook Page created")) throw new Error("meta diagnostic agent snapshot failed");
 
-  const metaAssets = await request("/api/meta/assets");
+  const metaAssetsModelPath = path.join(testDataDir, "model.json");
+  const metaAssetsModelBeforeAnonymous = await readFile(metaAssetsModelPath);
+  const metaAssetsRequestsBeforeAnonymous = await externalHttpRequestAttempts();
+  const metaAssetsMocksBeforeAnonymous = await shopifyScenarioExternalAttempts(providerMockLogPath);
+  const anonymousMetaAssetsResponse = await fetch(base + "/api/meta/assets");
+  const anonymousMetaAssets = await anonymousMetaAssetsResponse.json();
+  const invalidMetaAssetsResponse = await fetch(base + "/api/meta/assets", {
+    headers: { Authorization: "Bearer invalid-meta-assets-session" }
+  });
+  const invalidMetaAssets = await invalidMetaAssetsResponse.json();
+  for (const [label, response, body] of [
+    ["anonymous", anonymousMetaAssetsResponse, anonymousMetaAssets],
+    ["invalid-session", invalidMetaAssetsResponse, invalidMetaAssets]
+  ]) {
+    if (response.status !== 401
+      || body.ok !== false
+      || body.error !== "Sign in to Social Cues before using this API."
+      || Object.keys(body).sort().join(",") !== "error,ok"
+      || /workspace_writer_unclassified|commitStatus/iu.test(JSON.stringify(body))) {
+      throw new Error(`${label} meta assets read should return an exact sanitized authentication requirement`);
+    }
+  }
+  if (Buffer.compare(await readFile(metaAssetsModelPath), metaAssetsModelBeforeAnonymous) !== 0) throw new Error("anonymous meta assets denial changed persisted model state");
+  if (JSON.stringify(await externalHttpRequestAttempts()) !== JSON.stringify(metaAssetsRequestsBeforeAnonymous)
+    || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(metaAssetsMocksBeforeAnonymous)) {
+    throw new Error("anonymous meta assets denial attempted provider traffic");
+  }
+  const metaAssetsRequestsBeforeAuthenticated = await externalHttpRequestAttempts();
+  const metaAssetsMocksBeforeAuthenticated = await shopifyScenarioExternalAttempts(providerMockLogPath);
+  const metaAssets = await request("/api/meta/assets", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
   if (!metaAssets.ok || !Array.isArray(metaAssets.accounts) || !Array.isArray(metaAssets.capabilities)) throw new Error("meta assets failed");
   if (!metaAssets.accounts.length && !metaAssets.diagnostic?.snapshot?.reason) throw new Error("meta assets should return a safe diagnostic when no Page or Instagram assets are visible");
   if (Object.prototype.hasOwnProperty.call(metaAssets.metaHealth || {}, "token")) throw new Error("meta assets exposed token-shaped health field");
+  if (!metaAssetsPublicShapeIsSafe(metaAssets)
+    || metaAssets.accounts.some(account => Object.hasOwn(account, "ownerUserId") || Object.hasOwn(account, "workspaceId"))) {
+    throw new Error("meta assets exposed a private workspace or credential field");
+  }
+  const metaAssetsMockDelta = (await shopifyScenarioExternalAttempts(providerMockLogPath)).slice(metaAssetsMocksBeforeAuthenticated.length);
+  if (JSON.stringify(metaAssetsMockDelta.map(entry => entry.kind)) !== JSON.stringify([
+    "meta-debug-token-mock",
+    "meta-permissions-mock",
+    "meta-accounts-mock",
+    "meta-businesses-mock"
+  ]) || metaAssetsMockDelta.some(entry => entry.method !== "GET")) {
+    throw new Error("authenticated meta assets read did not use the guarded provider fixture");
+  }
+  if (JSON.stringify(await externalHttpRequestAttempts()) !== JSON.stringify(metaAssetsRequestsBeforeAuthenticated)) {
+    throw new Error("authenticated meta assets read attempted an unguarded provider request");
+  }
+  assertMetaAssetsPrivateMarkersAbsent(
+    [anonymousMetaAssets, invalidMetaAssets, metaAssets, metaAssetsMockDelta],
+    ["test-meta-app-secret", "fake-test-token-marker", SYNTHETIC_META_ASSETS_PAGE_TOKEN, login.session.token],
+    "monolithic HTTP or mock evidence"
+  );
 
-  const metaHealth = await request("/api/meta/health", { method: "POST" });
+  const metaHealthModelPath = path.join(testDataDir, "model.json");
+  const metaHealthModelBeforeAnonymous = await readFile(metaHealthModelPath);
+  const metaHealthRequestsBeforeAnonymous = await externalHttpRequestAttempts();
+  const anonymousMetaHealthResponse = await fetch(base + "/api/meta/health", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "foreign-meta-health-workspace",
+      providerAccountId: "foreign-meta-health-account",
+      token: "browser-meta-health-token",
+      metaHealth: { marker: "browser-meta-health" },
+      analytics: { marker: "browser-meta-analytics" }
+    })
+  });
+  const anonymousMetaHealth = await anonymousMetaHealthResponse.json();
+  if (
+    anonymousMetaHealthResponse.status !== 401
+    || anonymousMetaHealth.ok !== false
+    || anonymousMetaHealth.error !== "Sign in to Social Cues before using this API."
+  ) throw new Error("anonymous meta health write should require authentication");
+  if (Buffer.compare(await readFile(metaHealthModelPath), metaHealthModelBeforeAnonymous) !== 0) throw new Error("anonymous meta health denial changed persisted model state");
+  if (JSON.stringify(await externalHttpRequestAttempts()) !== JSON.stringify(metaHealthRequestsBeforeAnonymous)) throw new Error("anonymous meta health denial attempted a provider request");
+
+  const metaHealth = await request("/api/meta/health", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
   if (!metaHealth.ok || !Array.isArray(metaHealth.accounts) || !Array.isArray(metaHealth.capabilities) || !metaHealth.health) throw new Error("meta health failed");
   if (Object.prototype.hasOwnProperty.call(metaHealth.health, "token")) throw new Error("meta health exposed token-shaped field");
   if (metaHealth.accounts.some(account => !account.connected || !account.tokenStored || !account.providerAccountId)) throw new Error("meta health returned placeholder accounts as assets");
   if (!metaHealth.accounts.length && !metaHealth.diagnostic?.actions?.length) throw new Error("meta health should include safe next actions when no Meta assets are visible");
 
+  const badMetaCallbackModelBefore = await readFile(metaAssetsModelPath);
+  const badMetaCallbackRequestsBefore = await externalHttpRequestAttempts();
+  const badMetaCallbackMocksBefore = await shopifyScenarioExternalAttempts(providerMockLogPath);
   const badMetaCallback = await fetch(base + "/api/oauth/meta/callback?code=fake-code&state=bad-state");
-  if (badMetaCallback.status !== 400) throw new Error("meta callback should reject unissued OAuth state");
+  const badMetaCallbackText = await badMetaCallback.text();
+  if (badMetaCallback.status !== 400
+    || !badMetaCallbackText.includes("<h1>Meta OAuth state rejected</h1>")
+    || !badMetaCallbackText.includes(`<p>${META_CALLBACK_UNISSUED_ERROR}</p>`)
+    || badMetaCallback.headers.get("set-cookie")
+    || /workspace_writer_unclassified|commitStatus/iu.test(badMetaCallbackText)) {
+    throw new Error("meta callback should reject unissued OAuth state without exposing the local persistence classifier");
+  }
+  if (Buffer.compare(await readFile(metaAssetsModelPath), badMetaCallbackModelBefore) !== 0) {
+    throw new Error("unissued meta callback changed durable model bytes");
+  }
+  if (JSON.stringify(await externalHttpRequestAttempts()) !== JSON.stringify(badMetaCallbackRequestsBefore)
+    || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(badMetaCallbackMocksBefore)) {
+    throw new Error("unissued meta callback attempted provider traffic");
+  }
 
-  const youtubeStart = await fetch(base + "/api/oauth/youtube/start", { redirect: "manual" });
-  if (youtubeStart.status !== 302) throw new Error("youtube start should redirect to Google");
+  const youtubeModelBeforeAnonymous = await readFile(metaAssetsModelPath);
+  const youtubeRequestsBeforeAnonymous = await externalHttpRequestAttempts();
+  const youtubeMocksBeforeAnonymous = await shopifyScenarioExternalAttempts(providerMockLogPath);
+  const anonymousYoutubeStart = await fetch(base + "/api/oauth/youtube/start", { redirect: "manual" });
+  const anonymousYoutubeStartText = await anonymousYoutubeStart.text();
+  if (anonymousYoutubeStart.status !== 401
+    || !anonymousYoutubeStartText.includes("<h1>Sign in required</h1>")
+    || anonymousYoutubeStart.headers.get("location")
+    || anonymousYoutubeStart.headers.get("set-cookie")
+    || /workspace_writer_unclassified|commitStatus/iu.test(anonymousYoutubeStartText)) {
+    throw new Error("anonymous youtube start should fail closed before issuing OAuth state");
+  }
+  if (Buffer.compare(await readFile(metaAssetsModelPath), youtubeModelBeforeAnonymous) !== 0
+    || JSON.stringify(await externalHttpRequestAttempts()) !== JSON.stringify(youtubeRequestsBeforeAnonymous)
+    || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(youtubeMocksBeforeAnonymous)) {
+    throw new Error("anonymous youtube start changed durable state or attempted provider traffic");
+  }
+  const youtubeStart = await fetch(base + "/api/oauth/youtube/start", {
+    redirect: "manual",
+    headers: { Authorization: `Bearer ${ownerSignup.session.token}` }
+  });
+  if (youtubeStart.status !== 302) throw new Error("authenticated youtube start should redirect to Google");
   const youtubeAuthUrl = new URL(youtubeStart.headers.get("location"));
   const youtubeState = youtubeAuthUrl.searchParams.get("state");
   if (!youtubeState) throw new Error("youtube start did not issue OAuth state");
-  const firstYoutubeCallback = await fetch(base + `/api/oauth/youtube/callback?code=fake-code&state=${encodeURIComponent(youtubeState)}`);
+  const youtubeCallbackSession = { headers: { Cookie: `sc_session=${encodeURIComponent(ownerSignup.session.token)}` } };
+  const firstYoutubeCallback = await fetch(
+    base + `/api/oauth/youtube/callback?code=fake-code&state=${encodeURIComponent(youtubeState)}`,
+    youtubeCallbackSession
+  );
   const firstYoutubeText = await firstYoutubeCallback.text();
   if (firstYoutubeCallback.status !== 200 || !firstYoutubeText.includes("YouTube token exchange failed")) throw new Error("youtube callback should consume ledger state and reach token exchange");
-  const secondYoutubeCallback = await fetch(base + `/api/oauth/youtube/callback?code=fake-code&state=${encodeURIComponent(youtubeState)}`);
+  const youtubeRequestsBeforeReplay = await externalHttpRequestAttempts();
+  const secondYoutubeCallback = await fetch(
+    base + `/api/oauth/youtube/callback?code=fake-code&state=${encodeURIComponent(youtubeState)}`,
+    youtubeCallbackSession
+  );
   const secondYoutubeText = await secondYoutubeCallback.text();
-  if (secondYoutubeCallback.status !== 200 || secondYoutubeText.includes("OAuth state was not issued")) throw new Error("youtube signed state fallback should recover after ledger state is consumed");
+  if (secondYoutubeCallback.status !== 400
+    || !secondYoutubeText.includes("YouTube OAuth state rejected")
+    || !/already used/iu.test(secondYoutubeText)
+    || JSON.stringify(await externalHttpRequestAttempts()) !== JSON.stringify(youtubeRequestsBeforeReplay)) {
+    throw new Error("youtube callback replay should be rejected before another provider exchange");
+  }
   const oauthDebugLog = await request("/api/oauth/debug-log");
   if (!oauthDebugLog.ok || oauthDebugLog.summary.total < 4) throw new Error("OAuth debug log did not record the local OAuth test flow");
   for (const expectedEvent of ["state_issued", "callback_received", "state_validation", "token_exchange_result"]) {
@@ -1992,18 +8898,51 @@ try {
   });
   if (![401, 402].includes(metaMarketingMessage.status)) throw new Error("meta marketing messages should require a signed-in app session");
 
-  const xAccount = await request("/api/x/account");
-  if (!xAccount.ok || !Array.isArray(xAccount.scopes) || !xAccount.redirectUri.includes("/api/oauth/x/callback")) throw new Error("x account failed");
+  const anonymousXAccountResponse = await fetch(base + "/api/x/account");
+  const anonymousXAccount = await anonymousXAccountResponse.json();
+  if (anonymousXAccountResponse.status !== 402
+    || anonymousXAccount.ok !== false
+    || anonymousXAccount.accessRequired !== true
+    || anonymousXAccount.checkoutPath !== "/api/billing/checkout"
+    || anonymousXAccount.portalPath !== "/portal"
+    || Object.keys(anonymousXAccount).sort().join(",") !== "accessRequired,checkoutPath,error,ok,portalPath"
+    || containsCredentialLikeOwnershipField(anonymousXAccount)
+    || /workspace_writer_unclassified|commitStatus/iu.test(JSON.stringify(anonymousXAccount))) {
+    throw new Error("x account must fail closed before anonymous workspace or provider access");
+  }
 
+  const xAnonymousPayload = {
+    text: "Social Cues X anonymous smoke test",
+    live: false,
+    workspaceId: "foreign-x-workspace",
+    ownerUserId: "foreign-x-owner",
+    providerAccountId: "foreign-x-provider-account",
+    token: "synthetic-x-browser-token"
+  };
+  await assertAnonymousMutationDenied(
+    "/api/x/post",
+    xAnonymousPayload,
+    "anonymous X post",
+    [xAnonymousPayload.workspaceId, xAnonymousPayload.ownerUserId, xAnonymousPayload.providerAccountId, xAnonymousPayload.token]
+  );
+  const xPostRequestsBeforeAuthenticated = await externalHttpRequestAttempts();
   const xPostBlocked = await fetch(base + "/api/x/post", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: "Social Cues X smoke test" })
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    body: JSON.stringify({
+      text: "Social Cues X smoke test",
+      live: false,
+      workspaceId: xAnonymousPayload.workspaceId,
+      ownerUserId: xAnonymousPayload.ownerUserId,
+      providerAccountId: xAnonymousPayload.providerAccountId
+    })
   });
   const xPostBody = await xPostBlocked.json();
   if (![200, 409].includes(xPostBlocked.status)) throw new Error("x post returned unexpected status");
   if (xPostBlocked.status === 200 && !xPostBody.dryRun) throw new Error("x post should dry-run unless explicitly live submitted");
   if (xPostBlocked.status === 409 && !xPostBody.connectRoute) throw new Error("x post gate should provide connect route");
+  if (JSON.stringify(await externalHttpRequestAttempts()) !== JSON.stringify(xPostRequestsBeforeAuthenticated)) throw new Error("authenticated X dry run attempted a real provider request");
+  if ([xAnonymousPayload.workspaceId, xAnonymousPayload.ownerUserId, xAnonymousPayload.providerAccountId].some(marker => JSON.stringify(xPostBody).includes(marker))) throw new Error("X post body identity fields influenced the authenticated response");
 
   const reviewPack = await request("/api/meta/review-pack");
   if (!reviewPack.ok || !reviewPack.dataDeletionUri || !Array.isArray(reviewPack.statements)) throw new Error("meta review pack failed");
@@ -2011,19 +8950,379 @@ try {
   if (!reviewPack.dataDeletionUri || !reviewPack.dataDeletionUri.endsWith("/api/meta/data-deletion")) throw new Error("meta review pack missing data deletion URL");
   if (!reviewPack.dashboardEvidence?.needsAddOrReview?.instagramBusinessLogin?.includes("instagram_business_manage_messages")) throw new Error("meta review pack missing Instagram portal evidence");
 
+  const commerceAnonymousPayload = {
+    event: "anonymous_test_signal",
+    value: 1,
+    workspaceId: "foreign-commerce-workspace",
+    ownerUserId: "foreign-commerce-owner",
+    providerAccountId: "foreign-commerce-provider-account",
+    token: "synthetic-commerce-browser-token"
+  };
+  await assertAnonymousMutationDenied(
+    "/api/meta/commerce/signals",
+    commerceAnonymousPayload,
+    "anonymous Meta commerce signal",
+    [commerceAnonymousPayload.workspaceId, commerceAnonymousPayload.ownerUserId, commerceAnonymousPayload.providerAccountId, commerceAnonymousPayload.token]
+  );
+  const commerceWorkspaceBefore = await request("/api/model", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
+  });
+  const trustedCommerceWorkspaceId = commerceWorkspaceBefore.workspace?.id;
+  const commerceRequestsBeforeAuthenticated = await externalHttpRequestAttempts();
   const commerceSignal = await request("/api/meta/commerce/signals", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ event: "test_signal", value: 1 })
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    body: JSON.stringify({
+      event: "test_signal",
+      value: 1,
+      workspaceId: commerceAnonymousPayload.workspaceId,
+      ownerUserId: commerceAnonymousPayload.ownerUserId,
+      providerAccountId: commerceAnonymousPayload.providerAccountId
+    })
   });
   if (!commerceSignal.ok || !commerceSignal.signal.id) throw new Error("meta commerce signal failed");
-
-  const checkout = await request("/api/billing/checkout", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ selectedPlan: "Founder Audit - $99" })
+  const commerceWorkspaceAfter = await request("/api/model", {
+    headers: { Authorization: `Bearer ${login.session.token}` }
   });
-  if (!checkout.ok) throw new Error("billing checkout failed");
+  if (!trustedCommerceWorkspaceId || commerceWorkspaceAfter.workspace?.id !== trustedCommerceWorkspaceId || commerceWorkspaceAfter.workspace?.ownerUserId !== login.user.id) throw new Error("meta commerce signal did not remain in the authenticated active workspace");
+  if (!(commerceWorkspaceAfter.metaCommerceSignals || []).some(signal => signal.id === commerceSignal.signal.id)) throw new Error("meta commerce signal did not persist through the authenticated workspace");
+  if (JSON.stringify(commerceWorkspaceAfter).includes(commerceAnonymousPayload.workspaceId) || JSON.stringify(commerceWorkspaceAfter).includes(commerceAnonymousPayload.ownerUserId) || JSON.stringify(commerceWorkspaceAfter).includes(commerceAnonymousPayload.providerAccountId)) throw new Error("meta commerce signal accepted foreign body identity authority");
+  if (JSON.stringify(await externalHttpRequestAttempts()) !== JSON.stringify(commerceRequestsBeforeAuthenticated)) throw new Error("authenticated Meta commerce signal attempted a real provider request");
+
+  const billingModelPath = path.join(testDataDir, "model.json");
+  const billingFixtureModelBefore = JSON.parse(await readFile(billingModelPath, "utf8"));
+  if (billingFixtureModelBefore.format !== "social-cues.local-workspace-content.v1"
+    || Object.prototype.hasOwnProperty.call(billingFixtureModelBefore, "workspace")
+    || !Array.isArray(billingFixtureModelBefore.shared?.workspaces)
+    || !Array.isArray(billingFixtureModelBefore.shared?.authUsers)
+    || !Array.isArray(billingFixtureModelBefore.shared?.deviceSessions)
+    || !billingFixtureModelBefore.workspaces
+    || typeof billingFixtureModelBefore.workspaces !== "object"
+    || Array.isArray(billingFixtureModelBefore.workspaces)) {
+    throw new Error("billing checkout fixture requires the canonical revisioned workspace document");
+  }
+  const billingSessionCandidates = [login, ownerSignup, memberPromoSignup, secondSignup]
+    .filter(candidate => candidate?.session?.token && candidate?.session?.deviceId && candidate?.user?.id && candidate?.workspace?.id)
+    .map(candidate => ({
+      token: candidate.session.token,
+      deviceId: candidate.session.deviceId,
+      userId: candidate.user.id,
+      workspaceId: candidate.workspace.id,
+      role: candidate.user.role || ""
+    }));
+  const fixtureWorkspaces = billingFixtureModelBefore.shared.workspaces;
+  const fixtureUsers = billingFixtureModelBefore.shared.authUsers;
+  const fixtureDevices = billingFixtureModelBefore.shared.deviceSessions;
+  const ownsCanonicalWorkspace = candidate => (
+    fixtureWorkspaces.some(workspace => workspace?.id === candidate.workspaceId && workspace?.ownerUserId === candidate.userId)
+    && fixtureUsers.some(user => user?.id === candidate.userId && user?.workspaceId === candidate.workspaceId)
+    && fixtureDevices.some(device => (
+      device?.userId === candidate.userId
+      && device?.deviceId === candidate.deviceId
+      && device?.workspaceId === candidate.workspaceId
+      && !device?.revokedAt
+    ))
+    && Boolean(billingFixtureModelBefore.workspaces[candidate.workspaceId])
+  );
+  const canonicalBillingOwner = billingSessionCandidates.find(ownsCanonicalWorkspace);
+  const canonicalBillingNonOwnerSource = billingSessionCandidates.find(candidate => (
+    canonicalBillingOwner
+    && candidate.userId !== canonicalBillingOwner.userId
+    && !["owner", "admin"].includes(String(candidate.role || "").trim().toLowerCase())
+    && ownsCanonicalWorkspace(candidate)
+  ));
+  const foreignBillingWorkspace = billingSessionCandidates.find(candidate => (
+    canonicalBillingOwner
+    && canonicalBillingNonOwnerSource
+    && candidate.userId !== canonicalBillingOwner.userId
+    && candidate.userId !== canonicalBillingNonOwnerSource.userId
+    && candidate.workspaceId !== canonicalBillingOwner.workspaceId
+    && ownsCanonicalWorkspace(candidate)
+  ));
+  if (!canonicalBillingOwner || !canonicalBillingNonOwnerSource || !foreignBillingWorkspace) {
+    throw new Error("billing checkout fixture could not resolve canonical owner and foreign workspace controls");
+  }
+  const billingFixtureRequestsBefore = await externalHttpRequestAttempts();
+  const billingFixtureMocksBefore = await shopifyScenarioExternalAttempts(providerMockLogPath);
+  await stopMainTestServer();
+  const billingWorkspaceLockPath = path.join(testDataDir, ".workspace-content.lock");
+  if (await access(billingWorkspaceLockPath).then(() => true, error => error?.code !== "ENOENT")) {
+    throw new Error("billing checkout fixture could not acquire released revisioned storage");
+  }
+  await bindBillingCheckoutNonOwnerDeviceFixture({
+    owner: canonicalBillingOwner,
+    nonOwner: canonicalBillingNonOwnerSource
+  });
+  startMainTestServer();
+  await waitForServer();
+  if (JSON.stringify(await externalHttpRequestAttempts()) !== JSON.stringify(billingFixtureRequestsBefore)
+    || JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(billingFixtureMocksBefore)) {
+    throw new Error("billing checkout fixture setup attempted a provider or external request");
+  }
+
+  const billingModelBefore = await readFile(billingModelPath);
+  const canonicalBillingModel = JSON.parse(billingModelBefore.toString("utf8"));
+  const canonicalBillingWorkspace = canonicalBillingModel.shared?.workspaces?.find(workspace => (
+    workspace?.id === canonicalBillingOwner.workspaceId && workspace?.ownerUserId === canonicalBillingOwner.userId
+  ));
+  const canonicalBillingNonOwnerDevice = canonicalBillingModel.shared?.deviceSessions?.find(device => (
+    device?.userId === canonicalBillingNonOwnerSource.userId
+    && device?.deviceId === canonicalBillingNonOwnerSource.deviceId
+    && !device?.revokedAt
+  ));
+  const canonicalBillingNonOwner = {
+    ...canonicalBillingNonOwnerSource,
+    workspaceId: canonicalBillingNonOwnerDevice?.workspaceId || ""
+  };
+  if (!canonicalBillingWorkspace
+    || canonicalBillingNonOwner.userId === canonicalBillingWorkspace.ownerUserId
+    || canonicalBillingNonOwner.workspaceId !== canonicalBillingWorkspace.id
+    || foreignBillingWorkspace.workspaceId === canonicalBillingWorkspace.id
+    || JSON.stringify(canonicalBillingModel.shared.workspaces) !== JSON.stringify(fixtureWorkspaces)
+    || Object.prototype.hasOwnProperty.call(canonicalBillingModel, "workspace")) {
+    throw new Error("billing checkout fixture did not establish canonical owner, same-workspace non-owner, and foreign controls");
+  }
+
+  const billingRequestsBefore = await externalHttpRequestAttempts();
+  const billingMocksBefore = await shopifyScenarioExternalAttempts(providerMockLogPath);
+  const billingRouteStart = serverSource.indexOf('url.pathname === "/api/billing/checkout"');
+  const billingRouteEnd = serverSource.indexOf('url.pathname === "/api/billing/portal"', billingRouteStart);
+  const billingRouteSource = billingRouteStart >= 0 && billingRouteEnd > billingRouteStart
+    ? serverSource.slice(billingRouteStart, billingRouteEnd)
+    : "";
+  if (!billingRouteSource.includes("requireWorkspaceManagementAccess") || !billingRouteSource.includes("prepareCheckoutHeld")) {
+    throw new Error("billing checkout fixture did not reach the shared held application boundary");
+  }
+  for (const forbiddenOperation of ["bodyJson", "createStripeCheckoutSession", "saveModel(", "saveModelForUser(", "supabaseRequest(", "stripeBillingGatewayRequest(", "billing_entitlements", "fetch("]) {
+    if (billingRouteSource.includes(forbiddenOperation)) throw new Error(`held billing checkout route retained ${forbiddenOperation}`);
+  }
+  const stripeApplicationSource = await readFile(path.resolve("stripe-billing-application.mjs"), "utf8");
+  const heldCheckoutStart = stripeApplicationSource.indexOf("async function prepareCheckoutHeld");
+  const heldCheckoutEnd = stripeApplicationSource.indexOf("async function preparePortalHeld", heldCheckoutStart);
+  const heldCheckoutSource = heldCheckoutStart >= 0 && heldCheckoutEnd > heldCheckoutStart
+    ? stripeApplicationSource.slice(heldCheckoutStart, heldCheckoutEnd)
+    : "";
+  if (!heldCheckoutSource.includes('return heldResult("checkout")')) throw new Error("Stripe checkout held operation is unavailable");
+  for (const forbiddenOperation of ["lifecycle.", "repository.", "gateway.", "fetch(", "billing_entitlements"]) {
+    if (heldCheckoutSource.includes(forbiddenOperation)) throw new Error(`held checkout operation retained ${forbiddenOperation}`);
+  }
+
+  async function billingResponse(pathname, { method = "GET", token = "", body } = {}) {
+    const headers = {};
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const response = await fetch(base + pathname, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    return { status: response.status, body: await response.json() };
+  }
+
+  function assertBillingResponseRedacted(result, label, hostileMarkers = []) {
+    const forbiddenKeys = new Set([
+      "url", "paymenturl", "paymentlink", "priceid", "stripepriceid", "productid",
+      "customerid", "subscriptionid", "checkoutsessionid", "paymentintentid",
+      "providerrequestid", "requestid", "secret", "clientsecret", "webhooksecret",
+      "configuration", "stack", "sql", "query", "raw", "gatewayoutput", "provideroutput"
+    ]);
+    const visit = value => {
+      if (Array.isArray(value)) return value.some(visit);
+      if (!value || typeof value !== "object") return false;
+      return Object.entries(value).some(([key, nested]) => (
+        forbiddenKeys.has(String(key).replace(/[_-]/g, "").toLowerCase()) || visit(nested)
+      ));
+    };
+    const serialized = JSON.stringify(result);
+    if (visit(result)
+      || /https?:\/\//i.test(serialized)
+      || /\b(?:price|prod|cus|sub|cs|pi|req)_[A-Za-z0-9]+\b/.test(serialized)
+      || /\b(?:sk_(?:test|live)|whsec)_[A-Za-z0-9]+\b/i.test(serialized)
+      || hostileMarkers.some(marker => marker && serialized.includes(marker))) {
+      throw new Error(`${label} exposed payment, provider, configuration, or hostile body authority`);
+    }
+  }
+
+  async function assertBillingCheckoutInert(label) {
+    if (Buffer.compare(await readFile(billingModelPath), billingModelBefore) !== 0) {
+      throw new Error(`${label} changed workspace, billing, entitlement, queue, or durable model state`);
+    }
+    if (JSON.stringify(await externalHttpRequestAttempts()) !== JSON.stringify(billingRequestsBefore)) {
+      throw new Error(`${label} attempted a provider or external request`);
+    }
+    if (JSON.stringify(await shopifyScenarioExternalAttempts(providerMockLogPath)) !== JSON.stringify(billingMocksBefore)) {
+      throw new Error(`${label} attempted a mocked provider request`);
+    }
+  }
+
+  const billingReadiness = await billingResponse("/api/billing/readiness");
+  if (billingReadiness.status !== 200
+    || billingReadiness.body?.releaseStage !== "readiness_only"
+    || billingReadiness.body?.checkoutAvailable !== false
+    || billingReadiness.body?.portalAvailable !== false
+    || billingReadiness.body?.webhookProcessingAvailable !== false) {
+    throw new Error("billing readiness did not remain readiness-only and fail-closed");
+  }
+  await assertBillingCheckoutInert("billing readiness");
+
+  const billingStatus = await billingResponse("/api/billing/status", {
+    token: canonicalBillingOwner.token
+  });
+  if (billingStatus.status !== 200
+    || billingStatus.body?.releaseStage !== "readiness_only"
+    || billingStatus.body?.checkoutAvailable !== false
+    || billingStatus.body?.portalAvailable !== false
+    || billingStatus.body?.webhookProcessingAvailable !== false
+    || billingStatus.body?.billing?.connected !== false) {
+    throw new Error("authenticated canonical owner did not receive safe held billing status");
+  }
+  assertBillingResponseRedacted(billingStatus.body, "authenticated billing status");
+  await assertBillingCheckoutInert("authenticated billing status");
+
+  const anonymousCheckout = await billingResponse("/api/billing/checkout", {
+    method: "POST",
+    body: { selectedPlan: "anonymous-browser-plan" }
+  });
+  if (anonymousCheckout.status !== 401
+    || anonymousCheckout.body?.ok !== false
+    || !/account|sign in/i.test(anonymousCheckout.body?.error || "")) {
+    throw new Error("anonymous billing checkout should return sanitized authentication-required denial");
+  }
+  assertBillingResponseRedacted(anonymousCheckout.body, "anonymous billing checkout", ["anonymous-browser-plan"]);
+  await assertBillingCheckoutInert("anonymous billing checkout");
+
+  const nonOwnerCheckout = await billingResponse("/api/billing/checkout", {
+    method: "POST",
+    token: canonicalBillingNonOwner.token,
+    body: { selectedPlan: "non-owner-browser-plan" }
+  });
+  if (nonOwnerCheckout.status !== 403
+    || nonOwnerCheckout.body?.ok !== false
+    || !/owner or admin/i.test(nonOwnerCheckout.body?.error || "")) {
+    throw new Error("authenticated local non-owner billing checkout should be denied");
+  }
+  assertBillingResponseRedacted(nonOwnerCheckout.body, "non-owner billing checkout", ["non-owner-browser-plan"]);
+  await assertBillingCheckoutInert("non-owner billing checkout");
+
+  const ownerCheckout = await billingResponse("/api/billing/checkout", {
+    method: "POST",
+    token: canonicalBillingOwner.token,
+    body: { selectedPlan: "owner-browser-plan" }
+  });
+  if (ownerCheckout.status !== 503
+    || ownerCheckout.body?.ok !== false
+    || ownerCheckout.body?.status !== "activation_held"
+    || ownerCheckout.body?.resultCode !== "checkout_activation_held"
+    || ownerCheckout.body?.releaseStage !== "readiness_only"
+    || ownerCheckout.body?.checkoutAvailable !== false
+    || ownerCheckout.body?.portalAvailable !== false
+    || ownerCheckout.body?.webhookProcessingAvailable !== false) {
+    throw new Error("canonical local owner did not reach readiness-only held checkout");
+  }
+  assertBillingResponseRedacted(ownerCheckout.body, "canonical-owner held checkout", ["owner-browser-plan"]);
+  await assertBillingCheckoutInert("canonical-owner held checkout");
+
+  const adminClaimCheckout = await billingResponse("/api/billing/checkout", {
+    method: "POST",
+    token: canonicalBillingNonOwner.token,
+    body: {
+      role: "admin",
+      workspaceId: canonicalBillingWorkspace.id,
+      selectedPlan: "admin-claim-browser-plan"
+    }
+  });
+  if (adminClaimCheckout.status !== 403
+    || adminClaimCheckout.body?.ok !== false
+    || !/owner or admin/i.test(adminClaimCheckout.body?.error || "")) {
+    throw new Error("unsupported local admin claim should remain denied");
+  }
+  assertBillingResponseRedacted(adminClaimCheckout.body, "local admin-claim checkout", ["admin-claim-browser-plan"]);
+  await assertBillingCheckoutInert("local admin-claim checkout");
+
+  const hostileBillingBody = {
+    selectedPlan: "hostile-browser-plan",
+    amount: 1,
+    currency: "ZZZ",
+    priceId: "price_hostile_browser_authority",
+    productId: "prod_hostile_browser_authority",
+    customerId: "cus_hostile_browser_authority",
+    subscriptionId: "sub_hostile_browser_authority",
+    paymentLink: "https://payments.invalid/hostile",
+    successUrl: "https://success.invalid/hostile",
+    cancelUrl: "https://cancel.invalid/hostile",
+    environment: "live",
+    billingMode: "live",
+    workspaceId: foreignBillingWorkspace.workspaceId,
+    role: "owner",
+    email: "hostile-billing-authority@example.test"
+  };
+  const hostileCheckout = await billingResponse("/api/billing/checkout", {
+    method: "POST",
+    token: canonicalBillingOwner.token,
+    body: hostileBillingBody
+  });
+  if (hostileCheckout.status !== 503
+    || hostileCheckout.body?.status !== "activation_held"
+    || hostileCheckout.body?.resultCode !== "checkout_activation_held") {
+    throw new Error("hostile billing body escaped readiness-only held checkout");
+  }
+  assertBillingResponseRedacted(hostileCheckout.body, "hostile-body held checkout", Object.values(hostileBillingBody));
+  await assertBillingCheckoutInert("hostile-body held checkout");
+
+  const foreignWorkspaceCheckout = await billingResponse("/api/billing/checkout", {
+    method: "POST",
+    token: canonicalBillingOwner.token,
+    body: {
+      workspaceId: foreignBillingWorkspace.workspaceId,
+      selectedPlan: "foreign-workspace-browser-plan"
+    }
+  });
+  if (foreignWorkspaceCheckout.status !== 503
+    || foreignWorkspaceCheckout.body?.status !== "activation_held"
+    || foreignWorkspaceCheckout.body?.resultCode !== "checkout_activation_held") {
+    throw new Error("foreign body workspace redirected canonical-owner billing authority");
+  }
+  assertBillingResponseRedacted(foreignWorkspaceCheckout.body, "foreign-workspace held checkout", [
+    foreignBillingWorkspace.workspaceId,
+    "foreign-workspace-browser-plan"
+  ]);
+  await assertBillingCheckoutInert("foreign-workspace held checkout");
+
+  if (billingCheckoutFixtureOnly) {
+    await stopMainTestServer();
+    if (await access(billingWorkspaceLockPath).then(() => true, error => error?.code !== "ENOENT")) {
+      throw new Error("billing checkout focused fixture retained the revisioned workspace lock");
+    }
+    await rm(testDataDir, { recursive: true, force: true });
+    let cleanupComplete = false;
+    try {
+      await access(testDataDir);
+    } catch (error) {
+      if (error?.code === "ENOENT") cleanupComplete = true;
+      else throw error;
+    }
+    if (!cleanupComplete) throw new Error("billing checkout focused fixture cleanup was incomplete");
+    console.log(JSON.stringify({
+      ok: true,
+      billingCheckout: {
+        revisionedRootWorkspaceAbsent: true,
+        canonicalOwnerResolved: true,
+        sameWorkspaceNonOwnerResolved: true,
+        foreignWorkspaceResolved: true,
+        anonymousStatus: anonymousCheckout.status,
+        nonOwnerStatus: nonOwnerCheckout.status,
+        ownerStatus: ownerCheckout.status,
+        adminClaimStatus: adminClaimCheckout.status,
+        hostileBodyStatus: hostileCheckout.status,
+        foreignBodyStatus: foreignWorkspaceCheckout.status,
+        durableStateUnchangedByRequests: true,
+        externalRequestDelta: 0,
+        mockedProviderRequestDelta: 0,
+        cleanupComplete
+      }
+    }));
+    process.exit(0);
+  }
 
   const coreReadiness = await request("/api/integrations/readiness");
   if (!coreReadiness.ok || !Array.isArray(coreReadiness.coreServices)) throw new Error("integration readiness failed");
@@ -2069,8 +9368,6 @@ try {
   const portalAudit = await request("/api/dev-portal/audit");
   if (!portalAudit.ok || portalAudit.total < 10 || !portalAudit.rows.some(row => row.id === "tiktok" && row.callback.includes("/api/oauth/tiktok/callback"))) throw new Error("developer portal audit failed");
   if (!portalAudit.rows.some(row => row.id === "tiktok" && row.portalRoute?.includes("developers.tiktok.com")) || !portalAudit.hardBlockers.every(row => Object.prototype.hasOwnProperty.call(row, "portalRoute"))) throw new Error("developer portal audit missing provider portal routes");
-  const twitchPortalRow = portalAudit.rows.find(row => row.id === "twitch");
-  if (!twitchPortalRow || !twitchPortalRow.nextAction?.includes("Reconnect Twitch") || /Generate TWITCH_CLIENT_SECRET/i.test(twitchPortalRow.nextAction)) throw new Error("Twitch portal audit should not ask for a secret that is already configured");
   const discordPortalRow = portalAudit.rows.find(row => row.id === "discord");
   if (!discordPortalRow || !/portal-app-created|configured/i.test(discordPortalRow.status) || !/client secret|bot token|DISCORD_BOT_TOKEN/i.test(`${discordPortalRow.blocker} ${discordPortalRow.nextAction}`)) throw new Error("Discord portal audit should reflect the created app and remaining credentials");
 
@@ -2082,25 +9379,74 @@ try {
   const openaiReady = await request("/api/openai/readiness");
   if (!openaiReady.ok || !openaiReady.serverSideOnly) throw new Error("openai readiness failed");
 
+  const discordExternalRequestsBefore = (await externalHttpRequestAttempts()).length;
   const discordReady = await request("/api/discord/readiness");
   if (!discordReady.ok || !discordReady.redirectUri.includes("/api/oauth/discord/callback") || discordReady.connectRoute !== "/api/oauth/discord/start" || !discordReady.scopes.includes("identify")) throw new Error("discord readiness failed");
   if (!discordReady.install?.guildUrl?.includes("scope=bot+applications.commands") || discordReady.install?.botPermissionBits !== "126032" || !discordReady.install?.botPermissions?.includes("Manage Messages") || !discordReady.install?.botPermissions?.includes("Manage Channels")) throw new Error("discord install URL readiness failed");
   if (!discordReady.configured || discordReady.missingEnv?.includes("DISCORD_CLIENT_ID") || discordReady.missingEnv?.includes("DISCORD_CLIENT_SECRET")) throw new Error("discord alias credentials were not recognized");
+  if (discordReady.botReady || discordReady.guildConfigured || discordReady.announcementChannelConfigured) throw new Error("discord OAuth readiness must not borrow interaction, bot, or workspace-target configuration");
+  if (discordReady.account !== null) throw new Error("discord readiness borrowed connected-account state that is absent from this workspace");
   const discordInteractionsReady = await request("/api/discord/interactions/readiness");
-  if (!discordInteractionsReady.ok || !discordInteractionsReady.endpoint.includes("/api/discord/interactions") || !discordInteractionsReady.publicKeyConfigured || !discordInteractionsReady.commandIdeas.some(item => item.includes("/cue status"))) throw new Error("discord interactions readiness failed");
+  if (!discordInteractionsReady.ok || !discordInteractionsReady.ready || !discordInteractionsReady.configured || !discordInteractionsReady.endpoint.includes("/api/discord/interactions") || !discordInteractionsReady.publicKeyConfigured || !discordInteractionsReady.commandIdeas.some(item => item.includes("/cue status"))) throw new Error("discord interactions readiness failed");
+  if (discordInteractionsReady.missingEnv?.length || discordInteractionsReady.optionalMissingEnv?.includes("DISCORD_PUBLIC_KEY") || !["DISCORD_BOT_TOKEN", "DISCORD_GUILD_ID", "DISCORD_ANNOUNCEMENT_CHANNEL_ID"].every(name => discordInteractionsReady.optionalMissingEnv?.includes(name))) throw new Error("discord interaction readiness must keep public-key, bot, and workspace-target gates separate");
+  const discordReadinessPayload = JSON.stringify([discordReady, discordInteractionsReady]);
+  if (discordReadinessPayload.includes(SYNTHETIC_DISCORD_CLIENT_SECRET) || discordReadinessPayload.includes(SYNTHETIC_DISCORD_PUBLIC_KEY)) throw new Error("discord readiness exposed configured credential material");
+
+  const discordPingBody = JSON.stringify({ type: 1 });
+  const discordPingTimestamp = String(Math.floor(Date.now() / 1000));
+  const discordPingSignature = discordInteractionSignature(discordPingBody, discordPingTimestamp);
+  const signedDiscordPing = await fetch(base + "/api/discord/interactions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Signature-Ed25519": discordPingSignature,
+      "X-Signature-Timestamp": discordPingTimestamp
+    },
+    body: discordPingBody
+  });
+  const signedDiscordPong = await signedDiscordPing.json();
+  if (signedDiscordPing.status !== 200 || !signedDiscordPing.headers.get("content-type")?.includes("application/json") || signedDiscordPong.type !== 1) throw new Error("discord signed PING did not return PONG");
+  const unsignedDiscordPing = await fetch(base + "/api/discord/interactions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: discordPingBody
+  });
+  if (unsignedDiscordPing.status !== 401) throw new Error("discord interactions accepted an unsigned PING");
+  const tamperedDiscordPing = await fetch(base + "/api/discord/interactions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Signature-Ed25519": discordPingSignature,
+      "X-Signature-Timestamp": discordPingTimestamp
+    },
+    body: JSON.stringify({ type: 1, tampered: true })
+  });
+  if (tamperedDiscordPing.status !== 401) throw new Error("discord interactions accepted a body that did not match its signature");
   const discordWebhookEventsReady = await request("/api/discord/webhook-events/readiness");
-  if (!discordWebhookEventsReady.ok || !discordWebhookEventsReady.endpoint.includes("/api/discord/webhook-events") || !discordWebhookEventsReady.subscriptions.includes("APPLICATION_DEAUTHORIZED")) throw new Error("discord webhook event readiness failed");
+  if (!discordWebhookEventsReady.ok || !discordWebhookEventsReady.ready || !discordWebhookEventsReady.publicKeyConfigured || !discordWebhookEventsReady.endpoint.includes("/api/discord/webhook-events") || !discordWebhookEventsReady.subscriptions.includes("APPLICATION_DEAUTHORIZED")) throw new Error("discord webhook event readiness failed");
   const discordCommandsReady = await request("/api/discord/commands/readiness");
   if (!discordCommandsReady.ok || !discordCommandsReady.registerRoute.includes("/api/discord/commands/register") || !discordCommandsReady.commands.some(item => item.name === "cue")) throw new Error("discord command readiness failed");
+  if (discordCommandsReady.ready || discordCommandsReady.botReady || !discordCommandsReady.optionalMissingEnv?.includes("DISCORD_BOT_TOKEN")) throw new Error("discord command readiness must require the separate bot-token family");
   const discordBotReady = await request("/api/discord/bot/readiness");
   if (!discordBotReady.ok || !Object.prototype.hasOwnProperty.call(discordBotReady, "botTokenConfigured") || !Array.isArray(discordBotReady.errors)) throw new Error("discord bot readiness failed");
+  if (discordBotReady.ready || discordBotReady.botTokenConfigured || !discordBotReady.optionalMissingEnv?.includes("DISCORD_BOT_TOKEN")) throw new Error("discord bot readiness must remain false without a bot token");
   const discordVerificationPreflight = await request("/api/discord/verification-preflight");
   if (!discordVerificationPreflight.ok || !discordVerificationPreflight.dashboardFields?.some(field => field.label === "Interactions Endpoint URL") || !discordVerificationPreflight.gates?.some(gate => gate.id === "verification-final" && gate.finalStep && gate.deferred) || discordVerificationPreflight.verificationServerThreshold !== 100) throw new Error("discord verification preflight failed");
   const discordCommandsListResponse = await fetch(base + "/api/discord/commands");
   if (![200, 409].includes(discordCommandsListResponse.status)) throw new Error("discord registered command list should either return commands or a bot-config gate");
 
   const discordCommunityResponse = await fetch(base + "/api/discord/community");
-  if (discordCommunityResponse.status !== 409) throw new Error("discord community should require connected Discord OAuth");
+  const discordCommunity = await discordCommunityResponse.json();
+  if (discordCommunityResponse.status !== 402
+    || discordCommunity.ok !== false
+    || discordCommunity.accessRequired !== true
+    || discordCommunity.checkoutPath !== "/api/billing/checkout"
+    || discordCommunity.portalPath !== "/portal"
+    || discordCommunity.error !== "Buy Social Cues or use an active approved promo entitlement before using the app."
+    || JSON.stringify(Object.keys(discordCommunity).sort()) !== JSON.stringify(["accessRequired", "checkoutPath", "error", "ok", "portalPath"])) {
+    throw new Error("anonymous Discord community reads should require app access before workspace account lookup");
+  }
+  if ((await externalHttpRequestAttempts()).length !== discordExternalRequestsBefore) throw new Error("discord readiness fixture attempted an external provider request");
 
   const twitchReady = await request("/api/twitch/readiness");
   if (!twitchReady.ok || twitchReady.connectRoute !== "/api/oauth/twitch/start" || !twitchReady.developerReviewStatus) throw new Error("twitch readiness failed");
@@ -2155,23 +9501,37 @@ try {
   if (!securityAudit.ok || !securityAudit.headers || !securityAudit.auth?.publicUserListHidden) throw new Error("security audit failed");
   if (!securityAudit.secrets?.oauthTokenEncryption || !securityAudit.auth?.workspaceModelMirror) throw new Error("security audit missed core hardening status");
 
+  const mediaPlanAnonymousPayload = {
+    sourceName: "raw-test.mp4",
+    brief: "Social Cues launch",
+    workspaceId: "foreign-media-plan-workspace",
+    userId: "foreign-media-plan-user",
+    providerAccountId: "foreign-media-plan-provider-account",
+    token: "synthetic-media-plan-browser-token",
+    intent: {
+      messageToPreserve: "Show creators the audience-intelligence payoff.",
+      audience: "Creators building their first repeatable growth system",
+      targetClipCount: 5
+    }
+  };
+  await assertAnonymousMutationDenied(
+    "/api/media/editor/plan",
+    mediaPlanAnonymousPayload,
+    "anonymous media editor plan",
+    [mediaPlanAnonymousPayload.workspaceId, mediaPlanAnonymousPayload.userId, mediaPlanAnonymousPayload.providerAccountId, mediaPlanAnonymousPayload.token]
+  );
+  const mediaPlanRequestsBeforeAuthenticated = await externalHttpRequestAttempts();
   const mediaEditPlan = await request("/api/media/editor/plan", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sourceName: "raw-test.mp4",
-      brief: "Social Cues launch",
-      intent: {
-        messageToPreserve: "Show creators the audience-intelligence payoff.",
-        audience: "Creators building their first repeatable growth system",
-        targetClipCount: 5
-      }
-    })
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    body: JSON.stringify(mediaPlanAnonymousPayload)
   });
   if (!mediaEditPlan.ok || !mediaEditPlan.plan?.outputs?.length || !mediaEditPlan.serverRequirement) throw new Error("media editor plan failed");
   if (mediaEditPlan.plan.intent?.targetClipCount !== 5 || !mediaEditPlan.plan.intent?.messageToPreserve?.includes("audience-intelligence") || !mediaEditPlan.plan.intent?.audience?.includes("Creators")) throw new Error("media editor plan must preserve the user's message, audience, and requested clip count");
   if (![...(mediaEditPlan.plan.intake || []), ...(mediaEditPlan.plan.editPass || [])].some(stage => /scene|silence/i.test(stage)) || !mediaEditPlan.plan.reviewGate) throw new Error("media editor plan must include dissection stages and an explicit human review gate");
   if (!mediaEditPlan.plan.outputs.every(output => output.outputName?.startsWith("raw-test-") && output.filterPlan && output.safeArea && output.requiredReview)) throw new Error("media editor plan must include export names, filters, safe areas, and review gates");
+  if (JSON.stringify(await externalHttpRequestAttempts()) !== JSON.stringify(mediaPlanRequestsBeforeAuthenticated)) throw new Error("authenticated media editor plan attempted an external provider request");
+  if ([mediaPlanAnonymousPayload.workspaceId, mediaPlanAnonymousPayload.userId, mediaPlanAnonymousPayload.providerAccountId, mediaPlanAnonymousPayload.token].some(marker => JSON.stringify(mediaEditPlan).includes(marker))) throw new Error("media editor plan accepted browser identity or credential authority");
 
   const mediaAsset = await request("/api/media/assets", {
     method: "POST",
@@ -2215,12 +9575,30 @@ try {
   if (!renderJob.ok || !renderJob.job?.id || renderJob.job.ownerUserId !== login.user.id || !renderJob.job.outputs?.length) throw new Error("media render job failed");
   if (!["worker-storage-not-ready", "storage-not-configured"].includes(renderJob.job.status) || renderJob.job.workerStatus !== "durable-queue-ready-renderer-not-configured") throw new Error("media render job status should distinguish durable storage from the isolated renderer");
 
+  const tiktokAnonymousPayload = {
+    status: "connected",
+    handle: "@should-not-connect",
+    workspaceId: "foreign-tiktok-workspace",
+    ownerUserId: "foreign-tiktok-owner",
+    providerAccountId: "foreign-tiktok-provider-account",
+    token: "synthetic-tiktok-browser-token"
+  };
+  await assertAnonymousMutationDenied(
+    "/api/accounts/tiktok",
+    tiktokAnonymousPayload,
+    "anonymous TikTok account mutation",
+    [tiktokAnonymousPayload.workspaceId, tiktokAnonymousPayload.ownerUserId, tiktokAnonymousPayload.providerAccountId, tiktokAnonymousPayload.token]
+  );
+  const tiktokRequestsBeforeAuthenticated = await externalHttpRequestAttempts();
   const manualConnectResponse = await fetch(base + "/api/accounts/tiktok", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ status: "connected", handle: "@should-not-connect" })
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    body: JSON.stringify(tiktokAnonymousPayload)
   });
-  if (manualConnectResponse.status !== 409) throw new Error("manual account connect should be blocked");
+  const manualConnect = await manualConnectResponse.json();
+  if (manualConnectResponse.status !== 409 || manualConnect.ok !== false || manualConnect.platform !== "tiktok" || !manualConnect.connectRoutes?.tiktok) throw new Error("manual account connect should preserve the OAuth handoff gate");
+  if (JSON.stringify(await externalHttpRequestAttempts()) !== JSON.stringify(tiktokRequestsBeforeAuthenticated)) throw new Error("authenticated TikTok manual-connect gate attempted a real provider request");
+  if ([tiktokAnonymousPayload.workspaceId, tiktokAnonymousPayload.ownerUserId, tiktokAnonymousPayload.providerAccountId, tiktokAnonymousPayload.token].some(marker => JSON.stringify(manualConnect).includes(marker))) throw new Error("TikTok account fixture accepted body identity or credential authority");
 
   const cachedProviderModel = await request("/api/model", {
     headers: { Authorization: `Bearer ${login.session.token}` }
@@ -2259,11 +9637,16 @@ try {
     { id: "activity-tiktok-cache-test", type: "provider-action-check", providerId: "tiktok", summary: "stale TikTok activity" },
     ...(cachedProviderModel.activity || [])
   ];
-  await request("/api/model", {
+  const serverCacheForgeryEnvelope = revisionedModelSaveEnvelope(cachedProviderModel);
+  const serverCacheForgerySave = await request("/api/model", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
-    body: JSON.stringify(cachedProviderModel)
+    body: JSON.stringify(serverCacheForgeryEnvelope)
   });
+  if (serverCacheForgerySave.receipt?.operationId !== serverCacheForgeryEnvelope.operationId
+    || !serverCacheForgerySave.receipt?.committedRevision) {
+    throw new Error("server-owned cache forgery control did not use the revisioned model-save contract");
+  }
   const serverRetainedModel = await request("/api/model", {
     headers: { Authorization: `Bearer ${login.session.token}` }
   });
@@ -2312,15 +9695,33 @@ try {
   if (JSON.stringify(analytics.analytics).toLowerCase().includes("manual baseline")) throw new Error("growth should not mention manual baseline");
   if (appHtml.includes("variant.mockViews =") || appHtml.includes("4200 + Math.random() * 64000")) throw new Error("published variants must never invent view counts");
 
+  const mediaGenerateAnonymousPayload = {
+    provider: "Sora",
+    platform: "tiktok",
+    brief: "Social Cues launch",
+    workspaceId: "foreign-media-generate-workspace",
+    userId: "foreign-media-generate-user",
+    providerAccountId: "foreign-media-generate-provider-account",
+    token: "synthetic-media-generate-browser-token"
+  };
+  await assertAnonymousMutationDenied(
+    "/api/media/generate",
+    mediaGenerateAnonymousPayload,
+    "anonymous media generation",
+    [mediaGenerateAnonymousPayload.workspaceId, mediaGenerateAnonymousPayload.userId, mediaGenerateAnonymousPayload.providerAccountId, mediaGenerateAnonymousPayload.token]
+  );
+  const mediaGenerateRequestsBeforeAuthenticated = await externalHttpRequestAttempts();
   const media = await request("/api/media/generate", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ provider: "Sora", platform: "tiktok", brief: "Social Cues launch" })
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${login.session.token}` },
+    body: JSON.stringify(mediaGenerateAnonymousPayload)
   });
-  if (!media.ok || !media.prompt) throw new Error("media generation failed");
+  if (!media.ok || !media.prompt || media.provider !== "Sora" || media.platform !== "tiktok") throw new Error("media generation failed");
+  if (JSON.stringify(await externalHttpRequestAttempts()) !== JSON.stringify(mediaGenerateRequestsBeforeAuthenticated)) throw new Error("authenticated media generation attempted a real provider request");
+  if ([mediaGenerateAnonymousPayload.workspaceId, mediaGenerateAnonymousPayload.userId, mediaGenerateAnonymousPayload.providerAccountId, mediaGenerateAnonymousPayload.token].some(marker => JSON.stringify(media).includes(marker))) throw new Error("media generation accepted browser identity or credential authority");
 
   console.log(JSON.stringify({ ok: true, generated: generated.variants.length, queued: queued.status }));
+  }
 } finally {
-  server.kill();
-  await delay(150);
+  await stopMainTestServer();
 }
