@@ -179,8 +179,10 @@ flow.
 
 ## Persistence And Tenant-Isolation Gate
 
-R4 remains **HOLD**. Follow the complete matrix in `SUPABASE-SETUP.md`. At
-minimum, independent deployed instances must prove:
+R4 remains **HOLD**. Follow the complete matrix in `SUPABASE-SETUP.md`. The fresh
+implementation sequence, writer boundary, threat model, and evidence required to
+lift this gate are defined in `R4-HOSTED-PERSISTENCE-PLAN.md`. At minimum,
+independent deployed instances must prove:
 
 - authenticated session to active workspace to workspace-owned row binding;
 - owner/member/viewer/outsider and cross-workspace authorization;
