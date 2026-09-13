@@ -28,7 +28,10 @@ import { resolveLocalWorkspaceManagementMembership } from "./local-workspace-mem
 import { openLocalWorkspacePersistence } from "./local-workspace-persistence.mjs";
 import { WorkspaceContentPersistenceError } from "./workspace-content-persistence.mjs";
 import { localRecoveryValidation } from "./local-recovery-validation.mjs";
-import { PRICING_CONFIGURATION } from "./pricing-packaging.mjs";
+import {
+  OPENAI_COST_ACCOUNTING_DEFAULTS,
+  PRICING_CONFIGURATION
+} from "./pricing-packaging.mjs";
 import {
   resolveStripeBillingConfiguration,
   STRIPE_BILLING_RELEASE_STAGE
@@ -315,8 +318,11 @@ const openaiVideoModel = process.env.OPENAI_VIDEO_MODEL || "";
 const openaiDailyRequestLimit = Math.max(1, Number(process.env.OPENAI_DAILY_REQUEST_LIMIT || 40));
 const openaiMonthlyRequestLimit = Math.max(openaiDailyRequestLimit, Number(process.env.OPENAI_MONTHLY_REQUEST_LIMIT || 500));
 const openaiMonthlyTokenLimit = Math.max(10000, Number(process.env.OPENAI_MONTHLY_TOKEN_LIMIT || 1500000));
-const openaiInputCostPerMillionMicrousd = Math.max(0, Number(process.env.OPENAI_INPUT_COST_PER_MILLION_MICROUSD || 0));
-const openaiOutputCostPerMillionMicrousd = Math.max(0, Number(process.env.OPENAI_OUTPUT_COST_PER_MILLION_MICROUSD || 0));
+const openaiDefaultCostAccounting = openaiModel === OPENAI_COST_ACCOUNTING_DEFAULTS.model
+  ? OPENAI_COST_ACCOUNTING_DEFAULTS
+  : { inputCostPerMillionMicroUsd: 0, outputCostPerMillionMicroUsd: 0 };
+const openaiInputCostPerMillionMicrousd = Math.max(0, Number(process.env.OPENAI_INPUT_COST_PER_MILLION_MICROUSD || openaiDefaultCostAccounting.inputCostPerMillionMicroUsd));
+const openaiOutputCostPerMillionMicrousd = Math.max(0, Number(process.env.OPENAI_OUTPUT_COST_PER_MILLION_MICROUSD || openaiDefaultCostAccounting.outputCostPerMillionMicroUsd));
 const stripeBillingConfiguration = resolveStripeBillingConfiguration(process.env);
 const stripeWebhookSecret = stripeBillingConfiguration.internal?.gatewayConfiguration?.webhookSecret || "";
 const discordPublicAppUrl = (process.env.DISCORD_PUBLIC_APP_URL || publicAppUrl).replace(/\/$/, "");
@@ -8346,8 +8352,52 @@ function publicPricingAllowance(item, classificationLabels) {
     if (Number.isFinite(item?.[key])) result[key] = Number(item[key]);
   }
   if (item?.unit) result.unit = requiredPricingText(item.unit, `allowance.${item.id}.unit`);
+  if (item?.period) result.period = requiredPricingText(item.period, `allowance.${item.id}.period`);
+  if (typeof item?.pooled === "boolean") result.pooled = item.pooled;
   if (item?.serverBounded === true) result.serverBounded = true;
   return result;
+}
+
+function publicMoveWeight(item) {
+  if (!Number.isInteger(item?.moves) || item.moves < 0) throw new TypeError("Invalid Move weight.");
+  if (!["available", "planned"].includes(item?.availability)) throw new TypeError("Invalid Move availability.");
+  if (!["not_active", "planned"].includes(item?.meteringStatus)) throw new TypeError("Invalid Move metering status.");
+  if (item.availability === "planned" && item.meteringStatus !== "planned") {
+    throw new TypeError("Planned Move capabilities cannot claim active metering.");
+  }
+  return {
+    id: requiredPricingText(item.id, "moveWeight.id"),
+    label: requiredPricingText(item.label, `moveWeight.${item.id}.label`),
+    moves: item.moves,
+    unit: requiredPricingText(item.unit, `moveWeight.${item.id}.unit`),
+    availability: requiredPricingText(item.availability, `moveWeight.${item.id}.availability`),
+    meteringStatus: requiredPricingText(item.meteringStatus, `moveWeight.${item.id}.meteringStatus`),
+    detail: requiredPricingText(item.detail, `moveWeight.${item.id}.detail`)
+  };
+}
+
+function publicMovePack(item) {
+  if (!Number.isInteger(item?.moves) || item.moves < 1) throw new TypeError("Invalid Move pack quantity.");
+  if (!Number.isInteger(item?.priceCents) || item.priceCents < 1) throw new TypeError("Invalid Move pack price.");
+  if (item?.purchase?.available !== false || item?.purchase?.status !== "unavailable") {
+    throw new TypeError("Move pack purchase must remain unavailable.");
+  }
+  if (item?.status !== "planned") throw new TypeError("Move packs must remain planned.");
+  return {
+    id: requiredPricingText(item.id, "movePack.id"),
+    name: requiredPricingText(item.name, `movePack.${item.id}.name`),
+    status: requiredPricingText(item.status, `movePack.${item.id}.status`),
+    moves: item.moves,
+    priceCents: item.priceCents,
+    priceDisplay: new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: requiredPricingText(item.currency, `movePack.${item.id}.currency`).toUpperCase(),
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    }).format(item.priceCents / 100),
+    currency: requiredPricingText(item.currency, `movePack.${item.id}.currency`),
+    purchase: { available: false, status: "unavailable" }
+  };
 }
 
 function publicPricingCapability(item, classificationLabels) {
@@ -8430,6 +8480,25 @@ function currentPricingPresentation() {
   if (vizard?.status !== "planned" || vizard?.availability !== "unavailable") {
     throw new TypeError("Vizard pricing availability is invalid.");
   }
+  const moveMetering = configuration.moveMetering;
+  const moveExpirationMonths = Number(moveMetering?.purchasedMoves?.expirationMonths);
+  if (moveMetering?.enforcementStatus !== "not_active"
+    || moveMetering?.includedMoves?.rollover !== false
+    || moveMetering?.purchasedMoves?.purchaseExecutionAvailable !== false
+    || moveMetering?.purchasedMoves?.purchaseStatus !== "planned"
+    || moveMetering?.purchasedMoves?.requiresActiveSubscription !== true
+    || !Number.isInteger(moveExpirationMonths)
+    || moveExpirationMonths < 1) {
+    throw new TypeError("Move policy must remain planned and unavailable.");
+  }
+  const zeroMoveActivities = (moveMetering?.zeroMoveActivities || []).map(item => {
+    if (item?.moves !== 0) throw new TypeError("Ordinary activity must remain zero-Move.");
+    return {
+      id: requiredPricingText(item.id, "zeroMoveActivity.id"),
+      label: requiredPricingText(item.label, `zeroMoveActivity.${item.id}.label`),
+      moves: 0
+    };
+  });
   return {
     status: "available",
     catalogVersion: requiredPricingText(configuration.version, "version"),
@@ -8442,6 +8511,24 @@ function currentPricingPresentation() {
     billingActivation: { available: false, status: "unavailable" },
     classificationLabels,
     plans,
+    moves: {
+      unit: requiredPricingText(moveMetering.unit, "moveMetering.unit"),
+      definition: requiredPricingText(moveMetering.definition, "moveMetering.definition"),
+      enforcementStatus: requiredPricingText(moveMetering.enforcementStatus, "moveMetering.enforcementStatus"),
+      includedMoves: {
+        resetCadence: requiredPricingText(moveMetering.includedMoves?.resetCadence, "moveMetering.includedMoves.resetCadence"),
+        rollover: moveMetering.includedMoves?.rollover === true
+      },
+      purchasedMoves: {
+        purchaseExecutionAvailable: false,
+        purchaseStatus: requiredPricingText(moveMetering.purchasedMoves?.purchaseStatus, "moveMetering.purchasedMoves.purchaseStatus"),
+        expirationMonths: moveExpirationMonths,
+        requiresActiveSubscription: true
+      },
+      zeroMoveActivities,
+      weights: (moveMetering.weights || []).map(publicMoveWeight),
+      packs: (moveMetering.packs || []).map(publicMovePack)
+    },
     addOns: (configuration.addOns || []).map(addOn => ({
       id: requiredPricingText(addOn.id, "addOn.id"),
       name: requiredPricingText(addOn.name, `addOn.${addOn.id}.name`),
@@ -15981,6 +16068,9 @@ function pricingPageHtml(pricing) {
         <div class="nav-actions" style="margin-top:18px"><button class="btn" type="button" disabled aria-disabled="true" style="cursor:not-allowed;opacity:.65">Checkout unavailable</button></div>
       </article>`;
   }).join("");
+  const moveWeights = pricing.moves.weights.map(item => `<div class="status-row"><div><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(`${item.moves} Move${item.moves === 1 ? "" : "s"} per ${item.unit.replaceAll("_", " ")}`)}<br><span>${escapeHtml(item.detail)}</span></div><span class="pill">${escapeHtml(`${item.availability} / ${item.meteringStatus}`)}</span></div>`).join("");
+  const movePacks = pricing.moves.packs.map(pack => `<div class="status-row"><div><strong>${escapeHtml(pack.name)}:</strong> ${escapeHtml(pack.priceDisplay)}<br><span>Planned for purchase after Stripe billing is verified.</span></div><span class="pill">${escapeHtml(`${pack.status} / ${pack.purchase.status}`)}</span></div>`).join("");
+  const zeroMoveLabels = pricing.moves.zeroMoveActivities.map(item => item.label).join(", ");
   const services = pricing.services.map(service => `<div class="status-row"><div><strong>${escapeHtml(service.name)}</strong><br><span>${escapeHtml(service.description)}</span></div><span class="pill">${escapeHtml(service.status)}</span></div>`).join("");
   const providers = pricing.providers.map(provider => `<div class="status-row"><div><strong>${escapeHtml(provider.name)}</strong><br><span>${escapeHtml(provider.disclosure)}</span></div><span class="pill">${escapeHtml(`${provider.status} / ${provider.availability}`)}</span></div>`).join("");
   return marketingShell("Social Cues Pricing", `
@@ -15993,9 +16083,10 @@ function pricingPageHtml(pricing) {
         <div class="eyebrow">Monthly plans</div>
         <h1 style="font-size:clamp(38px,6vw,66px);line-height:1;margin:12px 0 16px">Business, Growth, and Agency plans.</h1>
         <p class="lead">${escapeHtml(pricing.positioning)}</p>
-        <div class="notice" style="margin-top:18px">Prices are monthly USD list prices. Checkout and billing activation are unavailable.</div>
+        <div class="notice" style="margin-top:18px">Prices are monthly USD list prices. Checkout, Move-pack purchase, and billing activation are unavailable.</div>
       </section>
       <section class="wrap grid" style="align-items:start" data-pricing-catalog-version="${escapeHtml(pricing.catalogVersion)}">${plans}</section>
+      <section class="band"><div class="wrap"><h2 style="margin:0 0 8px">How Moves work</h2><p>${escapeHtml(pricing.moves.definition)} Included Moves reset each billing cycle and do not roll over. Purchased Moves are planned to remain available for ${escapeHtml(pricing.moves.purchasedMoves.expirationMonths)} months while the subscription remains active.</p><p>Zero-Move activity: ${escapeHtml(zeroMoveLabels)}.</p><div class="status-list">${moveWeights}${movePacks}</div></div></section>
       <section class="band"><div class="wrap"><h2 style="margin:0 0 8px">Guided services remain separate</h2><p>Services are scoped independently and are not included automatically with a plan.</p><div class="status-list">${services}</div></div></section>
       <section class="wrap" style="padding:36px 20px 8px"><h2>Customer-owned providers</h2><p class="lead" style="font-size:17px">${escapeHtml(pricing.thirdPartyChargesDisclosure)}</p><div class="status-list">${providers}</div><div class="notice" style="margin-top:14px">${escapeHtml(pricing.agencyDataPolicy)}</div></section>
     </main>

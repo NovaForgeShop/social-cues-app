@@ -9,7 +9,12 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { PRICING_CONFIGURATION, resolvePricingPlan } from "./pricing-packaging.mjs";
+import {
+  MOVE_METERING_CONFIGURATION,
+  OPENAI_COST_ACCOUNTING_DEFAULTS,
+  PRICING_CONFIGURATION,
+  resolvePricingPlan
+} from "./pricing-packaging.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -18,14 +23,6 @@ const startupTimeoutMs = 20_000;
 const expectedSchemaVersion = "social-cues.pricing-presentation.v1";
 const secretSentinel = "pricing-presentation-secret-sentinel";
 const protectedFiles = {
-  "pricing-packaging.mjs": {
-    sha256: "0283ac45bf6b7cd46c2ffa666ed980a3c3266f37d29c77a02016f34c606aab56",
-    objectId: "e6573be7865536ddef479a2a914729ac2b75f213"
-  },
-  "pricing-packaging.contract.test.mjs": {
-    sha256: "7817c0f54635ded02a51a10604c10a1677d1021b66f06c906ea237797e2aebd1",
-    objectId: "cf611cb92f6bafa552d219cc743eacdf6c612a39"
-  },
   "package-lock.json": {
     sha256: "6c4b13067bed8bccd173b7059b9bcfadcb647c9a7befbb9ba22e2ff118270883",
     objectId: "7ef54f2b11b83967af8170c16dd81f0ec40cd32f"
@@ -157,19 +154,20 @@ function collectObjectKeys(value, keys = []) {
 }
 
 async function sourceChecks() {
-  const [serverSource, appSource, seedSource, packageSource, moduleSource] = await Promise.all([
+  const [serverSource, appSource, seedSource, packageSource, moduleSource, envExampleSource] = await Promise.all([
     readFile(path.join(root, "server.mjs"), "utf8"),
     readFile(path.join(root, "social-cues-app.html"), "utf8"),
     readFile(path.join(root, "social-cues-model-seed.json"), "utf8"),
     readFile(path.join(root, "package.json"), "utf8"),
-    readFile(path.join(root, "pricing-packaging.mjs"), "utf8")
+    readFile(path.join(root, "pricing-packaging.mjs"), "utf8"),
+    readFile(path.join(root, ".env.example"), "utf8")
   ]);
   const seed = JSON.parse(seedSource);
   const packageJson = JSON.parse(packageSource);
 
-  check(/from\s+["']\.\/pricing-packaging\.mjs["']/.test(serverSource), "The server must import the tracked P0 pricing module.");
-  check(!/from\s+["']\.\/stripe-billing-lifecycle\.mjs["']/.test(serverSource), "P1 must not import the dirty Stripe lifecycle module.");
-  equal(packageJson.scripts["test:pricing-presentation"], "node pricing-presentation.contract.test.mjs", "The P1 script must invoke only its contract.");
+  check(/from\s+["']\.\/pricing-packaging\.mjs["']/.test(serverSource), "The server must import the tracked canonical pricing module.");
+  check(!/from\s+["']\.\/stripe-billing-lifecycle\.mjs["']/.test(serverSource), "Pricing presentation must not import the Stripe lifecycle module directly.");
+  equal(packageJson.scripts["test:pricing-presentation"], "node pricing-presentation.contract.test.mjs", "The pricing presentation script must invoke only its contract.");
   for (const script of ["test:pricing", "test:auth-verification", "test:workspace-authorization", "test:twitch-oauth-readiness", "test:vizard", "test:vizard-connection-service", "test:vizard-connection-management", "test:vizard-connection-management:runtime", "test:vizard-connection-management:postgrest"]) {
     check(typeof packageJson.scripts[script] === "string" && packageJson.scripts[script].length > 0, `Package script ${script} must remain present.`);
   }
@@ -188,17 +186,19 @@ async function sourceChecks() {
 
   for (const [file, expected] of Object.entries(protectedFiles)) {
     const bytes = await readFile(path.join(root, file));
-    equal(crypto.createHash("sha256").update(bytes).digest("hex"), expected.sha256, `${file} raw SHA-256 must remain unchanged in P1.`);
+    equal(crypto.createHash("sha256").update(bytes).digest("hex"), expected.sha256, `${file} raw SHA-256 must remain unchanged.`);
     equal(await git("hash-object", `--path=${file}`, "--", file), expected.objectId, `${file} normalized Git object must remain unchanged.`);
-    equal(await git("rev-parse", `HEAD:${file}`), expected.objectId, `${file} committed object must remain the P0 object.`);
+    equal(await git("rev-parse", `HEAD:${file}`), expected.objectId, `${file} committed object must remain unchanged.`);
     equal(await git("diff", "--", file), "", `${file} must have no working diff.`);
   }
-  check(!/process\.env|fetch\s*\(|https?:\/\//i.test(moduleSource), "The P0 pricing domain must remain pure and provider-hermetic.");
+  check(!/process\.env|fetch\s*\(|https?:\/\//i.test(moduleSource), "The canonical pricing domain must remain pure and provider-hermetic.");
+  equal(await git("ls-files", "--error-unmatch", "--", "pricing-packaging.contract.test.mjs"), "pricing-packaging.contract.test.mjs", "The focused pricing contract must remain tracked.");
 
   check(appSource.includes('fetch("/api/pricing"'), "The application must request the public pricing API.");
   check(appSource.includes("Pricing unavailable. No fallback price is shown."), "The application must render a fail-closed pricing state.");
   check(appSource.includes("pricingResult.value.payload.pricing"), "The application must render pricing from the server response.");
   check(appSource.includes("plans.map(plan =>"), "Canonical plans must render from response data.");
+  check(appSource.includes("Move-pack purchase") && appSource.includes("Planned Move packs"), "The application must disclose Move-pack purchase as planned and unavailable.");
   check(!/Founder Audit|Campaign Build|Managed Proof Sprint|Social Cues Pro\b|\$299|\$499|\$49\s*\/\s*mo/i.test(appSource), "The application must contain no retired plan catalog.");
   check(!appSource.includes('/api/billing/checkout'), "The application must not invoke checkout.");
   check(!appSource.includes('/api/billing/portal'), "The application must not invoke the billing portal.");
@@ -220,7 +220,16 @@ async function sourceChecks() {
   check(serverSource.includes('"/api/pricing"') && serverSource.includes("anonymousApiGetPaths"), "The pricing API must be on the anonymous GET allowlist.");
   check(serverSource.includes("unavailablePricingEnvelope"), "The API must include a sanitized unavailable envelope.");
   check(serverSource.includes("pricingUnavailablePageHtml"), "The public page must include a fail-closed unavailable view.");
-  check(!serverSource.includes("buildPricingPresentation"), "P1 must not depend on the dirty Stripe-aware presentation adapter.");
+  check(!serverSource.includes("buildPricingPresentation"), "Pricing presentation must not depend on the legacy Stripe-aware adapter.");
+  check(serverSource.includes("OPENAI_COST_ACCOUNTING_DEFAULTS"), "The server must use the canonical OpenAI cost-accounting defaults.");
+  check(serverSource.includes("openaiModel === OPENAI_COST_ACCOUNTING_DEFAULTS.model"), "OpenAI defaults must apply only to gpt-4.1-mini unless explicitly overridden.");
+  for (const expected of [
+    "OPENAI_DAILY_REQUEST_LIMIT || 40",
+    "OPENAI_MONTHLY_REQUEST_LIMIT || 500",
+    "OPENAI_MONTHLY_TOKEN_LIMIT || 1500000"
+  ]) check(serverSource.includes(expected), `The server must preserve ${expected}.`);
+  check(envExampleSource.includes("OPENAI_INPUT_COST_PER_MILLION_MICROUSD=400000"), "The example environment must publish the gpt-4.1-mini input-cost default.");
+  check(envExampleSource.includes("OPENAI_OUTPUT_COST_PER_MILLION_MICROUSD=1600000"), "The example environment must publish the gpt-4.1-mini output-cost default.");
 
   return { serverSource, appSource, seed, packageJson };
 }
@@ -291,8 +300,8 @@ globalThis.fetch = async (input, init = {}) => {
     equal(firstApi.body?.pricing?.currency, "usd", "API currency must be USD.");
     equal(firstApi.body?.pricing?.billingInterval, "month", "API interval must be monthly.");
     deepEqual(firstApi.body?.pricing?.plans.map(plan => plan.id), ["business", "growth", "agency"], "API plan order must be canonical.");
-    deepEqual(firstApi.body?.pricing?.plans.map(plan => plan.monthlyPriceCents), [9900, 17900, 24900], "API amounts must match P0 exactly.");
-    deepEqual(firstApi.body?.pricing?.plans.map(plan => plan.monthlyPriceDisplay), ["$99 / month", "$179 / month", "$249 / month"], "API monthly displays must derive from P0.");
+    deepEqual(firstApi.body?.pricing?.plans.map(plan => plan.monthlyPriceCents), [5000, 10000, 15000], "API amounts must match the canonical pricing package exactly.");
+    deepEqual(firstApi.body?.pricing?.plans.map(plan => plan.monthlyPriceDisplay), ["$50 / month", "$100 / month", "$150 / month"], "API monthly displays must derive from the canonical pricing package.");
     for (let index = 0; index < PRICING_CONFIGURATION.plans.length; index += 1) {
       const expected = PRICING_CONFIGURATION.plans[index];
       const actual = firstApi.body.pricing.plans[index];
@@ -304,10 +313,32 @@ globalThis.fetch = async (input, init = {}) => {
       equal(actual.support.serviceLevelAgreement, null, `Plan ${expected.id} must not promise an SLA.`);
       equal(actual.support.guaranteedResponseTime, null, `Plan ${expected.id} must not promise a response time.`);
       equal(actual.checkout.available, false, `Plan ${expected.id} checkout must be unavailable.`);
-      for (const allowanceId of ["intelligence-credits", "media-storage", "automation"]) {
+      for (const allowanceId of ["moves", "media-storage", "automation"]) {
         equal(actual.allowances.find(item => item.id === allowanceId)?.serverBounded, true, `${expected.id} ${allowanceId} must remain server bounded.`);
       }
     }
+    deepEqual(firstApi.body.pricing.plans.map(plan => plan.allowances.find(item => item.id === "moves")?.limit), [250, 750, 1500], "API Move allowances must match the plan package.");
+    deepEqual(firstApi.body.pricing.plans.map(plan => plan.allowances.find(item => item.id === "moves")?.pooled), [false, false, true], "Only the Agency Move allowance may be pooled.");
+    equal(firstApi.body.pricing.moves.definition, MOVE_METERING_CONFIGURATION.definition, "The public Move definition must remain canonical.");
+    equal(firstApi.body.pricing.moves.enforcementStatus, "not_active", "Move balance enforcement must remain inactive.");
+    deepEqual(firstApi.body.pricing.moves.zeroMoveActivities.map(item => item.moves), [0, 0, 0, 0], "Ordinary activity must remain zero-Move.");
+    deepEqual(firstApi.body.pricing.moves.weights.map(item => item.moves), [1, 1, 1, 5, 25], "Public Move weights must remain canonical.");
+    for (const futureId of ["image-generation", "rendered-video-minute"]) {
+      const future = firstApi.body.pricing.moves.weights.find(item => item.id === futureId);
+      equal(future.availability, "planned", `${futureId} must remain planned.`);
+      equal(future.meteringStatus, "planned", `${futureId} must not claim live metering.`);
+    }
+    deepEqual(
+      firstApi.body.pricing.moves.packs.map(({ moves, priceCents, priceDisplay, status, purchase }) => ({ moves, priceCents, priceDisplay, status, purchase })),
+      [
+        { moves: 100, priceCents: 1000, priceDisplay: "$10", status: "planned", purchase: { available: false, status: "unavailable" } },
+        { moves: 500, priceCents: 4000, priceDisplay: "$40", status: "planned", purchase: { available: false, status: "unavailable" } },
+        { moves: 1500, priceCents: 10000, priceDisplay: "$100", status: "planned", purchase: { available: false, status: "unavailable" } }
+      ],
+      "Move packs must publish exact planned prices without enabling purchase."
+    );
+    deepEqual(firstApi.body.pricing.moves.includedMoves, { resetCadence: "billing_cycle", rollover: false }, "Included Moves must reset each billing cycle without rollover.");
+    deepEqual(firstApi.body.pricing.moves.purchasedMoves, { purchaseExecutionAvailable: false, purchaseStatus: "planned", expirationMonths: 12, requiresActiveSubscription: true }, "Purchased Move terms must remain planned and billing-held.");
     equal(firstApi.body.pricing.checkout.available, false, "Catalog checkout must be unavailable.");
     equal(firstApi.body.pricing.billingActivation.available, false, "Billing activation must be unavailable.");
     const vizard = firstApi.body.pricing.providers.find(provider => provider.id === "vizard");
@@ -315,7 +346,7 @@ globalThis.fetch = async (input, init = {}) => {
     equal(vizard?.availability, "unavailable", "Vizard must remain unavailable.");
 
     const responseKeys = collectObjectKeys(firstApi.body).map(key => key.toLowerCase());
-    for (const forbiddenKey of ["stripepriceid", "paymentlink", "credentialreadiness", "environmentvalues", "margin", "costassumption"]) {
+    for (const forbiddenKey of ["stripepriceid", "paymentlink", "credentialreadiness", "environmentvalues", "margin", "costassumption", "costaccounting", "inputcostpermillionmicrousd", "outputcostpermillionmicrousd", "rateunit"]) {
       check(!responseKeys.includes(forbiddenKey), `Pricing API must omit ${forbiddenKey}.`);
     }
     for (const forbiddenText of [secretSentinel, "STRIPE_SECRET_KEY", "STRIPE_PRICE_", "checkout.stripe.com", "buy.stripe.com", "price_"]) {
@@ -326,7 +357,7 @@ globalThis.fetch = async (input, init = {}) => {
     firstApi.body.pricing.plans[0].monthlyPriceCents = 1;
     const secondApi = await request(baseUrl, "/api/pricing");
     equal(secondApi.body?.pricing?.plans?.[0]?.name, "Business", "A response mutation must not alter the catalog.");
-    equal(secondApi.body?.pricing?.plans?.[0]?.monthlyPriceCents, 9900, "A response mutation must not alter P0 pricing.");
+    equal(secondApi.body?.pricing?.plans?.[0]?.monthlyPriceCents, 5000, "A response mutation must not alter canonical pricing.");
 
     const apiMutation = await request(baseUrl, "/api/pricing", { method: "POST" });
     check(apiMutation.status >= 400, "Non-GET pricing API requests must fail closed.");
@@ -336,12 +367,16 @@ globalThis.fetch = async (input, init = {}) => {
     equal(page.status, 200, "GET /pricing must succeed.");
     check(/^text\/html\b/i.test(page.contentType), "GET /pricing must return HTML.");
     for (const plan of ["Business", "Growth", "Agency"]) check(page.text.includes(`>${plan}<`), `/pricing must render ${plan}.`);
-    for (const price of ["$99 / month", "$179 / month", "$249 / month"]) check(page.text.includes(price), `/pricing must render ${price}.`);
+    for (const price of ["$50 / month", "$100 / month", "$150 / month"]) check(page.text.includes(price), `/pricing must render ${price}.`);
     check(page.text.indexOf("Business") < page.text.indexOf("Growth") && page.text.indexOf("Growth") < page.text.indexOf("Agency"), "/pricing must preserve canonical plan order.");
     equal((page.text.match(/data-pricing-plan=/g) || []).length, 3, "/pricing must render exactly three plan cards.");
     equal((page.text.match(/disabled aria-disabled="true"/g) || []).length, 3, "Every pricing card checkout control must be disabled.");
     check(page.text.includes("USD, billed monthly"), "/pricing must identify USD and monthly billing.");
     check(page.text.includes("planned / unavailable") && page.text.includes("Vizard"), "/pricing must disclose Vizard as planned and unavailable.");
+    check(page.text.includes("How Moves work") && page.text.includes("One Move is one meaningful AI or automated result."), "/pricing must explain the Move unit.");
+    check(page.text.includes("100 Move pack") && page.text.includes("500 Move pack") && page.text.includes("1,500 Move pack"), "/pricing must render all planned Move packs.");
+    check(page.text.includes("Planned for purchase after Stripe billing is verified."), "/pricing must keep Move-pack purchase on billing HOLD.");
+    check(page.text.includes("future-only") && page.text.includes("planned / planned"), "/pricing must identify future Move weights as planned rather than live.");
     for (const forbidden of [/Founder Audit/i, /Campaign Build/i, /Managed Proof Sprint/i, /Social Cues Pro\b/i, /\$299/i, /\$499/i, /\$49\s*\/\s*mo/i, /annual/i, /promotion/i, /founding/i, /unlimited/i, /checkout\.stripe\.com/i, /buy\.stripe\.com/i, /price_/i, /<s\b/i]) {
       check(!forbidden.test(page.text), `/pricing must exclude ${forbidden}.`);
     }

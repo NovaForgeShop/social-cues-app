@@ -2638,7 +2638,7 @@
             <div class="row">
               <div>
                 <h2>Billing</h2>
-                <p>Review the current monthly plans. Plan selection is informational while billing activation remains unavailable.</p>
+                <p>Review monthly plans and included Moves. Plan selection and Move-pack purchase are informational while billing activation remains unavailable.</p>
               </div>
               <button class="primary" id="createCheckout" disabled>Checkout unavailable</button>
             </div>
@@ -2666,7 +2666,7 @@
               <button class="secondary" id="manageSubscription" disabled>Billing portal unavailable</button>
             </div>
             <div style="height:14px"></div>
-            <div class="notice">Checkout, billing activation, and the billing portal are unavailable. No payment details or secret keys are placed in the browser.</div>
+            <div class="notice">Checkout, Move-pack purchase, billing activation, and the billing portal are unavailable. No payment details or secret keys are placed in the browser.</div>
           </div>
         </div>
       </section>
@@ -13563,8 +13563,13 @@
         </article>`).join("");
       const providerRows = (pricing?.providers || []).map(provider => `
         <div class="notice"><strong>${escapeHtml(provider.name)}:</strong> ${escapeHtml(provider.disclosure)} <span class="tag">${escapeHtml(`${provider.status} / ${provider.availability}`)}</span></div>`).join("");
+      const movePacks = (pricing?.moves?.packs || []).map(pack => `${escapeHtml(pack.name)} for ${escapeHtml(pack.priceDisplay)} (${escapeHtml(`${pack.status} / ${pack.purchase?.status || "unavailable"}`)})`).join("; ");
+      const zeroMoveActivities = (pricing?.moves?.zeroMoveActivities || []).map(item => item.label).join(", ");
+      const movePolicy = pricing?.moves
+        ? `<div class="notice"><strong>Moves:</strong> ${escapeHtml(pricing.moves.definition)} Included Moves reset each billing cycle and do not roll over. Purchased Moves are planned to remain available for ${escapeHtml(pricing.moves.purchasedMoves?.expirationMonths || 12)} months while the subscription remains active.</div><div class="notice"><strong>Zero-Move activity:</strong> ${escapeHtml(zeroMoveActivities)}.</div>${movePacks ? `<div class="notice"><strong>Planned Move packs:</strong> ${movePacks}. Purchase remains unavailable until Stripe billing is verified.</div>` : ""}`
+        : "";
       $("#planList").innerHTML = plans.length
-        ? `${planCards}<div class="notice"><strong>Third-party charges:</strong> ${escapeHtml(pricing.thirdPartyChargesDisclosure)}</div>${providerRows}<div class="notice"><strong>Agency data:</strong> ${escapeHtml(pricing.agencyDataPolicy)}</div>`
+        ? `${planCards}${movePolicy}<div class="notice"><strong>Third-party charges:</strong> ${escapeHtml(pricing.thirdPartyChargesDisclosure)}</div>${providerRows}<div class="notice"><strong>Agency data:</strong> ${escapeHtml(pricing.agencyDataPolicy)}</div>`
         : customerSurfaceState.pricingError
           ? `<div class="empty">Pricing unavailable. No fallback price is shown.</div>`
           : `<div class="empty">Open Billing or refresh to load the server-controlled pricing catalog.</div>`;

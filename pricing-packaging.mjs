@@ -28,6 +28,25 @@ function capability(id, label, classification, detail) {
   return { id, label, classification, detail };
 }
 
+function moveWeight(id, label, moves, unit, availability, meteringStatus, detail) {
+  return { id, label, moves, unit, availability, meteringStatus, detail };
+}
+
+function movePack(id, moves, priceCents) {
+  return {
+    id,
+    name: `${moves.toLocaleString("en-US")} Move pack`,
+    status: "planned",
+    moves,
+    priceCents,
+    currency: "usd",
+    purchase: {
+      available: false,
+      status: "unavailable"
+    }
+  };
+}
+
 function support(label, queuePriority, detail) {
   return {
     label,
@@ -48,7 +67,58 @@ const sharedCapabilities = [
   capability("workspace-isolation", "Workspace tenant isolation", "currently_enforced", "Authentication and workspace boundaries isolate customer records and provider credentials.")
 ];
 
-function plan({ id, name, monthlyPriceCents, description, intendedCustomer, workspaceAllowance, userAllowance, connectionAllowance, extraCapabilities = [], planSupport }) {
+export const MOVE_METERING_CONFIGURATION = deepFreeze({
+  unit: "move",
+  definition: "One Move is one meaningful AI or automated result.",
+  enforcementStatus: "not_active",
+  includedMoves: {
+    resetCadence: "billing_cycle",
+    rollover: false
+  },
+  purchasedMoves: {
+    purchaseExecutionAvailable: false,
+    purchaseStatus: "planned",
+    expirationMonths: 12,
+    requiresActiveSubscription: true
+  },
+  zeroMoveActivities: [
+    { id: "manual-editing", label: "Manual editing", moves: 0 },
+    { id: "approvals", label: "Approvals", moves: 0 },
+    { id: "dashboards", label: "Dashboards and reporting views", moves: 0 },
+    { id: "ordinary-workspace-activity", label: "Ordinary workspace activity", moves: 0 }
+  ],
+  weights: [
+    moveWeight("text-campaign-generation", "Text campaign generation", 1, "completed_result", "available", "not_active", "One completed text campaign result counts as one Move after Move balance enforcement is activated."),
+    moveWeight("audience-brief", "Audience brief", 1, "completed_result", "available", "not_active", "One completed audience brief counts as one Move after Move balance enforcement is activated."),
+    moveWeight("automation-execution", "Completed automation execution", 1, "completed_execution", "available", "not_active", "One completed automation execution counts as one Move after Move balance enforcement is activated."),
+    moveWeight("image-generation", "Future image generation", 5, "generated_image", "planned", "planned", "Image generation is future-only and is not currently available or metered in Moves."),
+    moveWeight("rendered-video-minute", "Future rendered video output", 25, "rendered_minute", "planned", "planned", "Rendered-video Move metering is future-only and is not currently available or metered in Moves.")
+  ],
+  packs: [
+    movePack("move-pack-100", 100, 1000),
+    movePack("move-pack-500", 500, 4000),
+    movePack("move-pack-1500", 1500, 10000)
+  ]
+});
+
+export const OPENAI_COST_ACCOUNTING_DEFAULTS = deepFreeze({
+  provider: "openai",
+  model: "gpt-4.1-mini",
+  currency: "usd",
+  rateUnit: "microUSD_per_million_tokens",
+  inputCostPerMillionMicroUsd: 400_000,
+  outputCostPerMillionMicroUsd: 1_600_000,
+  safetyCaps: {
+    scope: "workspace",
+    dailyRequests: 40,
+    monthlyRequests: 500,
+    monthlyTokens: 1_500_000
+  }
+});
+
+const movePackIds = MOVE_METERING_CONFIGURATION.packs.map(pack => pack.id);
+
+function plan({ id, name, monthlyPriceCents, includedMoves, movesPooled = false, description, intendedCustomer, workspaceAllowance, userAllowance, connectionAllowance, extraCapabilities = [], planSupport }) {
   return {
     id,
     name,
@@ -62,29 +132,32 @@ function plan({ id, name, monthlyPriceCents, description, intendedCustomer, work
       workspaceAllowance,
       userAllowance,
       connectionAllowance,
-      allowance("intelligence-credits", "Intelligence Credits", "Allowance pending cost validation", "currently_measured_not_enforced", "AI requests and tokens are measured, but plan-specific credit allowances are not yet defined or enforced. Requests remain subject to server safety and cost controls.", { serverBounded: true }),
+      allowance("moves", "Included Moves", `${includedMoves.toLocaleString("en-US")} Moves / month`, "planned", "The monthly package amount is defined, but Move balance deduction and plan enforcement are not active. Requests remain subject to server safety and cost controls.", { limit: includedMoves, unit: "move", period: "billing_cycle", pooled: movesPooled, serverBounded: true }),
       allowance("media-storage", "Media storage", "Allowance pending cost validation", "currently_measured_not_enforced", "Media assets are counted and per-file upload size is enforced; aggregate storage is not yet plan-gated and remains subject to server limits.", { serverBounded: true }),
       allowance("automation", "Automation capacity", "Allowance pending cost validation", "currently_measured_not_enforced", "Worker jobs are measured, but plan-specific automation allowances are not yet enforced and remain subject to server limits.", { serverBounded: true })
     ],
     capabilities: [...sharedCapabilities, ...extraCapabilities],
     support: planSupport,
-    plannedAddOnIds: ["additional-workspace", "additional-user", "connection-pack", "intelligence-credit-pack", "additional-storage", "automation-capacity"]
+    plannedAddOnIds: ["additional-workspace", "additional-user", "connection-pack", ...movePackIds, "additional-storage", "automation-capacity"]
   };
 }
 
 export const PRICING_CONFIGURATION = deepFreeze({
-  version: "2026-08-02",
+  version: "2026-09-13",
   defaultPlanId: "business",
   currency: "usd",
   billingInterval: "month",
   priceType: "list",
   positioning: "Social Cues brings publishing, responses, campaign coordination, connected business data, media workflows, and audience intelligence into one workspace.",
   classificationLabels,
+  moveMetering: MOVE_METERING_CONFIGURATION,
+  costAccounting: OPENAI_COST_ACCOUNTING_DEFAULTS,
   plans: [
     plan({
       id: "business",
       name: "Business",
-      monthlyPriceCents: 9900,
+      monthlyPriceCents: 5000,
+      includedMoves: 250,
       description: "Operate one brand from a coordinated workspace.",
       intendedCustomer: "One business managing its own brand.",
       workspaceAllowance: allowance("workspaces", "Workspaces", "1 workspace", "currently_measured_not_enforced", "Workspace ownership is enforced; the package count is not yet enforced.", { limit: 1, unit: "workspace" }),
@@ -95,7 +168,8 @@ export const PRICING_CONFIGURATION = deepFreeze({
     plan({
       id: "growth",
       name: "Growth",
-      monthlyPriceCents: 17900,
+      monthlyPriceCents: 10000,
+      includedMoves: 750,
       description: "Coordinate a larger team, more campaigns, and higher operating volume.",
       intendedCustomer: "A business with a team, multiple campaigns, or higher operating volume.",
       workspaceAllowance: allowance("workspaces", "Workspaces", "1 workspace", "currently_measured_not_enforced", "Workspace ownership is enforced; the package count is not yet enforced.", { limit: 1, unit: "workspace" }),
@@ -111,12 +185,14 @@ export const PRICING_CONFIGURATION = deepFreeze({
     plan({
       id: "agency",
       name: "Agency",
-      monthlyPriceCents: 24900,
-      description: "Planned package for coordinating separate client environments without mixing customer data.",
+      monthlyPriceCents: 15000,
+      includedMoves: 1500,
+      movesPooled: true,
+      description: "Package for pooled Move capacity with planned multi-client workspace management.",
       intendedCustomer: "A consultant or small agency managing separate client environments.",
-      workspaceAllowance: allowance("workspaces", "Client workspaces", "Up to 3 isolated client workspaces", "planned", "The current production app enforces tenant isolation but does not yet provide packaged multi-client workspace management.", { limit: 3, unit: "workspace" }),
-      userAllowance: allowance("users", "Users", "5-8 users, pending cost validation", "planned", "A final user allowance and its enforcement are not yet approved.", { minimum: 5, maximum: 8, unit: "user" }),
-      connectionAllowance: allowance("connections", "Connected accounts", "Allowance pending cost validation", "currently_measured_not_enforced", "Connected accounts are measured by workspace; the Agency package count is not yet defined or enforced."),
+      workspaceAllowance: allowance("workspaces", "Client workspaces", "Multi-client workspace management planned", "planned", "The current app enforces tenant isolation but does not yet provide packaged multi-client workspace management."),
+      userAllowance: allowance("users", "Users", "Allowance planned", "planned", "A final Agency user allowance and its enforcement are not yet approved."),
+      connectionAllowance: allowance("connections", "Connected accounts", "Allowance planned", "planned", "A final Agency connected-account allowance and its enforcement are not yet approved."),
       extraCapabilities: [
         capability("client-approvals", "Client approval workflows", "available_not_tier_gated", "Approval workflows are available within an isolated workspace; agency-level oversight is not yet implemented."),
         capability("workspace-attributed-usage", "Workspace-attributed usage", "currently_measured_not_enforced", "Usage records carry workspace attribution, but Agency package limits are not enforced."),
@@ -130,7 +206,7 @@ export const PRICING_CONFIGURATION = deepFreeze({
     { id: "additional-workspace", name: "Additional workspace", status: "planned", price: null },
     { id: "additional-user", name: "Additional user", status: "planned", price: null },
     { id: "connection-pack", name: "Connection pack", status: "planned", price: null },
-    { id: "intelligence-credit-pack", name: "Intelligence Credit pack", status: "planned", price: null },
+    ...MOVE_METERING_CONFIGURATION.packs,
     { id: "additional-storage", name: "Additional storage", status: "planned", price: null },
     { id: "automation-capacity", name: "Additional automation capacity", status: "planned", price: null }
   ],
