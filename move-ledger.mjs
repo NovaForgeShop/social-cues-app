@@ -412,6 +412,40 @@ export function hydrateMoveLedger(value) {
   return ledgerValue(value);
 }
 
+export function reconcilePurchasedMoveLots({ ledger, purchasedLots = [] } = {}) {
+  const canonicalLedger = ledgerValue(ledger);
+  if (!Array.isArray(purchasedLots)) {
+    fail("move_ledger_lot_invalid", "Purchased Move lot metadata is invalid.");
+  }
+
+  const existingById = new Map(canonicalLedger.purchasedLots.map(lot => [lot.lotId, lot]));
+  const additions = [];
+  for (const value of purchasedLots) {
+    const lot = lotValue(value, canonicalLedger.workspaceId);
+    if (lot.remainingMoves !== lot.originalMoves) {
+      fail("move_ledger_lot_invalid", "Purchased Move provenance must describe an unused lot.");
+    }
+    const existing = existingById.get(lot.lotId);
+    if (existing) {
+      if (existing.workspaceId !== lot.workspaceId
+        || existing.acquiredAt !== lot.acquiredAt
+        || existing.expiresAt !== lot.expiresAt
+        || existing.originalMoves !== lot.originalMoves) {
+        fail("move_ledger_lot_conflict", "Purchased Move lot identity conflicts with existing provenance.", 409);
+      }
+      continue;
+    }
+    existingById.set(lot.lotId, lot);
+    additions.push(lot);
+  }
+
+  if (additions.length === 0) return canonicalLedger;
+  return ledgerValue({
+    ...canonicalLedger,
+    purchasedLots: [...canonicalLedger.purchasedLots, ...additions]
+  });
+}
+
 export function summarizeMoveLedger({ ledger, at, subscriptionActive = false } = {}) {
   const canonicalLedger = ledgerValue(ledger);
   const canonicalAt = timestamp(at, "Move ledger summary timestamp");

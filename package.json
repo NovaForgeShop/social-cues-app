@@ -12,6 +12,8 @@
     "test:pricing": "node pricing-packaging.contract.test.mjs",
     "test:pricing-presentation": "node pricing-presentation.contract.test.mjs",
     "test:move-ledger": "node move-ledger.contract.test.mjs",
+    "test:move-ledger-repository": "node move-ledger-repository.contract.test.mjs",
+    "test:move-ledger-application": "node move-ledger-application.contract.test.mjs",
     "test:stripe-database": "node stripe-billing-database.contract.test.mjs",
     "test:stripe-database:runtime": "node stripe-billing-database.runtime.test.mjs",
     "test:stripe-database:postgrest": "node stripe-billing-database.postgrest.test.mjs",

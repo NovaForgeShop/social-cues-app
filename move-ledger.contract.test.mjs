@@ -27,6 +27,7 @@ const {
   definePurchasedMoveLot,
   evaluateMoveAllowance,
   hydrateMoveLedger,
+  reconcilePurchasedMoveLots,
   recordMoveResult,
   rollMoveLedgerCycle,
   summarizeMoveLedger
@@ -197,6 +198,37 @@ test("workspace identity isolates results and purchased lots", () => {
     acquiredAt: "2025-06-01T00:00:00.000Z"
   });
   assertMoveError(() => ledger({ purchasedLots: [foreignLot] }), "move_ledger_workspace_mismatch");
+});
+
+test("trusted purchased-lot provenance adds each immutable lot exactly once", () => {
+  const initial = ledger();
+  const purchased = definePurchasedMoveLot({
+    workspaceId: WORKSPACE_A,
+    lotId: "lot-provenance-0001",
+    moves: 100,
+    acquiredAt: "2026-01-10T00:00:00.000Z"
+  });
+  const added = reconcilePurchasedMoveLots({ ledger: initial, purchasedLots: [purchased] });
+  const replayed = reconcilePurchasedMoveLots({ ledger: added, purchasedLots: [purchased] });
+  assert.equal(added.purchasedLots.length, 1);
+  assert.deepEqual(replayed, added);
+
+  const conflicting = clone(purchased);
+  conflicting.originalMoves = 200;
+  conflicting.remainingMoves = 200;
+  assertMoveError(() => reconcilePurchasedMoveLots({ ledger: added, purchasedLots: [conflicting] }), "move_ledger_lot_conflict");
+
+  const spentProvenance = clone(purchased);
+  spentProvenance.remainingMoves = 99;
+  assertMoveError(() => reconcilePurchasedMoveLots({ ledger: initial, purchasedLots: [spentProvenance] }), "move_ledger_lot_invalid");
+
+  const foreign = definePurchasedMoveLot({
+    workspaceId: WORKSPACE_B,
+    lotId: "lot-provenance-foreign",
+    moves: 100,
+    acquiredAt: "2026-01-10T00:00:00.000Z"
+  });
+  assertMoveError(() => reconcilePurchasedMoveLots({ ledger: initial, purchasedLots: [foreign] }), "move_ledger_workspace_mismatch");
 });
 
 test("stable result identity prevents duplicate debits and rejects conflicting replay", () => {
