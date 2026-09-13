@@ -980,6 +980,42 @@
       font-weight: 850;
     }
     .manychat-connect-form.profile { grid-template-columns: minmax(0, 1fr) minmax(120px, .45fr) auto; }
+    .heygen-workflow {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+    .heygen-workflow-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .heygen-workflow label { display: grid; gap: 6px; min-width: 0; }
+    .heygen-workflow label span { color: var(--muted); font-size: 12px; }
+    .heygen-workflow input,
+    .heygen-workflow select,
+    .heygen-workflow textarea { width: 100%; min-width: 0; }
+    .heygen-workflow textarea { min-height: 92px; resize: vertical; }
+    .heygen-workflow [data-heygen-arg][hidden] { display: none; }
+    .heygen-history {
+      display: grid;
+      gap: 7px;
+      margin-top: 10px;
+    }
+    .heygen-history-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 9px 0;
+      border-top: 1px solid var(--line);
+    }
+    .heygen-history-row:first-child { border-top: 0; }
+    .heygen-history-row strong,
+    .heygen-history-row span { display: block; overflow-wrap: anywhere; }
+    .heygen-history-row span { color: var(--muted); font-size: 11px; margin-top: 3px; }
     .approval-check {
       display: flex;
       align-items: flex-start;
@@ -1041,7 +1077,7 @@
         grid-column: 2;
         justify-self: start;
       }
-      .manychat-connect-form, .manychat-connect-form.profile { grid-template-columns: 1fr; }
+      .manychat-connect-form, .manychat-connect-form.profile, .heygen-workflow-grid { grid-template-columns: 1fr; }
       .choice-grid { grid-template-columns: 1fr 1fr; }
       body[data-current-view="accounts"] .app,
       body[data-current-view="integrations"] .app,
@@ -2947,6 +2983,7 @@
       { id: "discord", name: "Discord", accent: "#5865f2", bestTime: "Always on", connector: "Discord OAuth/API", fit: "Community login, support server, campaign alerts, and private rooms", tags: ["community", "alerts", "support", "server"] },
       { id: "manychat", name: "Manychat", accent: "#00b894", bestTime: "Always on", connector: "Manychat Public API", fit: "Conversation CRM, lead tags, fields, flows, growth tools, and template links", tags: ["CRM", "DM automation", "subscriber tags", "flows"] },
       { id: "elevenlabs", name: "ElevenLabs", accent: "#f2c94c", bestTime: "Creative production", connector: "ElevenAPI", fit: "Voiceovers, transcription, audio cleanup, dubbing, and campaign-ready sound", tags: ["voiceover", "speech", "audio", "dubbing"], accountOnly: true },
+      { id: "heygen", name: "HeyGen", accent: "#15c7b6", bestTime: "Creative production", connector: "Remote MCP OAuth", fit: "Video Agent generation, revisions, avatars, voices, translation, and brand resources", tags: ["video agent", "avatars", "translation", "brand kits"], accountOnly: true },
       { id: "reddit", name: "Reddit", accent: "#ff4500", bestTime: "Community-led", connector: "Devvit / Reddit APIs", fit: "Installed-community moderation, app-attributed replies, and thread signals; Ads API remains separate", tags: ["Devvit", "moderation", "replies", "thread signals"] }
     ];
 
@@ -2969,7 +3006,8 @@
       { id: "etsy", account: "Etsy seller account that owns the shop", prepare: "Authorize the member account that owns the intended Etsy shop. Listing management needs listing scopes, while orders and receipts require transaction access.", actsAs: "The selected Etsy shop", linkage: "The Etsy member signs in; the shop ID is the commerce asset Social Cues uses." },
       { id: "canva", account: "Canva account that owns the brand designs and folders", prepare: "Authorize the account or team containing the intended brand assets, templates, folders, and exports. Select the correct Canva team when the user belongs to more than one.", actsAs: "The authorized Canva user or team asset library", linkage: "Canva Connect account access is separate from the Social Cues Canva developer application." },
       { id: "manychat", account: "Customer-owned Manychat account connected to the intended business channel", prepare: "Connect the correct Facebook Page, Instagram profile, WhatsApp, or other supported channel inside Manychat. Generate a Public API key on an eligible paid plan; use a separate Manychat account when the same channel type represents another business.", actsAs: "The selected Manychat account and connected channel", linkage: "Manychat profile login, Manychat account, connected business channel, and API key are distinct." },
-      { id: "elevenlabs", account: "Customer-owned ElevenLabs workspace with a restricted API key", prepare: "Create a dedicated key with only the required voice and Text to Speech scopes plus a credit quota. Do not enter or share the ElevenLabs account password.", actsAs: "The customer's ElevenLabs workspace and selected voice", linkage: "The restricted key controls capability and spend; Social Cues never needs the customer password." }
+      { id: "elevenlabs", account: "Customer-owned ElevenLabs workspace with a restricted API key", prepare: "Create a dedicated key with only the required voice and Text to Speech scopes plus a credit quota. Do not enter or share the ElevenLabs account password.", actsAs: "The customer's ElevenLabs workspace and selected voice", linkage: "The restricted key controls capability and spend; Social Cues never needs the customer password." },
+      { id: "heygen", account: "Customer-owned HeyGen account connected by OAuth", prepare: "Use the HeyGen account and plan that should supply this workspace's video capabilities and credits, then authorize from Social Cues.", actsAs: "The authenticated HeyGen account returned by the MCP current-user capability", linkage: "HeyGen bills the customer for their own plan and credits; Social Cues stores OAuth tokens server-side and never asks the customer for a HeyGen key." }
     ];
 
     const growthPlan = [
@@ -3080,6 +3118,7 @@
         pinterest: "Developer app pending",
         canva: "MFA / developer integration pending",
         elevenlabs: "Customer restricted API key pending",
+        heygen: "Domain approval and MCP OAuth registration pending",
         mediaEditor: "Needed",
         publishingPath: "Social Cues Queue first"
       },
@@ -3148,6 +3187,15 @@
         backend: "OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY, media worker",
         endpoint: "/api/media/editor/readiness",
         firstUse: "One raw video becomes campaign-ready variants for TikTok, Reels, Shorts, Facebook, X, and Threads."
+      },
+      {
+        id: "heygen",
+        name: "HeyGen Remote MCP",
+        accent: "#15c7b6",
+        role: "Customer-owned video generation, revision, avatars, voices, translation, and immutable campaign-video versions.",
+        backend: "HEYGEN_DOMAIN_WHITELISTED, HEYGEN_OAUTH_CLIENT_ID, optional HEYGEN_OAUTH_CLIENT_SECRET, OAUTH_TOKEN_ENCRYPTION_KEY",
+        endpoint: "/api/heygen/readiness",
+        firstUse: "Connect an entitled workspace by OAuth, verify current-user identity and credits, then use only the MCP tools HeyGen advertises."
       },
       {
         id: "native",
@@ -3567,6 +3615,19 @@
         ]
       },
       {
+        id: "heygen",
+        name: "HeyGen",
+        accent: "#15c7b6",
+        description: "Customer-owned Remote MCP OAuth, advertised video capabilities, workspace jobs, and immutable result versions.",
+        connectRoute: "/api/oauth/heygen/start",
+        checks: [
+          { label: "Readiness", route: "/api/heygen/readiness" },
+          { label: "Account identity", route: "/api/heygen/account" },
+          { label: "Workspace jobs", route: "/api/heygen/jobs" },
+          { label: "Immutable versions", route: "/api/heygen/versions" }
+        ]
+      },
+      {
         id: "reddit",
         name: "Reddit",
         accent: "#ff4500",
@@ -3588,7 +3649,7 @@
     ];
 
     let model = loadModel();
-    let metaState = { loading: SERVER_MODE, error: "", capabilities: [], accounts: [], providerAccounts: null, metaConnection: null, diagnostic: null, xAccount: null, tiktokAccount: null, youtubeAccount: null, twitchAccount: null, pinterestStatus: null, canvaStatus: null, shopifyStatus: null, etsyStatus: null, linkedinStatus: null, linkedinPosts: null, linkedinComments: null, linkedinAnalytics: null, linkedinWebhook: null, patreonStatus: null, patreonIdentity: null, patreonCampaigns: null, patreonMembers: null, patreonPosts: null, patreonWebhook: null, manychatStatus: null, elevenlabsStatus: null, vizardStatus: null, redditStatus: null, adsFundingStatus: null, threadsStatus: null, googleSuite: null, googleBusinessStatus: null, discordStatus: null, discordBotStatus: null, discordCommandsStatus: null, discordCommands: null, discordPreflight: null, services: [], integrationsStatus: null, providerTruth: null, acceptanceLedger: null, connectionLog: null, ownershipQueue: null, providerState: null, publishQueue: null, analyticsSnapshots: null, automationStatus: null, securityAudit: null, capabilityDepth: null, setupFields: null, testPanel: null };
+    let metaState = { loading: SERVER_MODE, error: "", capabilities: [], accounts: [], providerAccounts: null, metaConnection: null, diagnostic: null, xAccount: null, tiktokAccount: null, youtubeAccount: null, twitchAccount: null, pinterestStatus: null, canvaStatus: null, shopifyStatus: null, etsyStatus: null, linkedinStatus: null, linkedinPosts: null, linkedinComments: null, linkedinAnalytics: null, linkedinWebhook: null, patreonStatus: null, patreonIdentity: null, patreonCampaigns: null, patreonMembers: null, patreonPosts: null, patreonWebhook: null, manychatStatus: null, elevenlabsStatus: null, heygenStatus: null, heygenJobs: null, heygenVersions: null, vizardStatus: null, redditStatus: null, adsFundingStatus: null, threadsStatus: null, googleSuite: null, googleBusinessStatus: null, discordStatus: null, discordBotStatus: null, discordCommandsStatus: null, discordCommands: null, discordPreflight: null, services: [], integrationsStatus: null, providerTruth: null, acceptanceLedger: null, connectionLog: null, ownershipQueue: null, providerState: null, publishQueue: null, analyticsSnapshots: null, automationStatus: null, securityAudit: null, capabilityDepth: null, setupFields: null, testPanel: null };
     let onboardingEditMode = false;
     let onboardingFormHydrated = false;
     let onboardingRequirementsSignature = "";
@@ -3679,6 +3740,9 @@
         { id: "elevenlabs-account", name: "ElevenLabs account", provider: "ElevenLabs", route: "/api/elevenlabs/account", readinessRoute: "/api/elevenlabs/readiness", connectPlatform: "elevenlabs", detail: "Customer-owned ElevenLabs account status and spend isolation." },
         { id: "elevenlabs-catalog", name: "ElevenLabs voice catalog", provider: "ElevenLabs", route: "/api/elevenlabs/catalog", readinessRoute: "/api/elevenlabs/readiness", connectPlatform: "elevenlabs", detail: "Voices and models available for campaign voiceover planning." },
         { id: "elevenlabs-usage", name: "ElevenLabs usage meter", provider: "ElevenLabs", route: "/api/elevenlabs/usage", readinessRoute: "/api/elevenlabs/readiness", connectPlatform: "elevenlabs", detail: "The connected workspace's allowance and durable request meter without generating audio." },
+        { id: "heygen-account", name: "HeyGen account", provider: "HeyGen", route: "/api/heygen/account", readinessRoute: "/api/heygen/readiness", connectPlatform: "heygen", detail: "OAuth-connected current-user identity and customer-owned credit state for this workspace." },
+        { id: "heygen-jobs", name: "HeyGen jobs", provider: "HeyGen", route: "/api/heygen/jobs", readinessRoute: "/api/heygen/readiness", connectPlatform: "heygen", detail: "Workspace-isolated MCP generation and revision jobs." },
+        { id: "heygen-versions", name: "HeyGen video versions", provider: "HeyGen", route: "/api/heygen/versions", readinessRoute: "/api/heygen/readiness", connectPlatform: "heygen", detail: "Immutable generated-video versions and lineage for this workspace." },
         { id: "shopify-products", name: "Shopify products", provider: "Shopify", route: "/api/shopify/products", readinessRoute: "/api/shopify/readiness", connectPlatform: "shopify", detail: "Store products available as campaign sources." },
         { id: "etsy-listings", name: "Etsy listings", provider: "Etsy", route: "/api/etsy/listings", readinessRoute: "/api/etsy/readiness", connectPlatform: "etsy", detail: "Marketplace listings available as campaign sources." },
         { id: "google-business", name: "Google Business Profile", provider: "Google", route: "/api/google/business/readiness", readinessRoute: "/api/google/business/readiness", connectPlatform: "google_business", detail: "Managed locations and the currently available Business Profile lanes." },
@@ -8826,7 +8890,7 @@
         const assets = healthResponse.ok
           ? await healthResponse.json()
           : await authedFetch("/api/meta/assets").then(response => response.json());
-        const [diagnosticResponse, metaOAuthResponse, instagramAssetsResponse, threadsResponse, xResponse, tiktokResponse, youtubeResponse, pinterestResponse, canvaResponse, shopifyResponse, etsyResponse, linkedinResponse, linkedinPostsResponse, linkedinCommentsResponse, linkedinAnalyticsResponse, linkedinWebhookResponse, patreonResponse, patreonIdentityResponse, patreonCampaignsResponse, patreonMembersResponse, patreonPostsResponse, patreonWebhookResponse, twitchResponse, discordResponse, discordBotResponse, discordCommandsStatusResponse, discordCommandsResponse, discordPreflightResponse, manychatResponse, elevenlabsResponse, vizardResponse, redditResponse, googleSuiteResponse, googleBusinessResponse, providerTruthResponse, acceptanceLedgerResponse, providerAssetMapResponse, providerAccountsResponse, connectionLogResponse, oauthDebugLogResponse, ownershipQueueResponse, providerStateResponse, publishQueueResponse, analyticsSnapshotsResponse, automationResponse, integrationsResponse, securityResponse, capabilityDepthResponse, setupFieldsResponse, testPanelResponse, metaCommentsResponse, metaMessagesResponse, youtubeCommentsResponse, threadsReactionsResponse, threadsInsightsResponse, xEngagementResponse, xEngagementLiveResponse, discordCommunityResponse, discordMessagesResponse, renderJobsResponse, adsFundingResponse] = await Promise.all([
+        const [diagnosticResponse, metaOAuthResponse, instagramAssetsResponse, threadsResponse, xResponse, tiktokResponse, youtubeResponse, pinterestResponse, canvaResponse, shopifyResponse, etsyResponse, linkedinResponse, linkedinPostsResponse, linkedinCommentsResponse, linkedinAnalyticsResponse, linkedinWebhookResponse, patreonResponse, patreonIdentityResponse, patreonCampaignsResponse, patreonMembersResponse, patreonPostsResponse, patreonWebhookResponse, twitchResponse, discordResponse, discordBotResponse, discordCommandsStatusResponse, discordCommandsResponse, discordPreflightResponse, manychatResponse, elevenlabsResponse, heygenResponse, heygenJobsResponse, heygenVersionsResponse, vizardResponse, redditResponse, googleSuiteResponse, googleBusinessResponse, providerTruthResponse, acceptanceLedgerResponse, providerAssetMapResponse, providerAccountsResponse, connectionLogResponse, oauthDebugLogResponse, ownershipQueueResponse, providerStateResponse, publishQueueResponse, analyticsSnapshotsResponse, automationResponse, integrationsResponse, securityResponse, capabilityDepthResponse, setupFieldsResponse, testPanelResponse, metaCommentsResponse, metaMessagesResponse, youtubeCommentsResponse, threadsReactionsResponse, threadsInsightsResponse, xEngagementResponse, xEngagementLiveResponse, discordCommunityResponse, discordMessagesResponse, renderJobsResponse, adsFundingResponse] = await Promise.all([
           authedFetch("/api/meta/diagnostic-agent"),
           authedFetch("/api/oauth/meta/status"),
           authedFetch("/api/meta/instagram/accounts"),
@@ -8857,6 +8921,9 @@
           authedFetch("/api/discord/verification-preflight"),
           authedFetch("/api/manychat/readiness"),
           authedFetch("/api/elevenlabs/readiness"),
+          authedFetch("/api/heygen/readiness"),
+          authedFetch("/api/heygen/jobs"),
+          authedFetch("/api/heygen/versions"),
           canAccessAdminPanel() ? authedFetch("/api/accounts/vizard/status") : Promise.resolve(null),
           authedFetch("/api/reddit/readiness"),
           authedFetch("/api/google/growth-suite"),
@@ -8925,6 +8992,9 @@
         const discordPreflight = await readRouteJson(discordPreflightResponse);
         const manychatStatus = await readRouteJson(manychatResponse);
         const elevenlabsStatus = await readRouteJson(elevenlabsResponse);
+        const heygenStatus = await readRouteJson(heygenResponse);
+        const heygenJobs = await readRouteJson(heygenJobsResponse);
+        const heygenVersions = await readRouteJson(heygenVersionsResponse);
         const vizardStatus = await readRouteJson(vizardResponse);
         const redditStatus = await readRouteJson(redditResponse);
         const googleSuite = await readRouteJson(googleSuiteResponse);
@@ -9000,6 +9070,9 @@
           discordPreflight,
           manychatStatus,
           elevenlabsStatus,
+          heygenStatus,
+          heygenJobs,
+          heygenVersions,
           vizardStatus,
           redditStatus,
           googleSuite,
@@ -14322,6 +14395,19 @@
       const ledger = providerLedgerRow(providerId) || {};
       const connection = accountConnectionState(account || {});
       const platform = platforms.find(item => item.id === providerId);
+      if (providerId === "heygen") {
+        const status = metaState.heygenStatus || {};
+        const credits = status.credits || {};
+        const supportedTools = Array.isArray(status.supportedTools) ? status.supportedTools : [];
+        const chips = [
+          ["OAuth", status.authenticatedAccount?.connected ? "connected" : "not connected", status.authenticatedAccount?.connected ? "published" : "draft"],
+          ["domain", status.domainApproval?.approved ? "approved" : "pending", status.domainApproval?.approved ? "approved" : "revision"],
+          ["credits", credits.state || "unverified", credits.available ? "approved" : credits.state === "depleted" ? "revision" : "draft"],
+          ["MCP", supportedTools.length ? `${supportedTools.length} tools` : "not discovered", supportedTools.length ? "approved" : "draft"],
+          ["storage", status.durableRepository?.ready ? "durable" : "writes held", status.durableRepository?.ready ? "approved" : "revision"]
+        ];
+        return `<div class="tags provider-state-chips">${chips.map(([label, value, css]) => `<span class="pill ${css}" data-provider-state="${escapeHtml(label)}">${escapeHtml(label)}: ${escapeHtml(value)}</span>`).join("")}</div>`;
+      }
       if (platform?.accountOnly) {
         const status = providerStatusObject(providerId) || {};
         const chips = [
@@ -14409,11 +14495,22 @@
 
     const customerAccountPlatformIds = new Set([
       "facebook", "instagram", "threads", "youtube", "x", "tiktok",
-      "google_growth", "google_business", "pinterest", "canva", "shopify", "etsy", "linkedin", "patreon", "twitch", "discord", "manychat", "elevenlabs", "reddit"
+      "google_growth", "google_business", "pinterest", "canva", "shopify", "etsy", "linkedin", "patreon", "twitch", "discord", "manychat", "elevenlabs", "heygen", "reddit"
     ]);
 
     function providerCustomerSummary(platform = {}, account = null, truth = {}, connection = {}, readiness = {}) {
       const identity = providerPostingIdentityName(platform, account) || platform.name || "Account";
+      if (platform.id === "heygen") {
+        const status = metaState.heygenStatus || {};
+        if (status.authenticatedAccount?.connected) {
+          const remaining = Number(status.credits?.remaining);
+          const creditText = Number.isFinite(remaining) ? ` ${remaining.toLocaleString()} customer-owned credits remain.` : " Credit availability must be verified before generation.";
+          const holdText = status.durableRepository?.ready ? "" : " Hosted generation remains held until durable job persistence is available.";
+          return `${identity} is connected through MCP OAuth.${creditText}${holdText}`;
+        }
+        if (!status.domainApproval?.approved) return "HeyGen connection remains closed until socialcuesapp.com is approved for Remote MCP OAuth.";
+        return readiness.detail || "Connect a customer-owned HeyGen account. Its plan and credits remain with HeyGen.";
+      }
       if (platform.accountOnly) {
         const subscription = account?.profile?.subscription || {};
         const remaining = Number(subscription.charactersRemaining || 0);
@@ -14498,6 +14595,104 @@
           <button data-vizard-refresh>Refresh status</button>
           ${stored ? `<button data-vizard-disconnect>Disconnect</button>` : ""}
         </div>
+      </article>`;
+    }
+
+    const heygenActionFields = Object.freeze({
+      prompt_to_video: ["prompt", "title", "brandKitId"],
+      revise_video: ["prompt", "sessionId", "sourceAssetId", "parentVersionId"],
+      create_variant: ["prompt", "sessionId", "sourceAssetId", "parentVersionId"],
+      avatar_video: ["prompt", "avatarId", "imageAssetId", "voiceId", "title"],
+      template_video: ["templateId", "prompt", "title", "voiceId"],
+      replace_audio: ["sourceAssetId", "audioAssetId", "voiceId", "parentVersionId"],
+      translate_video: ["sourceAssetId", "locale", "glossaryId", "parentVersionId"],
+      remove_fillers: ["sourceAssetId", "parentVersionId"]
+    });
+
+    const heygenRequiredFields = Object.freeze({
+      prompt_to_video: ["prompt"],
+      revise_video: ["prompt", "sessionId"],
+      create_variant: ["sessionId"],
+      avatar_video: ["prompt"],
+      template_video: ["templateId"],
+      replace_audio: ["sourceAssetId"],
+      translate_video: ["sourceAssetId", "locale"],
+      remove_fillers: ["sourceAssetId"]
+    });
+
+    const heygenFieldDefinitions = Object.freeze({
+      prompt: { label: "Prompt or revision", kind: "textarea", max: 4000 },
+      title: { label: "Title", kind: "input", max: 200 },
+      sessionId: { label: "HeyGen session ID", kind: "input", max: 240 },
+      sourceAssetId: { label: "Source asset ID", kind: "input", max: 240 },
+      parentVersionId: { label: "Parent version ID", kind: "input", max: 240 },
+      avatarId: { label: "Avatar ID", kind: "input", max: 240 },
+      imageAssetId: { label: "Image asset ID", kind: "input", max: 240 },
+      voiceId: { label: "Voice ID", kind: "input", max: 240 },
+      templateId: { label: "Template ID", kind: "input", max: 240 },
+      audioAssetId: { label: "Audio asset ID", kind: "input", max: 240 },
+      locale: { label: "Target locale", kind: "input", max: 40 },
+      glossaryId: { label: "Glossary ID", kind: "input", max: 240 },
+      brandKitId: { label: "Brand kit ID", kind: "input", max: 240 }
+    });
+
+    function renderHeygenField(name) {
+      const field = heygenFieldDefinitions[name];
+      if (!field) return "";
+      const control = field.kind === "textarea"
+        ? `<textarea name="${escapeHtml(name)}" maxlength="${field.max}" autocomplete="off"></textarea>`
+        : `<input name="${escapeHtml(name)}" type="text" maxlength="${field.max}" autocomplete="off" spellcheck="false">`;
+      return `<label data-heygen-arg="${escapeHtml(name)}" hidden><span>${escapeHtml(field.label)}</span>${control}</label>`;
+    }
+
+    function renderHeygenHistory() {
+      const jobs = Array.isArray(metaState.heygenJobs?.jobs) ? metaState.heygenJobs.jobs.slice(0, 5) : [];
+      const versions = Array.isArray(metaState.heygenVersions?.versions) ? metaState.heygenVersions.versions.slice(0, 5) : [];
+      const jobRows = jobs.map(job => {
+        const terminal = ["completed", "failed"].includes(job.status);
+        return `<div class="heygen-history-row">
+          <div><strong>${escapeHtml(job.action || "HeyGen job")}</strong><span>${escapeHtml(`${job.status || "unknown"} - ${formatDateTime(job.updatedAt || job.createdAt)}`)}</span></div>
+          ${terminal ? `<span class="pill ${job.status === "completed" ? "published" : "revision"}">${escapeHtml(job.status)}</span>` : `<button data-heygen-poll="${escapeHtml(job.id || "")}">Check</button>`}
+        </div>`;
+      }).join("");
+      const versionRows = versions.map(version => `<div class="heygen-history-row">
+        <div><strong>${escapeHtml(version.title || `Version ${version.versionNumber || ""}`)}</strong><span>${escapeHtml(`immutable version ${version.versionNumber || "?"}${version.parentVersionId ? ` - parent ${version.parentVersionId}` : ""}`)}</span></div>
+        <span class="pill approved">saved</span>
+      </div>`).join("");
+      return `<details class="notice" data-heygen-history>
+        <summary>Jobs and immutable video versions</summary>
+        <div class="heygen-history">
+          ${jobRows || `<div class="empty">No HeyGen jobs in this workspace.</div>`}
+          ${versionRows || `<div class="empty">No HeyGen video versions in this workspace.</div>`}
+        </div>
+      </details>`;
+    }
+
+    function renderHeygenAccountCard(platform, account, connection, readiness) {
+      const status = metaState.heygenStatus || {};
+      const connected = Boolean(status.authenticatedAccount?.connected && connection.connected);
+      const actions = (status.supportedTools || []).filter(item => item.mutates && heygenActionFields[item.id]);
+      const generationReady = Boolean(status.generation?.ready);
+      const identity = account?.displayName || account?.name || "HeyGen";
+      const actionForm = connected && actions.length ? `<form class="heygen-workflow" data-heygen-workflow>
+        <label><span>HeyGen capability</span><select name="action" data-heygen-action>${actions.map(action => `<option value="${escapeHtml(action.id)}">${escapeHtml(action.label || action.id)}</option>`).join("")}</select></label>
+        <div class="heygen-workflow-grid">${Object.keys(heygenFieldDefinitions).map(renderHeygenField).join("")}</div>
+        <div class="variant-tools"><button type="submit" ${generationReady ? "" : "disabled"}>Create immutable version</button></div>
+      </form>` : "";
+      return `<article class="variant account-card" data-account-lane="heygen" style="--accent:${escapeHtml(platform.accent)}">
+        <div class="variant-head">
+          <div><h3>${escapeHtml(connected ? identity : platform.name)}</h3><p>${escapeHtml(providerCustomerSummary(platform, account, {}, connection, readiness))}</p></div>
+          <span class="pill ${escapeHtml(readiness.pill || "draft")}">${escapeHtml(readiness.label || "setup")}</span>
+        </div>
+        ${providerStateChips("heygen", account)}
+        <p class="provider-evidence-line">Customer-owned HeyGen account, plan, and credits. Social Cues uses the fixed Remote MCP OAuth connection only.</p>
+        <div class="variant-tools">
+          ${readiness.connectRoute ? `<button class="connector-route" data-route="${escapeHtml(readiness.connectRoute)}">${connected ? "Reconnect" : "Connect"}</button>` : ""}
+          <button class="connector-route" data-route="/api/heygen/readiness">Refresh status</button>
+          ${connected ? `<button data-heygen-refresh>Refresh account</button><button data-heygen-disconnect>Disconnect</button>` : ""}
+        </div>
+        ${actionForm}
+        ${connected ? renderHeygenHistory() : ""}
       </article>`;
     }
 
@@ -14595,6 +14790,7 @@
         }
         const truth = providerTruthRow(platform.id) || {};
         const { account: laneAccount, connection, known } = accountEvidence(platform);
+        if (platform.id === "heygen") return renderHeygenAccountCard(platform, laneAccount, connection, readiness);
         const connected = Boolean(connection.connected);
         const laneActive = laneAccount?.disabled !== true;
         const primaryAction = readiness.manualConnect ? { label: "", route: "" } : providerPrimaryAction(readiness, connected);
@@ -14797,6 +14993,150 @@
       $$("#socialAccountList [data-vizard-disconnect]").forEach(button => {
         button.addEventListener("click", disconnectVizardConnection);
       });
+      $$("#socialAccountList [data-heygen-workflow]").forEach(form => {
+        form.addEventListener("submit", submitHeygenWorkflow);
+        const select = form.querySelector("[data-heygen-action]");
+        select?.addEventListener("change", () => syncHeygenWorkflowFields(form));
+        syncHeygenWorkflowFields(form);
+      });
+      $$("#socialAccountList [data-heygen-refresh]").forEach(button => {
+        button.addEventListener("click", refreshHeygenAccount);
+      });
+      $$("#socialAccountList [data-heygen-disconnect]").forEach(button => {
+        button.addEventListener("click", disconnectHeygenAccount);
+      });
+      $$("#socialAccountList [data-heygen-poll]").forEach(button => {
+        button.addEventListener("click", pollHeygenJob);
+      });
+    }
+
+    function syncHeygenWorkflowFields(form) {
+      const action = String(form?.elements?.action?.value || "");
+      const visible = new Set(heygenActionFields[action] || []);
+      const required = new Set(heygenRequiredFields[action] || []);
+      form?.querySelectorAll("[data-heygen-arg]").forEach(label => {
+        const name = label.dataset.heygenArg || "";
+        const input = label.querySelector("input, textarea, select");
+        label.hidden = !visible.has(name);
+        if (input) {
+          input.disabled = !visible.has(name);
+          input.required = visible.has(name) && required.has(name);
+        }
+      });
+    }
+
+    async function refreshHeygenState() {
+      const [statusResponse, jobsResponse, versionsResponse] = await Promise.all([
+        authedFetch("/api/heygen/readiness"),
+        authedFetch("/api/heygen/jobs"),
+        authedFetch("/api/heygen/versions")
+      ]);
+      const [heygenStatus, heygenJobs, heygenVersions] = await Promise.all([
+        statusResponse.json().catch(() => ({})),
+        jobsResponse.json().catch(() => ({})),
+        versionsResponse.json().catch(() => ({}))
+      ]);
+      if (!statusResponse.ok || heygenStatus.ok === false) throw new Error(heygenStatus.error || "HeyGen status is unavailable.");
+      if (!jobsResponse.ok || heygenJobs.ok === false) throw new Error(heygenJobs.error || "HeyGen jobs are unavailable.");
+      if (!versionsResponse.ok || heygenVersions.ok === false) throw new Error(heygenVersions.error || "HeyGen versions are unavailable.");
+      metaState = { ...metaState, heygenStatus, heygenJobs, heygenVersions };
+      renderAccounts();
+      return { heygenStatus, heygenJobs, heygenVersions };
+    }
+
+    async function submitHeygenWorkflow(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const submit = form.querySelector('button[type="submit"]');
+      const action = String(form.elements.action?.value || "");
+      const allowedFields = heygenActionFields[action] || [];
+      if (!allowedFields.length) return showAppResult("HeyGen action unavailable", "Refresh account capabilities before creating a video.", "error");
+      const args = {};
+      for (const name of allowedFields) {
+        const value = String(form.elements[name]?.value || "").trim();
+        if (value) args[name] = value;
+      }
+      const missing = (heygenRequiredFields[action] || []).filter(name => !args[name]);
+      if (missing.length) return showAppResult("HeyGen input incomplete", `Complete ${missing.map(name => heygenFieldDefinitions[name]?.label || name).join(", ")}.`, "error");
+      form.dataset.heygenOperationId ||= globalThis.crypto?.randomUUID?.() || uid("heygen-operation");
+      submit.disabled = true;
+      submit.textContent = "Submitting...";
+      try {
+        const response = await authedFetch("/api/heygen/jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, args, operationId: form.dataset.heygenOperationId })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false) throw new Error(data.error || "HeyGen could not start this operation.");
+        form.dataset.heygenOperationId = "";
+        showAppResult(data.replayed ? "HeyGen operation already recorded" : "HeyGen operation submitted", data.job?.status === "completed" ? "An immutable video version was saved." : "The job is recorded and ready for status checks.", "success");
+        await refreshHeygenState();
+      } catch (error) {
+        showAppResult("HeyGen operation failed", error.message, "error");
+      } finally {
+        submit.disabled = !metaState.heygenStatus?.generation?.ready;
+        submit.textContent = "Create immutable version";
+      }
+    }
+
+    async function refreshHeygenAccount(event) {
+      const button = event.currentTarget;
+      button.disabled = true;
+      button.textContent = "Refreshing...";
+      try {
+        const response = await authedFetch("/api/heygen/refresh", { method: "POST" });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false) throw new Error(data.error || "HeyGen account refresh failed.");
+        if (data.account) model.connectedAccounts = mergeConnectedAccountLists(model.connectedAccounts || [], [data.account]);
+        await refreshHeygenState();
+        showAppResult("HeyGen account refreshed", "Identity, credits, and advertised MCP capabilities were reverified.", "success");
+      } catch (error) {
+        showAppResult("HeyGen refresh failed", error.message, "error");
+      } finally {
+        button.disabled = false;
+        button.textContent = "Refresh account";
+      }
+    }
+
+    async function disconnectHeygenAccount(event) {
+      if (!window.confirm("Disconnect this HeyGen account and delete its stored OAuth credentials from this workspace?")) return;
+      const button = event.currentTarget;
+      button.disabled = true;
+      button.textContent = "Disconnecting...";
+      try {
+        const response = await authedFetch("/api/heygen/disconnect", { method: "POST" });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false || data.localCredentialsDeleted !== true) throw new Error(data.error || "HeyGen could not be disconnected safely.");
+        model.connectedAccounts = (model.connectedAccounts || []).filter(account => account.platform !== "heygen");
+        await refreshHeygenState();
+        showAppResult("HeyGen disconnected", "Stored OAuth credentials were deleted from this workspace.", "success");
+      } catch (error) {
+        showAppResult("HeyGen disconnect failed", error.message, "error");
+      } finally {
+        button.disabled = false;
+        button.textContent = "Disconnect";
+      }
+    }
+
+    async function pollHeygenJob(event) {
+      const button = event.currentTarget;
+      const jobId = String(button.dataset.heygenPoll || "");
+      if (!/^[A-Za-z0-9._:-]+$/.test(jobId)) return;
+      button.disabled = true;
+      button.textContent = "Checking...";
+      try {
+        const response = await authedFetch(`/api/heygen/jobs/${encodeURIComponent(jobId)}/poll`, { method: "POST" });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false) throw new Error(data.error || "HeyGen job status is unavailable.");
+        await refreshHeygenState();
+        showAppResult("HeyGen job checked", data.job?.status === "completed" ? "The immutable result version is ready." : `Current status: ${data.job?.status || "processing"}.`, "success");
+      } catch (error) {
+        showAppResult("HeyGen status check failed", error.message, "error");
+      } finally {
+        button.disabled = false;
+        button.textContent = "Check";
+      }
     }
 
     async function refreshVizardConnection() {
@@ -15070,6 +15410,7 @@
         discord: metaState.discordStatus,
         manychat: metaState.manychatStatus,
         elevenlabs: metaState.elevenlabsStatus,
+        heygen: metaState.heygenStatus,
         reddit: metaState.redditStatus,
         threads: metaState.threadsStatus,
         google_growth: metaState.googleSuite,
@@ -15160,6 +15501,37 @@
 
     function providerReadiness(platform) {
       const account = connectedAccountForPlatform(platform.id);
+      if (platform.id === "heygen") {
+        const status = metaState.heygenStatus || {};
+        const connected = Boolean(status.authenticatedAccount?.connected && account);
+        const domainApproved = Boolean(status.domainApproval?.approved);
+        const registrationConfigured = Boolean(status.oauthRegistration?.configured);
+        const durable = Boolean(status.durableRepository?.ready);
+        const generationState = status.generation?.state || "account_not_connected";
+        const label = connected
+          ? generationState === "ready" ? "connected / generation ready" : generationState === "credits_depleted" ? "connected / credits depleted" : generationState === "credits_unverified" ? "connected / verify credits" : generationState === "durable_repository_pending" ? "connected / workflow held" : "connected / MCP gated"
+          : !domainApproved ? "approval pending" : !registrationConfigured ? "needs config" : "needs OAuth";
+        return {
+          label,
+          pill: generationState === "ready" ? "published" : connected ? "approved" : domainApproved && registrationConfigured ? "draft" : "revision",
+          detail: connected
+            ? (durable ? "Use only the MCP capabilities HeyGen advertised for this account. Generated video outputs are recorded as immutable versions." : "The HeyGen account is connected, but hosted generation is held until durable job persistence is available.")
+            : !domainApproved
+              ? "Social Cues will not start HeyGen OAuth until socialcuesapp.com is approved for Remote MCP access."
+              : registrationConfigured
+                ? "Connect a customer-owned HeyGen account through Remote MCP OAuth. Social Cues does not collect HeyGen API keys or resell credits."
+                : "Complete HeyGen Remote MCP OAuth registration for socialcuesapp.com before connecting accounts.",
+          tags: [
+            "Remote MCP OAuth",
+            status.endpoint || "fixed HeyGen MCP endpoint",
+            status.oauthDiscovery?.verified ? "issuer verified" : "runtime discovery required",
+            status.credits?.state ? `credits: ${status.credits.state}` : "credits: unverified",
+            durable ? "durable jobs ready" : "hosted writes held"
+          ],
+          connectRoute: status.connectRoute || status.reconnectRoute || "",
+          statusRoute: "/api/heygen/readiness"
+        };
+      }
       if (platform.id === "tiktok") {
         const tiktokAccount = metaState.tiktokStatus?.connected === false ? null : (metaState.tiktokAccount || account);
         const laneTags = tiktokLaneTags();
@@ -15820,6 +16192,7 @@
         "/api/discord/readiness": "discordStatus",
         "/api/manychat/readiness": "manychatStatus",
         "/api/elevenlabs/readiness": "elevenlabsStatus",
+        "/api/heygen/readiness": "heygenStatus",
         "/api/reddit/readiness": "redditStatus",
         "/api/google/growth-suite": "googleSuite",
         "/api/google/business/readiness": "googleBusinessStatus"

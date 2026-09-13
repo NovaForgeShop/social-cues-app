@@ -49,6 +49,27 @@ import {
   isVizardJsonMediaType,
   normalizeVizardConnectionError
 } from "./vizard-connection-service.mjs";
+import {
+  heyGenReadiness,
+  resolveHeyGenConfiguration
+} from "./heygen-integration.mjs";
+import {
+  createHeyGenOAuthClient,
+  createHeyGenOAuthStateManager,
+  sanitizeHeyGenOAuthError
+} from "./heygen-oauth-client.mjs";
+import {
+  createHeyGenMcpClient,
+  sanitizeHeyGenMcpError
+} from "./heygen-mcp-client.mjs";
+import {
+  createHeyGenMediaWorkflow,
+  sanitizeHeyGenWorkflowError
+} from "./heygen-media-workflow.mjs";
+import {
+  createHeyGenApplication,
+  sanitizeHeyGenApplicationError
+} from "./heygen-application.mjs";
 import http from "node:http";
 import crypto from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -243,6 +264,7 @@ const webPushConfigured = Boolean(vapidPublicKey && vapidPrivateKey && /^mailto:
 if (webPushConfigured) webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
 const mediaRenderWorkerConfigured = /^(1|true|yes|configured)$/i.test(process.env.MEDIA_RENDER_WORKER_CONFIGURED || "");
 const runtimeMode = process.env.VERCEL ? "vercel" : "local";
+const heygenConfiguration = resolveHeyGenConfiguration(process.env);
 const releaseReadinessSchemaVersion = "social-cues.release-readiness.v1";
 const vercelReleaseEnvironments = new Set(["production", "preview", "development"]);
 const releaseReadinessGates = Object.freeze({
@@ -918,6 +940,7 @@ const platforms = [
   { id: "discord", name: "Discord", fit: "Community server, launch announcements, support rooms, and member feedback loops", bestTime: "Always on", tags: ["community", "server", "launch-room", "member-feedback"] },
   { id: "manychat", name: "Manychat", fit: "Conversation automation, subscriber CRM, tags, fields, flows, growth tools, and template distribution", bestTime: "Always on", tags: ["CRM", "DM automation", "subscriber tags", "flows"] },
   { id: "elevenlabs", name: "ElevenLabs", fit: "Voiceovers, transcription, audio cleanup, dubbing, and campaign-ready sound", bestTime: "Creative production", tags: ["voiceover", "speech", "audio", "dubbing"], accountOnly: true },
+  { id: "heygen", name: "HeyGen", fit: "OAuth-connected video generation, revisions, avatars, voices, translation, and brand resources", bestTime: "Creative production", tags: ["video agent", "avatars", "translation", "brand kits"], accountOnly: true },
   { id: "reddit", name: "Reddit", fit: "Community-native apps, post/comment signal, mod tools, and paid Reddit Ads when approved", bestTime: "Community-led", tags: ["Devvit", "subreddit", "comments", "Reddit Ads"] }
 ];
 
@@ -1113,6 +1136,19 @@ const providerServiceStack = [
     firstUse: "/api/elevenlabs/readiness"
   },
   {
+    id: "heygen",
+    name: "HeyGen",
+    purpose: "Customer-owned video generation and revision through the fixed HeyGen Remote MCP OAuth connection.",
+    env: ["HEYGEN_DOMAIN_WHITELISTED", "HEYGEN_OAUTH_CLIENT_ID"],
+    optionalEnv: ["HEYGEN_OAUTH_CLIENT_SECRET", "HEYGEN_MCP_URL", "HEYGEN_INTEGRATION_MODE"],
+    credentialState: {
+      configured: heygenConfiguration.safeReadiness.readyToDiscover,
+      missingEnv: heygenConfiguration.safeReadiness.missingEnv
+    },
+    configured: () => heygenConfiguration.safeReadiness.readyToDiscover,
+    firstUse: "/api/heygen/readiness"
+  },
+  {
     id: "reddit",
     name: "Reddit / Devvit",
     purpose: "Reddit-hosted community app workflows, subreddit post/comment signal, mod-tool style response loops, and Reddit Ads readiness after approval.",
@@ -1214,6 +1250,7 @@ function providerSetupScopes(providerId = "") {
     discord: discordScopes,
     manychat: ["Account Public API key", "Profile Public API key", "External Request webhooks"],
     elevenlabs: ["Text to Speech: Access", "Voices: Read", "Optional audio capabilities only when implemented"],
+    heygen: ["Runtime-discovered MCP scopes", "current-user identity before persistence", "advertised generation tools only"],
     reddit: ["Devvit reddit permission", "community install/playtest", "Ads OAuth and advertiser account"]
   };
   return map[providerId] || [];
@@ -1242,6 +1279,7 @@ function providerSetupFields() {
     "discord",
     "manychat",
     "elevenlabs",
+    "heygen",
     "reddit"
   ];
   const rows = providerIds.map(id => {
@@ -1273,6 +1311,10 @@ function providerSetupFields() {
       id === "canva" ? { label: "Canva product split", value: "Your apps / Apps SDK is separate from Your integrations / Connect API. Social Cues OAuth needs Connect credentials." } : null,
       id === "elevenlabs" ? { label: "Connection method", value: "Create a restricted API key in ElevenAPI > API Keys. Do not share the ElevenLabs login or password." } : null,
       id === "elevenlabs" ? { label: "Minimum key access", value: "Text to Speech: Access; Voices: Read. Set a credit quota before connecting." } : null,
+      id === "heygen" ? { label: "Remote MCP resource", value: heygenConfiguration.safeReadiness.endpoint || "https://mcp.heygen.com/mcp/v1/" } : null,
+      id === "heygen" ? { label: "Domain approval", value: "Register socialcuesapp.com for HeyGen Remote MCP OAuth before enabling account connection." } : null,
+      id === "heygen" ? { label: "OAuth callback URL", value: heygenConfiguration.safeReadiness.callbackUrl } : null,
+      id === "heygen" ? { label: "Customer billing boundary", value: "Each customer uses their own HeyGen account, plan, and credits. Social Cues does not collect HeyGen API keys or resell credits." } : null,
       id === "etsy" ? { label: "Existing app", value: "Etsy portal shows personal app social-cues with Personal Access, callback editor, commercial-access request, webhook portal, and 5 QPS / 5K QPD limit." } : null,
       id === "etsy" ? { label: "Callback URL", value: callbackUrl } : null,
       id === "etsy" ? { label: "Observed OAuth blocker", value: "Etsy says 'The requested redirect URL is not permitted' until the exact callback URL is saved in the Etsy app." } : null,
@@ -1568,6 +1610,7 @@ const providerTruthRoutes = {
   canva: { connect: "/api/oauth/canva/start", status: "/api/canva/readiness" },
   manychat: { status: "/api/manychat/readiness" },
   elevenlabs: { status: "/api/elevenlabs/readiness" },
+  heygen: { connect: "/api/oauth/heygen/start", status: "/api/heygen/readiness" },
   reddit: { status: "/api/reddit/readiness" }
 };
 
@@ -5023,6 +5066,26 @@ function developerPortalAudit() {
         : "Connect a paid customer Account API key from Accounts, then create a Manychat developer app for unique scoped installation keys."
     },
     {
+      id: "heygen",
+      name: "HeyGen",
+      status: heygenConfiguration.safeReadiness.state,
+      ready: heygenConfiguration.safeReadiness.readyToDiscover,
+      callback: heygenConfiguration.safeReadiness.callbackUrl,
+      evidence: "Social Cues uses the fixed HeyGen Remote MCP resource, runtime OAuth discovery, PKCE S256, and authenticated current-user verification before storing a workspace connection.",
+      blocker: heygenConfiguration.safeReadiness.readyToDiscover
+        ? "No application-configuration blocker detected; each customer still needs their own eligible HeyGen account, plan, credits, and advertised MCP capabilities."
+        : heygenConfiguration.safeReadiness.state === "domain_approval_pending"
+          ? "HeyGen Remote MCP OAuth remains disabled until socialcuesapp.com is approved."
+          : heygenConfiguration.safeReadiness.state === "oauth_registration_pending"
+            ? "HeyGen OAuth client registration is not configured for socialcuesapp.com."
+            : heygenConfiguration.safeReadiness.state === "token_encryption_missing"
+              ? "Hosted OAuth token encryption is not configured."
+              : "HeyGen Remote MCP configuration is invalid and remains fail-closed.",
+      nextAction: heygenConfiguration.safeReadiness.readyToDiscover
+        ? "Connect an entitled workspace account and verify current-user, credits, and the runtime-advertised MCP tools."
+        : "Complete HeyGen domain approval and OAuth client registration, then rerun readiness without submitting customer credentials."
+    },
+    {
       id: "reddit",
       name: "Reddit / Devvit",
       status: redditDevvitProjectReady() ? (redditCommercialApproved ? "devvit-project-ready" : "commercial-approval-needed") : redditDevvitCliTokenStored() ? "cli-login-ready-project-needed" : "fresh-code-needed",
@@ -6637,7 +6700,7 @@ function workspaceModelIdForUser(user = {}) {
 
 const workspaceScopedCollectionKeys = ["campaigns", "quickPosts", "actions", "proof", "mediaAssets", "mediaRenderJobs", "publishQueue", "analyticsSnapshots", "providerStateSnapshots", "activity"];
 const serverRetainedWorkspaceCollectionKeys = new Set(["mediaAssets", "mediaRenderJobs", "publishQueue", "analyticsSnapshots", "providerStateSnapshots"]);
-const sharedRegistryKeys = ["authUsers", "authPromoClaims", "deviceSessions", "oauthStates", "oauthEvents", "metaDeletionRequests", "billing", "integrations"];
+const sharedRegistryKeys = ["authUsers", "authPromoClaims", "deviceSessions", "oauthStates", "heygenOAuthStates", "oauthEvents", "metaDeletionRequests", "billing", "integrations"];
 
 function cloneJson(value) {
   return JSON.parse(JSON.stringify(value ?? null));
@@ -6666,6 +6729,7 @@ function blankClientIntegrations() {
     twitch: "Developer app setup pending",
     pinterest: "Developer app pending",
     canva: "MFA / developer integration pending",
+    heygen: "Domain approval and MCP OAuth registration pending",
     elevenlabs: "Customer restricted API key pending",
     mediaEditor: "Needed",
     publishingPath: "Social Cues Queue first"
@@ -6870,6 +6934,7 @@ function safeWorkspaceSnapshot(model, user = {}) {
   delete safe.authUsers;
   delete safe.authPromoClaims;
   delete safe.oauthStates;
+  delete safe.heygenOAuthStates;
   delete safe.oauthEvents;
   delete safe.metaDeletionRequests;
   safe.workspaceModel = {
@@ -7430,6 +7495,7 @@ function providerCacheAliases(platform = "") {
     twitch: ["twitch"],
     discord: ["discord"],
     manychat: ["manychat"],
+    heygen: ["heygen"],
     reddit: ["reddit"]
   };
   return [...new Set([key, ...(aliases[key] || [])].filter(Boolean))];
@@ -10496,6 +10562,44 @@ function decryptedToken(record) {
   } catch {
     return "";
   }
+}
+
+const heygenOAuthClient = createHeyGenOAuthClient({
+  fetchImpl: (...args) => fetch(...args)
+});
+
+const heygenOAuthStateManager = createHeyGenOAuthStateManager({
+  secret: authSessionSecret || oauthTokenEncryptionKeyMaterial(),
+  protectVerifier: encryptedToken,
+  unprotectVerifier: decryptedToken
+});
+
+function heygenApplicationFor(persistStateLedger = async () => {}) {
+  return createHeyGenApplication({
+    configuration: heygenConfiguration,
+    oauthClient: heygenOAuthClient,
+    mcpClientFactory: accessToken => createHeyGenMcpClient({
+      accessToken,
+      fetchImpl: (...args) => fetch(...args)
+    }),
+    stateManager: heygenOAuthStateManager,
+    protectToken: encryptedToken,
+    unprotectToken: decryptedToken,
+    persistStateLedger
+  });
+}
+
+function publicHeygenFailure(error) {
+  if (error?.name === "HeyGenWorkflowError") return sanitizeHeyGenWorkflowError(error);
+  if (error?.name === "HeyGenApplicationError") return sanitizeHeyGenApplicationError(error);
+  if (error?.name === "HeyGenOAuthError") return sanitizeHeyGenOAuthError(error);
+  if (error?.name === "HeyGenMcpError") return sanitizeHeyGenMcpError(error);
+  return { ok: false, code: "heygen_unavailable", error: "HeyGen is temporarily unavailable.", status: 503 };
+}
+
+function heygenJsonFailure(res, error) {
+  const failure = publicHeygenFailure(error);
+  return json(res, failure.status, { ok: false, code: failure.code, error: failure.error });
 }
 
 function cleanOAuthCode(code = "") {
@@ -14507,6 +14611,63 @@ function stampWorkspaceOwnership(item, user = {}, workspaceId = workspaceIdForUs
   return item;
 }
 
+function heygenAccountForUser(model = {}, user = {}) {
+  const workspaceId = workspaceIdForUser(user);
+  return (model.connectedAccounts || []).find(account => account.platform === "heygen"
+    && account.oauthProvider === "heygen"
+    && String(account.ownerUserId || account.createdBy || "") === String(user.id || "")
+    && String(account.workspaceId || "") === workspaceId) || null;
+}
+
+async function heygenRequestContext(req) {
+  const sharedModel = await getModel();
+  const session = await sessionFromRequest(sharedModel, req);
+  if (!session?.user) return { ok: false, status: 401, error: "Sign in before using HeyGen." };
+  if (!hasActiveAppAccess(session.user)) {
+    return { ok: false, status: 402, error: "An active Social Cues subscription is required before using HeyGen." };
+  }
+  const model = await modelForSession(session, sharedModel);
+  ensureUserWorkspace(model, session.user);
+  await ensureWorkspaceBootstrap(model, session.user);
+  return {
+    ok: true,
+    sharedModel,
+    model,
+    session,
+    actorId: session.user.id,
+    workspaceId: workspaceIdForUser(session.user)
+  };
+}
+
+async function heygenWorkflowActor(actorId, workspaceId) {
+  const sharedModel = await loadModel();
+  const user = (sharedModel.authUsers || []).find(item => String(item.id || "") === String(actorId || ""));
+  if (!user || workspaceIdForUser(user) !== String(workspaceId || "") || !hasActiveAppAccess(user)) return null;
+  const model = await modelForSession({ user }, sharedModel);
+  return { sharedModel, model, user };
+}
+
+const heygenWorkflowApplication = heygenApplicationFor();
+const heygenMediaWorkflow = createHeyGenMediaWorkflow({
+  mutationsEnabled: runtimeMode !== "vercel",
+  async authorize({ actorId, workspaceId }) {
+    return Boolean(await heygenWorkflowActor(actorId, workspaceId));
+  },
+  async loadModel({ actorId, workspaceId }) {
+    const context = await heygenWorkflowActor(actorId, workspaceId);
+    if (!context) throw new Error("HeyGen workspace access is unavailable.");
+    return context.model;
+  },
+  async saveModel(model, { actorId, workspaceId }) {
+    const user = (model.authUsers || []).find(item => String(item.id || "") === String(actorId || ""));
+    if (!user || workspaceIdForUser(user) !== String(workspaceId || "")) throw new Error("HeyGen workspace access is unavailable.");
+    await saveModelForUser(model, user);
+  },
+  async invoke({ account, action, args, operationId }) {
+    return heygenWorkflowApplication.invokeAccountAction(account, { action, args, operationId });
+  }
+});
+
 function workspaceSeedItemId(item, key, index, user = {}) {
   const base = item?.id || `${key}-seed-${index + 1}`;
   return `${base}-${user.id || "alpha"}`;
@@ -14652,6 +14813,7 @@ function publicModel(model, session = null) {
     safe.metaHealth.assetSync.synced = safe.metaHealth.assetSync.synced.map(publicAccount);
   }
   delete safe.oauthStates;
+  delete safe.heygenOAuthStates;
   delete safe.oauthEvents;
   if (Array.isArray(safe.metaDeletionRequests)) {
     safe.metaDeletionRequests = safe.metaDeletionRequests.map(item => ({
@@ -18730,20 +18892,22 @@ async function route(req, res) {
       const oauthModel = await getModel();
       const oauthCallbackMatch = url.pathname.match(/^\/api\/oauth\/([^/]+)\/callback$/);
       const callbackProvider = oauthCallbackMatch[1];
-      const callbackState = url.searchParams.get("state") || "";
-      const localStateRecord = localWorkspacePersistence && callbackState
-        ? (oauthModel.oauthStates || []).find(item => item.provider === callbackProvider && item.state === callbackState)
-        : null;
-      recordOAuthCallbackIngress(oauthModel, url, req);
-      if (!localWorkspacePersistence) {
-        await saveModel(oauthModel);
-      } else if (localStateRecord) {
-        const ingressSession = await sessionFromRequest(oauthModel, req);
-        const stateOwnerUserId = String(localStateRecord.ownerUserId || localStateRecord.userId || "");
-        const stateWorkspaceId = String(localStateRecord.workspaceId || "");
-        const sessionWorkspaceId = ingressSession?.user ? String(workspaceIdForUser(ingressSession.user)) : "";
-        if (stateOwnerUserId === String(ingressSession?.user?.id || "")
-          && (!stateWorkspaceId || stateWorkspaceId === sessionWorkspaceId)) await saveModel(oauthModel);
+      if (callbackProvider !== "heygen") {
+        const callbackState = url.searchParams.get("state") || "";
+        const localStateRecord = localWorkspacePersistence && callbackState
+          ? (oauthModel.oauthStates || []).find(item => item.provider === callbackProvider && item.state === callbackState)
+          : null;
+        recordOAuthCallbackIngress(oauthModel, url, req);
+        if (!localWorkspacePersistence) {
+          await saveModel(oauthModel);
+        } else if (localStateRecord) {
+          const ingressSession = await sessionFromRequest(oauthModel, req);
+          const stateOwnerUserId = String(localStateRecord.ownerUserId || localStateRecord.userId || "");
+          const stateWorkspaceId = String(localStateRecord.workspaceId || "");
+          const sessionWorkspaceId = ingressSession?.user ? String(workspaceIdForUser(ingressSession.user)) : "";
+          if (stateOwnerUserId === String(ingressSession?.user?.id || "")
+            && (!stateWorkspaceId || stateWorkspaceId === sessionWorkspaceId)) await saveModel(oauthModel);
+        }
       }
     } catch (error) {
       oauthRuntimeLog("unknown", "callback_ingress_log_failed", { error: error.message });
@@ -19677,6 +19841,254 @@ async function route(req, res) {
         : `Configure ${twitchApplicationCredentials.missingEnv.join(" and ")} before Twitch OAuth can start.`,
       securityModel: "Twitch access depends on OAuth scopes and channel ownership; analytics and subscriber scopes require the broadcaster's consent."
     });
+  }
+
+  if (url.pathname === "/api/heygen/readiness" && req.method === "GET") {
+    const context = await heygenRequestContext(req);
+    if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
+    const account = heygenAccountForUser(context.model, context.session.user);
+    return json(res, 200, heyGenReadiness({
+      configuration: heygenConfiguration,
+      account,
+      durableRepositoryReady: runtimeMode !== "vercel"
+    }));
+  }
+
+  if (url.pathname === "/api/heygen/account" && req.method === "GET") {
+    const context = await heygenRequestContext(req);
+    if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
+    const account = heygenAccountForUser(context.model, context.session.user);
+    return json(res, 200, {
+      ok: true,
+      connected: Boolean(account && providerAccountConnectionState(account).connected),
+      account: account ? publicAccount(account) : null
+    });
+  }
+
+  if (url.pathname === "/api/oauth/heygen/start" && req.method === "GET") {
+    const context = await heygenRequestContext(req);
+    if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
+    context.model.heygenOAuthStates = Array.isArray(context.model.heygenOAuthStates) ? context.model.heygenOAuthStates : [];
+    const application = heygenApplicationFor(async () => saveModelForUser(context.model, context.session.user));
+    try {
+      const started = await application.beginOAuth({
+        ledger: context.model.heygenOAuthStates,
+        actorId: context.actorId,
+        workspaceId: context.workspaceId
+      });
+      res.writeHead(302, { Location: started.authorizationUrl });
+      return res.end();
+    } catch (error) {
+      return heygenJsonFailure(res, error);
+    }
+  }
+
+  if (url.pathname === "/api/oauth/heygen/callback" && req.method === "GET") {
+    const context = await heygenRequestContext(req);
+    if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
+    context.model.heygenOAuthStates = Array.isArray(context.model.heygenOAuthStates) ? context.model.heygenOAuthStates : [];
+    const application = heygenApplicationFor(async () => saveModelForUser(context.model, context.session.user));
+    const state = url.searchParams.get("state") || "";
+    const code = cleanOAuthCode(url.searchParams.get("code") || "");
+    const providerStopped = Boolean(url.searchParams.get("error"));
+    try {
+      if (providerStopped || !code) {
+        await application.cancelOAuth({
+          ledger: context.model.heygenOAuthStates,
+          actorId: context.actorId,
+          workspaceId: context.workspaceId,
+          state
+        });
+        const message = providerStopped
+          ? "HeyGen connection was not authorized. Start again from Accounts when ready."
+          : "HeyGen returned without an authorization code. Start the connection again.";
+        return html(res, 400, oauthReturnBody("HeyGen", message, {
+          provider: "heygen",
+          status: "error",
+          title: "HeyGen connection stopped"
+        }), "/app");
+      }
+      const completed = await application.completeOAuth({
+        ledger: context.model.heygenOAuthStates,
+        actorId: context.actorId,
+        workspaceId: context.workspaceId,
+        state,
+        code
+      });
+      context.model.connectedAccounts = Array.isArray(context.model.connectedAccounts) ? context.model.connectedAccounts : [];
+      const existingIndex = context.model.connectedAccounts.findIndex(account => account.platform === "heygen"
+        && ownedByUser(account, context.actorId)
+        && String(account.workspaceId || "") === context.workspaceId);
+      if (existingIndex >= 0) {
+        completed.account.id = context.model.connectedAccounts[existingIndex].id || completed.account.id;
+        context.model.connectedAccounts[existingIndex] = completed.account;
+      } else {
+        context.model.connectedAccounts.push(completed.account);
+      }
+      context.model.integrations = context.model.integrations || {};
+      context.model.integrations.heygen = "HeyGen MCP OAuth connected and current-user identity verified";
+      renewOAuthReturnSession(res, context.sharedModel, context.model, context.session.user, {
+        provider: "heygen",
+        platform: "heygen",
+        ownerUserId: context.actorId,
+        workspaceId: context.workspaceId,
+        state
+      }, req, context.session);
+      if (context.model !== context.sharedModel && !localWorkspacePersistence) await saveModel(context.sharedModel);
+      await saveModelForUser(context.model, context.session.user);
+      const persistence = await confirmPersistedProviderAccount(
+        context.session.user,
+        "heygen",
+        completed.account.providerAccountId,
+        context.sharedModel,
+        completed.account
+      );
+      if (!persistence.ok && !persistence.pending && !persistence.skipped) {
+        return json(res, 503, {
+          ok: false,
+          code: "heygen_persistence_unverified",
+          error: "HeyGen authorized, but secure account persistence could not be verified. Reconnect before using video tools."
+        });
+      }
+      return html(res, 200, oauthReturnBody("HeyGen", "Your HeyGen account is connected through MCP OAuth.", {
+        provider: "heygen",
+        status: "connected",
+        title: "HeyGen connected"
+      }), "/app");
+    } catch (error) {
+      const failure = publicHeygenFailure(error);
+      return html(res, failure.status, oauthReturnBody("HeyGen", failure.error, {
+        provider: "heygen",
+        status: "error",
+        title: "HeyGen connection unavailable"
+      }), "/app");
+    }
+  }
+
+  if (url.pathname === "/api/heygen/refresh" && req.method === "POST") {
+    const context = await heygenRequestContext(req);
+    if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
+    const account = heygenAccountForUser(context.model, context.session.user);
+    if (!account) return json(res, 409, { ok: false, code: "heygen_account_required", error: "Connect HeyGen before refreshing access." });
+    try {
+      const refreshed = await heygenApplicationFor().refreshAccount(account);
+      const index = context.model.connectedAccounts.indexOf(account);
+      context.model.connectedAccounts[index] = refreshed;
+      await saveModelForUser(context.model, context.session.user);
+      return json(res, 200, {
+        ok: true,
+        account: publicAccount(refreshed),
+        readiness: heyGenReadiness({ configuration: heygenConfiguration, account: refreshed, durableRepositoryReady: runtimeMode !== "vercel" })
+      });
+    } catch (error) {
+      return heygenJsonFailure(res, error);
+    }
+  }
+
+  if (url.pathname === "/api/heygen/reconnect" && req.method === "POST") {
+    const context = await heygenRequestContext(req);
+    if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
+    return json(res, 200, { ok: true, connectRoute: "/api/oauth/heygen/start" });
+  }
+
+  if (url.pathname === "/api/heygen/disconnect" && req.method === "POST") {
+    const context = await heygenRequestContext(req);
+    if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
+    const account = heygenAccountForUser(context.model, context.session.user);
+    let remoteRevocation = { attempted: false, state: "remote_revocation_unavailable" };
+    if (account) {
+      try {
+        ({ remoteRevocation } = await heygenApplicationFor().disconnect(account));
+      } catch {
+        remoteRevocation = { attempted: true, state: "remote_revocation_failed" };
+      }
+    }
+    context.model.connectedAccounts = (context.model.connectedAccounts || []).filter(item => item !== account);
+    context.model.integrations = context.model.integrations || {};
+    context.model.integrations.heygen = "HeyGen disconnected; local credentials deleted";
+    await saveModelForUser(context.model, context.session.user);
+    await clearNormalizedProviderRowsForPlatform(context.session.user, "heygen");
+    return json(res, 200, {
+      ok: true,
+      connected: false,
+      localCredentialsDeleted: true,
+      remoteRevocation
+    });
+  }
+
+  if (url.pathname === "/api/heygen/jobs" && req.method === "GET") {
+    const context = await heygenRequestContext(req);
+    if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
+    try {
+      const jobs = await heygenMediaWorkflow.listJobs(context);
+      return json(res, 200, { ok: true, jobs });
+    } catch (error) {
+      return heygenJsonFailure(res, error);
+    }
+  }
+
+  if (url.pathname === "/api/heygen/jobs" && req.method === "POST") {
+    const context = await heygenRequestContext(req);
+    if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
+    try {
+      const input = await bodyJson(req);
+      if (!input || typeof input !== "object" || Array.isArray(input)
+        || Object.keys(input).some(key => !["action", "args", "operationId"].includes(key))) {
+        return json(res, 400, { ok: false, code: "heygen_input_invalid", error: "HeyGen generation input is invalid." });
+      }
+      const result = await heygenMediaWorkflow.createJob(context, input);
+      return json(res, result.replayed ? 200 : 202, result);
+    } catch (error) {
+      return heygenJsonFailure(res, error);
+    }
+  }
+
+  const heygenPollMatch = url.pathname.match(/^\/api\/heygen\/jobs\/([A-Za-z0-9._:-]+)\/poll$/);
+  if (heygenPollMatch && req.method === "POST") {
+    const context = await heygenRequestContext(req);
+    if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
+    try {
+      return json(res, 200, await heygenMediaWorkflow.pollJob(context, heygenPollMatch[1]));
+    } catch (error) {
+      return heygenJsonFailure(res, error);
+    }
+  }
+
+  const heygenJobMatch = url.pathname.match(/^\/api\/heygen\/jobs\/([A-Za-z0-9._:-]+)$/);
+  if (heygenJobMatch && req.method === "GET") {
+    const context = await heygenRequestContext(req);
+    if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
+    try {
+      const jobs = await heygenMediaWorkflow.listJobs(context);
+      const job = jobs.find(item => item.id === heygenJobMatch[1]);
+      return job ? json(res, 200, { ok: true, job }) : json(res, 404, { ok: false, error: "That HeyGen job is not available in this workspace." });
+    } catch (error) {
+      return heygenJsonFailure(res, error);
+    }
+  }
+
+  if (url.pathname === "/api/heygen/versions" && req.method === "GET") {
+    const context = await heygenRequestContext(req);
+    if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
+    try {
+      const versions = await heygenMediaWorkflow.listVersions(context);
+      return json(res, 200, { ok: true, versions });
+    } catch (error) {
+      return heygenJsonFailure(res, error);
+    }
+  }
+
+  const heygenVersionMatch = url.pathname.match(/^\/api\/heygen\/versions\/([A-Za-z0-9._:-]+)$/);
+  if (heygenVersionMatch && req.method === "GET") {
+    const context = await heygenRequestContext(req);
+    if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
+    try {
+      const versions = await heygenMediaWorkflow.listVersions(context);
+      const version = versions.find(item => item.id === heygenVersionMatch[1]);
+      return version ? json(res, 200, { ok: true, version }) : json(res, 404, { ok: false, error: "That HeyGen version is not available in this workspace." });
+    } catch (error) {
+      return heygenJsonFailure(res, error);
+    }
   }
 
   if (url.pathname === "/api/meta/use-cases" && req.method === "GET") {
