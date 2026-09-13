@@ -1354,8 +1354,6 @@ await mkdir(httpDataDir, { recursive: true });
 await writeExternalGuard(httpGuardPath);
 const httpPort = await availablePort();
 const httpBase = `http://127.0.0.1:${httpPort}`;
-const HTTP_PROMO_A = "LM1-OWNER-A";
-const HTTP_PROMO_B = "LM1-OWNER-B";
 const HTTP_PASSWORD_A = "lm1-owner-a-password-2026";
 const HTTP_PASSWORD_B = "lm1-owner-b-password-2026";
 const HTTP_SESSION_SECRET = "lm1-synthetic-session-secret-2026-not-production";
@@ -1370,10 +1368,6 @@ const httpChildEnvironment = hermeticEnvironment({
   PUBLIC_APP_URL: "https://socialcuesapp.com",
   SOCIAL_CUES_DATA_DIR: httpDataDir,
   SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: httpExternalLog,
-  SOCIAL_CUES_PROMO_CODES: JSON.stringify([
-    { code: HTTP_PROMO_A, label: "LM1 owner A", days: 1, active: true },
-    { code: HTTP_PROMO_B, label: "LM1 owner B", days: 1, active: true }
-  ]),
   OAUTH_TOKEN_ENCRYPTION_KEY: HTTP_ENCRYPTION_KEY
 });
 let httpStdout = "";
@@ -1393,9 +1387,8 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       name: "LM1 Local Owner A",
-      email: "lm1-owner-a@example.test",
+      email: "barton.cory.m+lm1-owner-a@gmail.com",
       password: HTTP_PASSWORD_A,
-      promoCode: HTTP_PROMO_A,
       workspaceName: "LM1 Local Workspace A"
     })
   });
@@ -1435,9 +1428,8 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       name: "LM1 Local Owner B",
-      email: "lm1-owner-b@example.test",
+      email: "barton.cory.m+lm1-owner-b@gmail.com",
       password: HTTP_PASSWORD_B,
-      promoCode: HTTP_PROMO_B,
       workspaceName: "LM1 Local Workspace B"
     })
   });

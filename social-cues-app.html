@@ -4372,7 +4372,7 @@
         document.body.classList.add("signup-mode");
         $$(".create-only").forEach(item => item.classList.remove("hidden"));
         $("#authTitle").textContent = "Create your Social Cues account";
-        $("#authHelp").textContent = "Create account can collect setup details. Alpha signup is invite-only: use the owner email or an active promo code for 120-day highest-tier tester access.";
+        $("#authHelp").textContent = "Create account can collect setup details. Alpha signup is invite-only: use the owner email or an active Alpha code. Alpha discount: 20% off forever; the code does not unlock the app.";
         $("#loginButton").textContent = "Back to login";
         $("#loginButton").classList.remove("primary");
         $("#loginButton").classList.add("secondary");
@@ -12576,7 +12576,7 @@
           </div>
           <div class="tags">
             <span class="tag">${workspace.signedIn ? "signed in" : "signed out"}</span>
-            <span class="tag">${workspace.appAccess ? "paid/test access" : "access blocked"}</span>
+            <span class="tag">${workspace.appAccess ? "subscription access" : "access blocked"}</span>
             <span class="tag">${summary.connected || 0}/${summary.providers || 0} connected</span>
             <span class="tag">${summary.tokenStored || 0} tokens</span>
             <span class="tag">${summary.owned || 0} owned</span>
@@ -13568,13 +13568,16 @@
       const movePolicy = pricing?.moves
         ? `<div class="notice"><strong>Moves:</strong> ${escapeHtml(pricing.moves.definition)} Included Moves reset each billing cycle and do not roll over. Purchased Moves are planned to remain available for ${escapeHtml(pricing.moves.purchasedMoves?.expirationMonths || 12)} months while the subscription remains active.</div><div class="notice"><strong>Zero-Move activity:</strong> ${escapeHtml(zeroMoveActivities)}.</div>${movePacks ? `<div class="notice"><strong>Planned Move packs:</strong> ${movePacks}. Purchase remains unavailable until Stripe billing is verified.</div>` : ""}`
         : "";
+      const standardExperiences = (pricing?.standardExperiences || []).map(item => `<div class="notice"><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.detail)}</div>`).join("");
+      const alphaPolicy = pricing?.alphaDiscount || null;
       $("#planList").innerHTML = plans.length
-        ? `${planCards}${movePolicy}<div class="notice"><strong>Third-party charges:</strong> ${escapeHtml(pricing.thirdPartyChargesDisclosure)}</div>${providerRows}<div class="notice"><strong>Agency data:</strong> ${escapeHtml(pricing.agencyDataPolicy)}</div>`
+        ? `${standardExperiences}${alphaPolicy ? `<div class="notice"><strong>${escapeHtml(alphaPolicy.label)}</strong> Applies to Business, Growth, or Agency after an eligible account starts a normal subscription. An Alpha code does not grant app access or a free period. Checkout remains unavailable.</div>` : ""}${planCards}${movePolicy}<div class="notice"><strong>Third-party charges:</strong> ${escapeHtml(pricing.thirdPartyChargesDisclosure)}</div>${providerRows}<div class="notice"><strong>Agency data:</strong> ${escapeHtml(pricing.agencyDataPolicy)}</div>`
         : customerSurfaceState.pricingError
           ? `<div class="empty">Pricing unavailable. No fallback price is shown.</div>`
           : `<div class="empty">Open Billing or refresh to load the server-controlled pricing catalog.</div>`;
       const statusElement = $("#billingAccountStatus");
       const entitlement = customerSurfaceState.entitlement?.entitlement || model.currentUser?.entitlement || null;
+      const alphaDiscount = customerSurfaceState.entitlement?.alphaDiscount || model.currentUser?.alphaDiscount || null;
       const readiness = customerSurfaceState.billingStatus;
       if (!statusElement) return;
       if (!entitlement && !readiness) return statusElement.innerHTML = `<div class="empty">Refresh to load this account's billing status.</div>`;
@@ -13591,6 +13594,7 @@
             ${entitlement?.expiresAt ? `<span class="tag">Until ${escapeHtml(new Date(entitlement.expiresAt).toLocaleDateString())}</span>` : ""}
             ${readiness?.mode ? `<span class="tag">Billing lane: ${escapeHtml(readiness.mode)}</span>` : ""}
           </div>
+          ${alphaDiscount?.eligible ? `<p><strong>${escapeHtml(alphaDiscount.label)}</strong> Choose Business, Growth, or Agency when checkout becomes available.</p>` : ""}
         </article>`;
     }
 

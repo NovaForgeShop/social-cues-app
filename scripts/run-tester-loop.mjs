@@ -18,12 +18,6 @@ const metaCredentialEnvNames = new Set([
   'META_APP_SECRET', 'META_CLIENT_SECRET', 'FACEBOOK_APP_SECRET', 'FACEBOOK_CLIENT_SECRET', 'FB_APP_SECRET',
   'E2E_META_APP_ID', 'E2E_META_APP_SECRET'
 ].map(name => name.toLowerCase()));
-const localPromoCodes = JSON.stringify([
-  { code: 'SC-LOCAL-BEACON-4M7Q', label: 'Local test account 1', days: 120, active: true },
-  { code: 'SC-LOCAL-SIGNAL-9X2P', label: 'Local test account 2', days: 120, active: true },
-  { code: 'SC-LOCAL-PULSE-6R8N', label: 'Local test account 3', days: 120, active: true },
-  { code: 'SC-LOCAL-LAUNCH-3V5K', label: 'Local test account 4', days: 120, active: true }
-]);
 const playwrightBin = process.platform === 'win32'
   ? 'node_modules\\.bin\\playwright.cmd'
   : 'node_modules/.bin/playwright';
@@ -103,8 +97,8 @@ function summarizeProviderFixture(events) {
 
 function providerFixtureSummaryIsValid(summary) {
   const runsTesterLoop = !testFiles.length || testFiles.some(file => /social-cues-tester-loop\.spec\.ts$/i.test(file));
-  const expectedHits = runsTesterLoop ? 4 : 0;
-  const expectedPerCase = runsTesterLoop ? 2 : 0;
+  const expectedPerCase = runsTesterLoop ? projects.length : 0;
+  const expectedHits = expectedPerCase * Object.keys(summary.fixtureCases).length;
   return summary.fixtureHits === expectedHits
     && summary.fixtureCases['instagram-business-link'] === expectedPerCase
     && summary.fixtureCases['connected-instagram-link'] === expectedPerCase
@@ -165,7 +159,6 @@ async function run() {
     AUTH_PROVIDER: 'alpha-local',
     SUPABASE_ENABLED: 'false',
     AUTH_SESSION_SECRET: 'social-cues-local-test-session-secret',
-    SOCIAL_CUES_PROMO_CODES: localPromoCodes,
     SOCIAL_CUES_DATA_DIR: testDataDir,
     E2E_USE_LOCAL_SERVER: '1',
     NODE_ENV: 'test',
@@ -187,7 +180,6 @@ async function run() {
     AUTH_PROVIDER: 'alpha-local',
     SUPABASE_ENABLED: 'false',
     AUTH_SESSION_SECRET: 'social-cues-local-test-session-secret',
-    SOCIAL_CUES_PROMO_CODES: localPromoCodes,
     SOCIAL_CUES_DATA_DIR: testDataDir,
     E2E_BASE_URL: baseURL,
     E2E_USE_LOCAL_SERVER: '1',

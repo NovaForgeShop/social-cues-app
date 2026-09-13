@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createStripeBillingApplication } from "./stripe-billing-application.mjs";
 import {
+  STRIPE_ALPHA_DISCOUNT_READINESS,
   STRIPE_BILLING_SUPPORTED_PRICING_VERSION,
   resolveStripeBillingConfiguration
 } from "./stripe-billing-configuration.mjs";
@@ -131,6 +132,8 @@ equal(testReadiness.releaseStage, "readiness_only");
 equal(testReadiness.checkoutAvailable, false);
 equal(testReadiness.portalAvailable, false);
 equal(testReadiness.webhookProcessingAvailable, false);
+assert.deepEqual(testReadiness.alphaDiscount, STRIPE_ALPHA_DISCOUNT_READINESS);
+checks += 1;
 
 const status = await testFixture.app.getWorkspaceBillingStatus("11111111-1111-4111-8111-111111111111");
 equal(status.ok, true);

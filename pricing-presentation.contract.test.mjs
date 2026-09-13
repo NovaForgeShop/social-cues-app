@@ -15,6 +15,7 @@ import {
   PRICING_CONFIGURATION,
   resolvePricingPlan
 } from "./pricing-packaging.mjs";
+import { ALPHA_DISCOUNT_POLICY } from "./alpha-discount.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -319,6 +320,23 @@ globalThis.fetch = async (input, init = {}) => {
     }
     deepEqual(firstApi.body.pricing.plans.map(plan => plan.allowances.find(item => item.id === "moves")?.limit), [250, 750, 1500], "API Move allowances must match the plan package.");
     deepEqual(firstApi.body.pricing.plans.map(plan => plan.allowances.find(item => item.id === "moves")?.pooled), [false, false, true], "Only the Agency Move allowance may be pooled.");
+    deepEqual(firstApi.body.pricing.standardExperiences, PRICING_CONFIGURATION.standardExperiences, "Guided setup must be a canonical standard experience.");
+    for (const plan of firstApi.body.pricing.plans) {
+      check(plan.capabilities.some(capability => capability.id === "guided-setup"), `${plan.id} must include guided setup and onboarding.`);
+    }
+    check(!firstApi.body.pricing.services.some(service => /guided|pilot/i.test(`${service.id} ${service.name}`)), "Guided setup must not remain a separately priced service or pilot.");
+    deepEqual(firstApi.body.pricing.alphaDiscount, {
+      policyId: ALPHA_DISCOUNT_POLICY.id,
+      label: "Alpha discount: 20% off forever",
+      percentOff: 20,
+      duration: "forever",
+      appliesTo: "subscription",
+      applicablePlanIds: ["business", "growth", "agency"],
+      accountScoped: true,
+      reusableAfterCancellation: true,
+      checkoutAvailable: false,
+      grants: ALPHA_DISCOUNT_POLICY.grants
+    }, "Pricing must expose only the canonical discount policy.");
     equal(firstApi.body.pricing.moves.definition, MOVE_METERING_CONFIGURATION.definition, "The public Move definition must remain canonical.");
     equal(firstApi.body.pricing.moves.enforcementStatus, "not_active", "Move balance enforcement must remain inactive.");
     deepEqual(firstApi.body.pricing.moves.zeroMoveActivities.map(item => item.moves), [0, 0, 0, 0], "Ordinary activity must remain zero-Move.");
@@ -377,6 +395,10 @@ globalThis.fetch = async (input, init = {}) => {
     check(page.text.includes("100 Move pack") && page.text.includes("500 Move pack") && page.text.includes("1,500 Move pack"), "/pricing must render all planned Move packs.");
     check(page.text.includes("Planned for purchase after Stripe billing is verified."), "/pricing must keep Move-pack purchase on billing HOLD.");
     check(page.text.includes("future-only") && page.text.includes("planned / planned"), "/pricing must identify future Move weights as planned rather than live.");
+    check(page.text.includes("Guided setup and onboarding") && page.text.includes("included for every Social Cues user on Business, Growth, and Agency"), "/pricing must present guided setup as universal.");
+    check(page.text.includes("Alpha discount: 20% off forever"), "/pricing must present the exact Alpha discount truth.");
+    check(page.text.includes("does not grant app access") && page.text.includes("Checkout remains unavailable"), "/pricing must keep Alpha redemption and checkout fail closed.");
+    check(!/Guided services remain separate|Guided Pilot/i.test(page.text), "/pricing must not present guided setup or a pilot as a separate service.");
     for (const forbidden of [/Founder Audit/i, /Campaign Build/i, /Managed Proof Sprint/i, /Social Cues Pro\b/i, /\$299/i, /\$499/i, /\$49\s*\/\s*mo/i, /annual/i, /promotion/i, /founding/i, /unlimited/i, /checkout\.stripe\.com/i, /buy\.stripe\.com/i, /price_/i, /<s\b/i]) {
       check(!forbidden.test(page.text), `/pricing must exclude ${forbidden}.`);
     }

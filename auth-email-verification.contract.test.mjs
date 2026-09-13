@@ -538,7 +538,11 @@ async function run() {
     thirdPassword,
     configurationPassword,
     malformedLoginPassword,
-    malformedSignupPassword
+    malformedSignupPassword,
+    localPromo,
+    firstPromo,
+    secondPromo,
+    thirdPromo
   ]);
   let checkCount = 0;
   let allChildrenClosed = true;
@@ -599,7 +603,7 @@ async function run() {
   };
 
   const hostedPromoCodes = JSON.stringify([
-    { code: firstPromo, label: "Hosted auth contract A", access: "highest-tier-test", days: 30, active: true },
+    { code: firstPromo, label: "Hosted auth contract A", access: "highest-tier-test", days: 30, percentOff: 99, duration: "once", active: true },
     { code: secondPromo, label: "Hosted auth contract B", access: "highest-tier-test", days: 30, active: true },
     { code: thirdPromo, label: "Hosted auth contract C", access: "highest-tier-test", days: 30, active: true }
   ]);
@@ -965,12 +969,17 @@ async function run() {
       check(confirmedLogin.body?.user?.id === firstUser.id, "Confirmed login must preserve the exact verified Supabase user id.");
       check(confirmedLogin.body?.workspace?.id === firstUser.id, "Confirmed login must derive the tenant workspace from the verified identity.");
       check(confirmedLogin.body?.workspace?.id !== firstUser.forgedWorkspaceId, "Provider metadata must not select the tenant workspace.");
-      check(confirmedLogin.body?.user?.role === "Alpha tester", "Provider metadata must not grant owner application authorization.");
-      check(confirmedLogin.body?.entitlement?.promoCode === firstPromo, "Entitlement must come from the server-side promo ledger.");
+      check(confirmedLogin.body?.user?.role === "Member", "Alpha eligibility must remain in the ordinary member role before subscription activation.");
+      check(confirmedLogin.body?.entitlement?.active === false && confirmedLogin.body?.entitlement?.access === "unpaid", "Alpha redemption must not create a paid entitlement or app access.");
+      check(confirmedLogin.body?.entitlement?.subscriptionPaid === false && confirmedLogin.body?.entitlement?.appFeePaid === false, "Alpha redemption must not fake payment or waive an application fee.");
+      check(confirmedLogin.body?.alphaDiscount?.eligible === true, "Confirmed login must restore durable Alpha discount eligibility.");
+      check(confirmedLogin.body?.alphaDiscount?.label === "Alpha discount: 20% off forever", "Alpha discount display must be exact.");
+      check(confirmedLogin.body?.alphaDiscount?.percentOff === 20 && confirmedLogin.body?.alphaDiscount?.duration === "forever", "Request or environment fields must not override the canonical Alpha terms.");
+      check(JSON.stringify(confirmedLogin.body).includes(firstPromo) === false, "The redeemed Alpha code must not appear in public authentication output.");
       const persistedFirstUser = persistedUserByEmail(mock.state, firstEmail);
       check(persistedFirstUser?.id === firstUser.id && persistedFirstUser?.supabaseUserId === firstUser.id, "Provider persistence must retain the validated UUID exactly.");
       check(!persistedFirstUser?.passwordHash, "Provider persistence must never create or retain a local password hash.");
-      ensureSingleTenant(tenantCounts(mock.state, firstUser.id), "First confirmed login");
+      check(JSON.stringify(tenantCounts(mock.state, firstUser.id)) === JSON.stringify({ profiles: 0, workspaces: 0, memberships: 0, entitlements: 0, devices: 1, bootstraps: 0 }), "An Alpha-only login must persist its device without provisioning paid workspace records.");
 
       sensitiveValues.add(firstUser.accessToken);
       sensitiveValues.add(firstUser.refreshToken);
@@ -987,15 +996,19 @@ async function run() {
       const profile = rowsForUser(mock.state, "profiles", firstUser.id)[0];
       const membership = rowsForUser(mock.state, "workspace_members", firstUser.id)[0];
       const entitlement = rowsForUser(mock.state, "billing_entitlements", firstUser.id)[0];
-      check(profile?.workspace_id === firstUser.id && profile?.role === "Alpha tester", "The profile must remain tenant-scoped and metadata-independent.");
-      check(membership?.workspace_id === firstUser.id && membership?.role === "owner", "The verified tenant must receive one owner membership.");
-      check(entitlement?.workspace_id === firstUser.id && entitlement?.source === "promo-code" && entitlement?.promo_code === firstPromo && entitlement?.status === "active", "The durable entitlement must use the validated promo claim.");
+      check(!profile && !membership && !entitlement, "Discount eligibility must not provision profile, membership, or billing-entitlement rows before paid access exists.");
+      const persistedAlphaClaim = (persistedFirstUser && persistedModel(mock.state)?.authPromoClaims || []).find(item => item.userId === firstUser.id);
+      check(persistedFirstUser?.alphaDiscount?.eligible === true && persistedFirstUser?.alphaDiscount?.percentOff === 20 && persistedFirstUser?.alphaDiscount?.duration === "forever", "The Social Cues account registry must durably store canonical Alpha eligibility.");
+      check(persistedAlphaClaim?.code === firstPromo && persistedAlphaClaim?.status === "eligible", "The private claim ledger must retain the account-bound code without treating it as billing entitlement.");
 
       const cookie = sessionCookie(confirmedLogin.setCookie);
       const authenticatedSession = await request(app, "/api/auth/session", { cookie });
       check(authenticatedSession.status === 200 && authenticatedSession.body?.ok === true, "The confirmed device cookie must restore the application session.");
       check(authenticatedSession.body?.user?.id === firstUser.id && authenticatedSession.body?.workspace?.id === firstUser.id, "Restored sessions must stay inside the verified tenant.");
       check(authenticatedSession.body?.devices?.length === 1, "The restored tenant session must expose exactly one remembered device.");
+      check(authenticatedSession.body?.alphaDiscount?.eligible === true && authenticatedSession.body?.entitlement?.active === false, "Session restoration must preserve the discount while keeping app access closed.");
+      const blockedAppModel = await request(app, "/api/model", { cookie });
+      check(blockedAppModel.status === 402 && blockedAppModel.body?.accessRequired === true, "An Alpha-only account must not cross the hosted application paywall.");
 
       const repeatedLogin = await request(app, "/api/auth/login", {
         method: "POST",
@@ -1006,7 +1019,7 @@ async function run() {
         }
       });
       check(repeatedLogin.status === 200 && repeatedLogin.body?.ok === true, "Repeated confirmed login must remain successful.");
-      ensureSingleTenant(tenantCounts(mock.state, firstUser.id), "Repeated confirmed login");
+      check(JSON.stringify(tenantCounts(mock.state, firstUser.id)) === JSON.stringify({ profiles: 0, workspaces: 0, memberships: 0, entitlements: 0, devices: 1, bootstraps: 0 }), "Repeated Alpha-only login must remain idempotent without tenant provisioning.");
 
       const secondDeviceId = `contract-device-b-${runId}`;
       const secondSignup = await request(app, "/api/auth/signup", {
@@ -1054,7 +1067,7 @@ async function run() {
       check(confirmedSignup.body?.user?.id === thirdUser?.id, "Confirmed signup must preserve the exact provider identity.");
       const persistedThirdUser = persistedUserByEmail(mock.state, thirdEmail);
       check(persistedThirdUser?.id === thirdUser?.id && !persistedThirdUser?.passwordHash, "Confirmed signup must persist no local password hash or substitute id.");
-      ensureSingleTenant(tenantCounts(mock.state, thirdUser.id), "Immediately confirmed signup");
+      check(JSON.stringify(tenantCounts(mock.state, thirdUser.id)) === JSON.stringify({ profiles: 1, workspaces: 1, memberships: 1, entitlements: 1, devices: 1, bootstraps: 1 }), "Immediately confirmed signup may create its account workspace while keeping billing inactive.");
       sensitiveValues.add(thirdUser.accessToken);
       sensitiveValues.add(thirdUser.refreshToken);
       mock.state.signupBehavior = { mode: "unconfirmed" };

@@ -1,6 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const promoCode = 'SC-LOCAL-BEACON-4M7Q';
 const activePlatforms = ['facebook'];
 
 async function sameOriginJson(page: Page, path: string) {
@@ -28,7 +27,7 @@ test('25-step Social Cues tester loop reaches the workstation and checks safe fu
   test.skip(!process.env.E2E_USE_LOCAL_SERVER, 'Full workstation loop uses the local alpha server; production signup requires email verification before app access.');
 
   const stamp = Date.now();
-  const email = `tester-loop-${stamp}@socialcuesapp.test`;
+  const email = `barton.cory.m+tester-loop-${stamp}@gmail.com`;
   const password = `Tester-loop-${stamp}!`;
 
   await test.step('01 - anonymous app is guarded before login', async () => {
@@ -43,17 +42,16 @@ test('25-step Social Cues tester loop reaches the workstation and checks safe fu
     await expect(page.locator('#passwordInput')).toBeVisible();
   });
 
-  await test.step('03 - create-account mode exposes tester fields', async () => {
+  await test.step('03 - create-account mode exposes account fields', async () => {
     await page.locator('#createBtn').click();
     await expect(page.locator('#nameInput')).toBeVisible();
     await expect(page.locator('#promoInput')).toBeVisible();
   });
 
-  await test.step('04 - promo tester account is created', async () => {
+  await test.step('04 - local owner account is created', async () => {
     await page.locator('#nameInput').fill('Tester Loop');
     await page.locator('#emailInput').fill(email);
     await page.locator('#passwordInput').fill(password);
-    await page.locator('#promoInput').fill(promoCode);
     await Promise.all([
       page.waitForURL(/\/app/, { timeout: 10_000 }),
       page.locator('#createBtn').click()
@@ -158,6 +156,8 @@ test('25-step Social Cues tester loop reaches the workstation and checks safe fu
       page.reload()
     ]);
     await expect(page.locator('#dashboard')).toBeVisible();
+    await page.locator('[data-view="accounts"]').click();
+    await expect(page.locator('#socialAccountList [data-account-lane="facebook"]')).toContainText('Tester Loop Page');
     await page.locator('[data-view="studio"]').click();
     await page.locator('[data-studio-mode="campaign"]').click();
     const [variantResponse] = await Promise.all([
@@ -285,13 +285,26 @@ test('25-step Social Cues tester loop reaches the workstation and checks safe fu
     if (body.connectionState?.expired || body.connectionState?.needsReconnect) expect(body.ready).toBeFalsy();
   });
 
-  await test.step('22 - billing readiness exposes webhook and self-service lifecycle', async () => {
+  await test.step('22 - billing readiness keeps activation held and exposes Alpha discount truth', async () => {
     const result = await sameOriginJson(page, '/api/billing/readiness');
     expect(result.ok).toBeTruthy();
-    const body = result.body as { customerPortalEndpoint?: string; entitlementEvents?: string[] };
-    expect(body.customerPortalEndpoint).toBe('/api/billing/portal');
-    expect(body.entitlementEvents).toContain('customer.subscription.deleted');
-    expect(body.entitlementEvents).toContain('invoice.payment_failed');
+    const body = result.body as {
+      releaseStage?: string;
+      checkoutAvailable?: boolean;
+      portalAvailable?: boolean;
+      webhookProcessingAvailable?: boolean;
+      alphaDiscount?: { label?: string; percentOff?: number; duration?: string; mutationAvailable?: boolean };
+    };
+    expect(body.releaseStage).toBe('readiness_only');
+    expect(body.checkoutAvailable).toBe(false);
+    expect(body.portalAvailable).toBe(false);
+    expect(body.webhookProcessingAvailable).toBe(false);
+    expect(body.alphaDiscount).toEqual(expect.objectContaining({
+      label: 'Alpha discount: 20% off forever',
+      percentOff: 20,
+      duration: 'forever',
+      mutationAvailable: false
+    }));
   });
 
   await test.step('23 - Android account cards keep truth and controls in bounds', async () => {

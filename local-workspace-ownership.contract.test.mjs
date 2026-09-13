@@ -381,6 +381,29 @@ async function durableSnapshot(dataDir) {
   };
 }
 
+async function grantSyntheticPaidSubscription(dataDir, signup, plan = "business") {
+  const snapshot = await durableSnapshot(dataDir);
+  const email = String(signup?.body?.user?.email || "").trim().toLowerCase();
+  check(Boolean(email), "synthetic paid fixture is missing its account email", "http-authentication");
+  snapshot.model.billing = snapshot.model.billing || {};
+  snapshot.model.billing.paidEmails = Array.isArray(snapshot.model.billing.paidEmails)
+    ? snapshot.model.billing.paidEmails
+    : [];
+  snapshot.model.billing.paidEmails.push({
+    email,
+    active: true,
+    selectedPlan: plan,
+    plan,
+    access: plan,
+    tier: plan,
+    subscriptionPaid: true,
+    appFeePaid: true,
+    paymentStatus: "paid",
+    reason: "Synthetic local subscription fixture"
+  });
+  await injectSharedFixture(dataDir, snapshot.model);
+}
+
 async function externalAttempts(logPath) {
   try {
     return (await readFile(logPath, "utf8")).split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
@@ -397,10 +420,10 @@ await mkdir(localDataDir, { recursive: true });
 await writeExternalGuard(guardPath);
 const localPort = await availablePort();
 const localBase = `http://127.0.0.1:${localPort}`;
-const PROMO_A = "OI1-OWNER-A";
-const PROMO_B = "OI1-OWNER-B";
-const PROMO_C = "OI1-OWNER-C";
-const PROMO_D = "OI1-OWNER-D";
+const PROMO_A = "OI1-ALPHA-A";
+const PROMO_B = "OI1-ALPHA-B";
+const PROMO_C = "OI1-ALPHA-C";
+const PROMO_D = "OI1-ALPHA-D";
 const TEST_ENCRYPTION_KEY = "oi1-synthetic-encryption-key-2026-not-production";
 const TEST_PATREON_SECRET = "oi1-synthetic-patreon-secret";
 const childEnv = hermeticEnvironment({
@@ -413,10 +436,10 @@ const childEnv = hermeticEnvironment({
   SOCIAL_CUES_DATA_DIR: localDataDir,
   SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: externalLogPath,
   SOCIAL_CUES_PROMO_CODES: JSON.stringify([
-    { code: PROMO_A, label: "OI1 owner A", days: 1, active: true },
-    { code: PROMO_B, label: "OI1 owner B", days: 1, active: true },
-    { code: PROMO_C, label: "OI1 revoked owner", days: 1, active: true },
-    { code: PROMO_D, label: "OI1 expired owner", days: 1, active: true }
+    { code: PROMO_A, label: "OI1 Alpha A", active: true },
+    { code: PROMO_B, label: "OI1 Alpha B", active: true },
+    { code: PROMO_C, label: "OI1 Alpha C", active: true },
+    { code: PROMO_D, label: "OI1 Alpha D", active: true }
   ]),
   OAUTH_TOKEN_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
   PATREON_CLIENT_ID: "oi1-synthetic-patreon-client",
@@ -448,9 +471,13 @@ try {
     })
   });
   check(signupA.status === 200 && signupA.body?.session?.token && signupA.body?.workspace?.ownerUserId === signupA.body?.user?.id, "trusted first-workspace signup did not establish canonical ownership", "http-authentication");
+  check(signupA.body?.entitlement?.active === false && signupA.body?.alphaDiscount?.label === "Alpha discount: 20% off forever", "Alpha signup unexpectedly granted application access", "http-authentication");
   httpProbeCount += 1;
   const tokenA = signupA.body.session.token;
   const authA = { Authorization: `Bearer ${tokenA}` };
+  const alphaOnlyProtectedRoute = await response(localBase, "/api/responses", { headers: authA });
+  check(alphaOnlyProtectedRoute.status === 402, "Alpha eligibility bypassed a protected application route", "http-authentication");
+  await grantSyntheticPaidSubscription(localDataDir, signupA);
   const modelA = await response(localBase, "/api/model", { headers: authA });
   check(modelA.status === 200 && modelA.body?.workspace?.id === signupA.body.workspace.id, "authenticated owner could not load its canonical workspace", "http-authentication");
   const canonicalA = {
@@ -642,6 +669,8 @@ try {
     })
   });
   check(signupB.status === 200 && signupB.body?.session?.token, "foreign user fixture signup failed", "http-cross-workspace");
+  check(signupB.body?.entitlement?.active === false, "second Alpha signup unexpectedly granted application access", "http-cross-workspace");
+  await grantSyntheticPaidSubscription(localDataDir, signupB);
   const authB = { Authorization: `Bearer ${signupB.body.session.token}` };
   const modelB = await response(localBase, "/api/model", { headers: authB });
   const afterForeignSignup = await durableSnapshot(localDataDir);

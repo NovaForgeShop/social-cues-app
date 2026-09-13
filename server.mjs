@@ -29,6 +29,13 @@ import { openLocalWorkspacePersistence } from "./local-workspace-persistence.mjs
 import { WorkspaceContentPersistenceError } from "./workspace-content-persistence.mjs";
 import { localRecoveryValidation } from "./local-recovery-validation.mjs";
 import {
+  ALPHA_DISCOUNT_POLICY,
+  alphaDiscountEligible,
+  createAlphaDiscountEligibility,
+  normalizeAlphaDiscountAccount,
+  publicAlphaDiscountEligibility
+} from "./alpha-discount.mjs";
+import {
   OPENAI_COST_ACCOUNTING_DEFAULTS,
   PRICING_CONFIGURATION
 } from "./pricing-packaging.mjs";
@@ -390,11 +397,8 @@ function configuredPromoCodes(raw = process.env.SOCIAL_CUES_PROMO_CODES || "") {
   return rows
     .map((item, index) => ({
       code: normalizePromoCode(typeof item === "string" ? item : item?.code),
-      label: String(item?.label || `Test account ${index + 1}`).slice(0, 80),
+      label: String(item?.label || `Alpha account ${index + 1}`).slice(0, 80),
       email: normalizeEmail(typeof item === "string" ? "" : item?.email),
-      access: "highest-tier-test",
-      days: Math.max(1, Math.min(365, Number(item?.days || 120))),
-      memberOnly: item?.memberOnly === true,
       active: item?.active !== false
     }))
     .filter(item => item.code);
@@ -3109,6 +3113,7 @@ async function runDailyProviderOwnershipLoop(model = {}, session = null, options
   const at = new Date().toISOString();
   const sweep = await runProviderAcceptanceSweep(model, session);
   const dueItems = queuedVariants(model, {
+    user,
     includeFuture: options.includeFuture === true,
     now: options.now || at,
     platforms: Array.isArray(options.platforms) ? options.platforms : []
@@ -3211,6 +3216,12 @@ function visibleWorkspaceRecords(records = [], session = null) {
   const user = session?.user || null;
   return (Array.isArray(records) ? records : [])
     .filter(item => !user || !hasOwnerMarker(item) || ownedByUser(item, user.id));
+}
+
+function visiblePublishWorkspaceRecord(item, user = null) {
+  if (!user) return true;
+  if (!ownedByUser(item, user.id)) return false;
+  return !item.workspaceId || String(item.workspaceId) === workspaceIdForUser(user);
 }
 
 function publicPublishQueueRecord(item = {}) {
@@ -3343,10 +3354,12 @@ function scheduledVariantLedgerItems(model = {}, options = {}) {
   const now = Date.parse(options.now || new Date().toISOString());
   const includeFuture = options.includeFuture !== false;
   const platforms = new Set((options.platforms || []).filter(Boolean));
+  const user = options.user || null;
   const trackedStatuses = new Set(["approved", "queued", "retrying", "processing", "submitted", "published", "blocked", "failed"]);
   const terminalStatuses = new Set(["published", "blocked", "failed"]);
   const items = [];
   for (const campaign of contentVariantBatches(model)) {
+    if (!visiblePublishWorkspaceRecord(campaign, user)) continue;
     for (const variant of campaign.variants || []) {
       const status = String(variant.status || "").toLowerCase();
       if (!trackedStatuses.has(status)) continue;
@@ -3362,6 +3375,7 @@ function scheduledVariantLedgerItems(model = {}, options = {}) {
 function publishQueueLedger(model = {}, session = null, options = {}) {
   const records = visibleWorkspaceRecords(model.publishQueue, session).map(publicPublishQueueRecord);
   const variantRecords = scheduledVariantLedgerItems(model, {
+    user: session?.user || null,
     includeFuture: options.includeFuture !== false,
     now: options.now || new Date().toISOString(),
     platforms: Array.isArray(options.platforms) ? options.platforms : []
@@ -6364,8 +6378,6 @@ async function authRateLimitDecision(action, req, email = "") {
 async function createSupabasePasswordUser(input = {}) {
   const email = normalizeEmail(input.email);
   const password = normalizePassword(input.password);
-  const promoCode = normalizePromoCode(input.promoCode);
-  const promo = promoCode ? promoCodeRecord(promoCode) : null;
   const signup = await supabaseAuthRequest("/signup", {
     method: "POST",
     body: JSON.stringify({
@@ -6373,12 +6385,7 @@ async function createSupabasePasswordUser(input = {}) {
       password,
       data: {
         name: input.name || "Social Cues User",
-        workspace_name: input.workspaceName || "Social Cues",
-        ...(promo ? {
-          promo_code: promo.code,
-          promo_access: promo.access || "highest-tier-test",
-          promo_days: promo.days || 120
-        } : {})
+        workspace_name: input.workspaceName || "Social Cues"
       }
     })
   });
@@ -6630,7 +6637,7 @@ function workspaceModelIdForUser(user = {}) {
 
 const workspaceScopedCollectionKeys = ["campaigns", "quickPosts", "actions", "proof", "mediaAssets", "mediaRenderJobs", "publishQueue", "analyticsSnapshots", "providerStateSnapshots", "activity"];
 const serverRetainedWorkspaceCollectionKeys = new Set(["mediaAssets", "mediaRenderJobs", "publishQueue", "analyticsSnapshots", "providerStateSnapshots"]);
-const sharedRegistryKeys = ["authUsers", "deviceSessions", "oauthStates", "oauthEvents", "metaDeletionRequests", "billing", "integrations"];
+const sharedRegistryKeys = ["authUsers", "authPromoClaims", "deviceSessions", "oauthStates", "oauthEvents", "metaDeletionRequests", "billing", "integrations"];
 
 function cloneJson(value) {
   return JSON.parse(JSON.stringify(value ?? null));
@@ -7804,6 +7811,7 @@ async function loadModel() {
     model.billing = seed.billing || {};
     changed = true;
   }
+  if (normalizeAlphaDiscountModel(model)) changed = true;
   if (sanitizeConnectedAccounts(model)) changed = true;
   if (reconcileProviderAccountEvidence(model)) changed = true;
   if (hydrateMetaLoginStatus(model)) changed = true;
@@ -8469,6 +8477,12 @@ function currentPricingPresentation() {
   if (planIds.size !== plans.length || !planIds.has(defaultPlanId)) {
     throw new TypeError("Pricing plan identities are invalid.");
   }
+  const standardExperiences = (configuration.standardExperiences || []).map(item => publicPricingCapability(item, classificationLabels));
+  const standardExperienceIds = standardExperiences.map(item => item.id);
+  if (!standardExperienceIds.includes("guided-setup")
+    || plans.some(plan => standardExperienceIds.some(id => !plan.capabilities.some(capability => capability.id === id)))) {
+    throw new TypeError("Standard guided setup must be included for every plan.");
+  }
   const providers = (configuration.providers || []).map(provider => ({
     id: requiredPricingText(provider.id, "provider.id"),
     name: requiredPricingText(provider.name, `provider.${provider.id}.name`),
@@ -8511,6 +8525,19 @@ function currentPricingPresentation() {
     billingActivation: { available: false, status: "unavailable" },
     classificationLabels,
     plans,
+    standardExperiences,
+    alphaDiscount: {
+      policyId: ALPHA_DISCOUNT_POLICY.id,
+      label: ALPHA_DISCOUNT_POLICY.label,
+      percentOff: ALPHA_DISCOUNT_POLICY.percentOff,
+      duration: ALPHA_DISCOUNT_POLICY.duration,
+      appliesTo: ALPHA_DISCOUNT_POLICY.appliesTo,
+      applicablePlanIds: [...ALPHA_DISCOUNT_POLICY.applicablePlanIds],
+      accountScoped: true,
+      reusableAfterCancellation: true,
+      checkoutAvailable: false,
+      grants: { ...ALPHA_DISCOUNT_POLICY.grants }
+    },
     moves: {
       unit: requiredPricingText(moveMetering.unit, "moveMetering.unit"),
       definition: requiredPricingText(moveMetering.definition, "moveMetering.definition"),
@@ -8614,17 +8641,11 @@ function promoCodeRecord(value) {
   return testPromoCodes.find(item => item.code === code) || null;
 }
 
-const terminalPromoClaimStatuses = new Set(["released", "revoked", "expired"]);
+const terminalPromoClaimStatuses = new Set(["released", "revoked"]);
 
 function promoClaims(model) {
   model.authPromoClaims = Array.isArray(model.authPromoClaims) ? model.authPromoClaims : [];
   return model.authPromoClaims;
-}
-
-function activePromoUserClaim(model, code) {
-  const normalized = normalizePromoCode(code);
-  if (!normalized) return null;
-  return (model.authUsers || []).find(user => normalizePromoCode(user.entitlement?.promoCode) === normalized && publicEntitlement(user).active) || null;
 }
 
 function activePromoLedgerClaim(model, code) {
@@ -8651,13 +8672,9 @@ function validatePromoClaim(model, promo, email) {
   if (promo.email && promo.email !== normalizedEmail) {
     return { ok: false, status: 403, error: "That Social Cues promo code is assigned to a different email address." };
   }
-  const userClaim = activePromoUserClaim(model, promo.code);
-  if (userClaim && normalizeEmail(userClaim.email) !== normalizedEmail) {
-    return { ok: false, status: 409, error: "That Social Cues promo code has already been assigned to a tester." };
-  }
   const ledgerClaim = activePromoLedgerClaim(model, promo.code);
   if (ledgerClaim && normalizeEmail(ledgerClaim.email) !== normalizedEmail) {
-    return { ok: false, status: 409, error: "That Social Cues promo code has already been assigned to a tester." };
+    return { ok: false, status: 409, error: "That Social Cues promo code has already been assigned to another account." };
   }
   return { ok: true };
 }
@@ -8680,10 +8697,77 @@ function recordPromoClaim(model, promo, email, status = "pending", user = null) 
   }
   claim.status = status;
   claim.active = true;
+  claim.policyId = ALPHA_DISCOUNT_POLICY.id;
+  claim.percentOff = ALPHA_DISCOUNT_POLICY.percentOff;
+  claim.duration = ALPHA_DISCOUNT_POLICY.duration;
   claim.userId = user?.id || claim.userId || "";
   claim.workspaceId = user ? workspaceIdForUser(user) : claim.workspaceId || "";
   claim.updatedAt = new Date().toISOString();
   return claim;
+}
+
+function deterministicPromoClaimId(code, email) {
+  const digest = crypto.createHash("sha256").update(`${normalizePromoCode(code)}\n${normalizeEmail(email)}`).digest("hex");
+  return `promo-claim-${digest.slice(0, 24)}`;
+}
+
+function normalizeAlphaDiscountModel(model = {}) {
+  const before = JSON.stringify({ authUsers: model.authUsers || [], authPromoClaims: model.authPromoClaims || [] });
+  model.authUsers = Array.isArray(model.authUsers) ? model.authUsers : [];
+  model.authPromoClaims = Array.isArray(model.authPromoClaims) ? model.authPromoClaims : [];
+
+  for (const claim of model.authPromoClaims) {
+    const status = String(claim.status || "pending").toLowerCase();
+    if (status === "expired") {
+      claim.status = "eligible";
+      claim.active = true;
+    }
+    if (!terminalPromoClaimStatuses.has(String(claim.status || "pending").toLowerCase())) {
+      claim.policyId = ALPHA_DISCOUNT_POLICY.id;
+      claim.percentOff = ALPHA_DISCOUNT_POLICY.percentOff;
+      claim.duration = ALPHA_DISCOUNT_POLICY.duration;
+      delete claim.days;
+      delete claim.months;
+      delete claim.access;
+      delete claim.memberOnly;
+    }
+  }
+
+  for (const user of model.authUsers) {
+    const legacyCode = normalizePromoCode(user.entitlement?.promoCode);
+    if (legacyCode && !model.authPromoClaims.some(claim => normalizePromoCode(claim.code) === legacyCode)) {
+      model.authPromoClaims.push({
+        id: deterministicPromoClaimId(legacyCode, user.email),
+        code: legacyCode,
+        label: user.entitlement?.promoLabel || "Legacy Alpha account",
+        email: normalizeEmail(user.email),
+        status: "eligible",
+        active: true,
+        userId: user.id || "",
+        workspaceId: workspaceIdForUser(user),
+        policyId: ALPHA_DISCOUNT_POLICY.id,
+        percentOff: ALPHA_DISCOUNT_POLICY.percentOff,
+        duration: ALPHA_DISCOUNT_POLICY.duration,
+        claimedAt: user.entitlement?.grantedAt || user.createdAt || null,
+        updatedAt: user.entitlement?.grantedAt || user.createdAt || null
+      });
+    }
+    const claim = model.authPromoClaims.find(item => normalizeEmail(item.email) === normalizeEmail(user.email));
+    const claimStatus = String(claim?.status || "").toLowerCase();
+    const eligibleByClaim = Boolean(claim && claim.active !== false && !terminalPromoClaimStatuses.has(claimStatus));
+    const revokedByClaim = Boolean(claim && terminalPromoClaimStatuses.has(claimStatus));
+    const normalized = normalizeAlphaDiscountAccount(user, {
+      eligible: revokedByClaim ? false : eligibleByClaim ? true : undefined,
+      eligibleAt: claim?.claimedAt || claim?.updatedAt || null,
+      source: "alpha-code"
+    });
+    user.entitlement = normalized.entitlement;
+    user.role = normalized.role || user.role;
+    if (normalized.alphaDiscount) user.alphaDiscount = normalized.alphaDiscount;
+    else delete user.alphaDiscount;
+  }
+
+  return before !== JSON.stringify({ authUsers: model.authUsers, authPromoClaims: model.authPromoClaims });
 }
 
 function envEmailList(names = []) {
@@ -8725,33 +8809,38 @@ function isSignupOwnerEmail(email) {
 function signupGateSummary() {
   return {
     mode: "invite-only",
-    allowed: "Owner allowlist or active Social Cues promo code",
+    allowed: "Owner allowlist or active Social Cues Alpha code",
     ownerEmailCount: signupOwnerEmails().length,
     activePromoCodeCount: testPromoCodes.filter(item => item.active !== false).length
   };
 }
 
-function addMonths(date, months) {
-  const next = new Date(date);
-  next.setMonth(next.getMonth() + months);
-  return next;
-}
-
-function addDays(date, days) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
 function publicEntitlement(user) {
   const entitlement = user?.entitlement || {};
+  const legacyPromoAccess = entitlement.source === "promo-code"
+    || entitlement.access === "highest-tier-test"
+    || entitlement.paymentStatus === "promo-paid";
+  if (legacyPromoAccess) {
+    return {
+      access: "unpaid",
+      source: "none",
+      active: false,
+      grantedAt: null,
+      expiresAt: null,
+      billingStartsAfter: null,
+      selectedPlan: "",
+      tier: "",
+      subscriptionPaid: false,
+      appFeePaid: false,
+      paymentStatus: "unpaid"
+    };
+  }
   const expiresAt = entitlement.expiresAt || null;
   const expired = expiresAt ? Date.parse(expiresAt) <= Date.now() : false;
   const active = !expired && entitlement.active !== false && Boolean(entitlement.access && entitlement.access !== "unpaid");
   return {
     access: entitlement.access || "unpaid",
     source: entitlement.source || "none",
-    promoCode: entitlement.promoCode || "",
     active,
     grantedAt: entitlement.grantedAt || null,
     expiresAt,
@@ -8760,20 +8849,16 @@ function publicEntitlement(user) {
     tier: entitlement.tier || entitlement.access || "",
     subscriptionPaid: Boolean(active && (entitlement.subscriptionPaid || entitlement.fullAccess)),
     appFeePaid: Boolean(active && (entitlement.appFeePaid || entitlement.fullAccess)),
-    paymentStatus: entitlement.paymentStatus || (entitlement.active ? "active" : "unpaid"),
-    alphaHonorDiscountPercent: Number(entitlement.alphaHonorDiscountPercent || 0),
-    deactivatesBeforeAlpha: Boolean(entitlement.deactivatesBeforeAlpha),
-    memberOnly: Boolean(entitlement.memberOnly)
+    paymentStatus: entitlement.paymentStatus || (entitlement.active ? "active" : "unpaid")
   };
 }
 
 function resolvedAppUserRole(user = null) {
   if (!user) return "Guest";
   const entitlement = publicEntitlement(user);
-  if (entitlement.memberOnly) return "Member";
-  if (isSignupOwnerEmail(user.email) || entitlement.source === "owner-allowlist" || entitlement.tier === "owner") return "Owner";
-  if (entitlement.source === "promo-code") return "Alpha tester";
   if (entitlement.source === "stripe") return "Customer";
+  if (alphaDiscountEligible(user)) return "Member";
+  if (isSignupOwnerEmail(user.email) || entitlement.source === "owner-allowlist" || entitlement.tier === "owner") return "Owner";
   return "Member";
 }
 
@@ -9551,7 +9636,7 @@ async function processScheduledPublishWorkerJob(job, registry) {
   }
   const externalKey = String(job.payload?.externalKey || "");
   const variantId = String(job.payload?.variantId || externalKey).replace(/^variant-/, "");
-  const item = queuedVariants(model, { includeFuture: true }).find(candidate =>
+  const item = queuedVariants(model, { user, includeFuture: true }).find(candidate =>
     String(candidate.variant?.id || "") === variantId
     || String(candidate.queueRecord?.id || "") === externalKey
   ) || null;
@@ -10089,38 +10174,16 @@ async function recordAuthAlert(model, user, alert = {}) {
   return publicAuthAlert(entry);
 }
 
-function applyPromoEntitlement(user, promo, input = {}) {
-  if (!promo) return;
-  const now = new Date();
-  const daysFree = Number(promo.days || (promo.months ? Number(promo.months) * 30 : 120));
-  const existingCode = normalizePromoCode(user.entitlement?.promoCode);
-  const samePromo = user.entitlement?.source === "promo-code" && existingCode === normalizePromoCode(promo.code);
-  const expiresAt = samePromo && user.entitlement?.expiresAt
-    ? user.entitlement.expiresAt
-    : addDays(now, daysFree).toISOString();
-  user.entitlement = {
-    access: promo.access,
-    source: "promo-code",
-    promoCode: promo.code,
-    promoLabel: promo.label,
-    active: true,
-    fullAccess: true,
-    daysFree,
-    monthsFree: Math.round(daysFree / 30),
-    expiresAt,
-    billingStartsAfter: expiresAt,
-    selectedPlan: "Social Cues highest tier tester access",
-    tier: "highest",
-    subscriptionPaid: true,
-    appFeePaid: true,
-    paymentStatus: "promo-paid",
-    memberOnly: Boolean(promo.memberOnly),
-    alphaHonorDiscountPercent: 10,
-    alphaPremiumPercent: 25,
-    deactivatesBeforeAlpha: false,
-    grantedAt: samePromo && user.entitlement?.grantedAt ? user.entitlement.grantedAt : (user.entitlement?.grantedAt || now.toISOString()),
-    grantedReason: input.grantedReason || "120-day no-charge highest-tier test account"
-  };
+function applyAlphaDiscountEligibility(user, promo, input = {}) {
+  if (!user || !promo) return null;
+  const normalized = normalizeAlphaDiscountAccount(user, {
+    eligible: true,
+    eligibleAt: user.alphaDiscount?.eligibleAt || input.eligibleAt || new Date().toISOString(),
+    source: "alpha-code"
+  });
+  user.entitlement = normalized.entitlement;
+  user.alphaDiscount = normalized.alphaDiscount;
+  return user.alphaDiscount;
 }
 
 function applyPaidEntitlement(user, payment = {}) {
@@ -10157,7 +10220,7 @@ function applyPaidEntitlementForEmail(model, email) {
 
 function applyOwnerEntitlement(user) {
   if (!user || !isSignupOwnerEmail(user.email)) return null;
-  if (user.entitlement?.memberOnly) return user.entitlement;
+  if (alphaDiscountEligible(user)) return user.entitlement;
   if (publicEntitlement(user).active) return user.entitlement;
   user.entitlement = {
     access: "owner-full-access",
@@ -10179,15 +10242,24 @@ function promoForUserAccess(model, user = {}, _supabaseUser = null, input = {}) 
   const inputPromo = promoCodeRecord(input.promoCode || "");
   if (inputPromo) return inputPromo;
   const ledgerClaim = promoLedgerClaimForEmail(model, user.email);
-  return ledgerClaim ? promoCodeRecord(ledgerClaim.code) : null;
+  return ledgerClaim ? {
+    code: normalizePromoCode(ledgerClaim.code),
+    label: ledgerClaim.label || "Alpha account",
+    email: normalizeEmail(ledgerClaim.email),
+    active: true
+  } : null;
 }
 
 function hydrateUserAccessState(model, user, { supabaseUser = null, input = {} } = {}) {
   if (!model || !user?.email) return user;
+  const normalized = normalizeAlphaDiscountAccount(user);
+  user.entitlement = normalized.entitlement;
+  if (normalized.alphaDiscount) user.alphaDiscount = normalized.alphaDiscount;
+  else delete user.alphaDiscount;
   const promo = promoForUserAccess(model, user, supabaseUser, input);
   if (promo && validatePromoClaim(model, promo, user.email).ok) {
-    applyPromoEntitlement(user, promo, input);
-    recordPromoClaim(model, promo, user.email, "active", user);
+    const claim = recordPromoClaim(model, promo, user.email, "eligible", user);
+    applyAlphaDiscountEligibility(user, promo, { ...input, eligibleAt: claim?.claimedAt || claim?.updatedAt });
   }
   applyPaidEntitlementForEmail(model, user.email);
   applyOwnerEntitlement(user);
@@ -10196,7 +10268,7 @@ function hydrateUserAccessState(model, user, { supabaseUser = null, input = {} }
 }
 
 function normalizedEntitlementActive(row = {}) {
-  return ["active", "trialing", "paid", "promo-paid", "owner-verified"].includes(String(row.status || "").toLowerCase());
+  return ["active", "trialing", "paid", "owner-verified"].includes(String(row.status || "").toLowerCase());
 }
 
 async function hydrateNormalizedSupabaseAccountState(model, user) {
@@ -10236,7 +10308,7 @@ async function hydrateNormalizedSupabaseAccountState(model, user) {
         stripeSubscriptionId: entitlement.stripe_subscription_id || user.entitlement?.stripeSubscriptionId || "",
         expiresAt: entitlement.current_period_end || null,
         billingStartsAfter: entitlement.current_period_end || null,
-        selectedPlan: user.entitlement?.selectedPlan || (access === "highest-tier-test" ? "Social Cues highest tier tester access" : access),
+        selectedPlan: user.entitlement?.selectedPlan || access,
         grantedAt: user.entitlement?.grantedAt || entitlement.created_at || entitlement.updated_at || new Date().toISOString(),
         grantedReason: user.entitlement?.grantedReason || "Durable Supabase billing entitlement"
       };
@@ -13868,7 +13940,8 @@ function publicAppUser(user) {
     role: resolvedAppUserRole(user),
     createdAt: user.createdAt || null,
     lastLoginAt: user.lastLoginAt || user.loggedInAt || null,
-    entitlement: publicEntitlement(user)
+    entitlement: publicEntitlement(user),
+    alphaDiscount: publicAlphaDiscountEligibility(user)
   };
 }
 
@@ -13913,6 +13986,7 @@ function accountSessionResponse(model, user, device, token = "") {
     workspace: workspaceForUser(model, user),
     session,
     entitlement: publicEntitlement(user),
+    alphaDiscount: publicAlphaDiscountEligibility(user),
     device: publicDeviceSession(device),
     devices: publicDeviceSessions(model, user.id),
     alerts: [...providerExpiryAlertsForUser(model, user), ...authAlertsForUser(model, user.id)]
@@ -13995,29 +14069,28 @@ async function createAppAccount(model, input = {}) {
   if (enteredPromoCode && (!promo || promo.active === false)) {
     return { ok: false, status: 400, error: "That Social Cues promo code is not active." };
   }
-  const assignedMemberPromo = testPromoCodes.find(item => (
+  const assignedPromo = testPromoCodes.find(item => (
     item.active
-    && item.memberOnly
     && item.email
     && item.email === email
   ));
-  if (assignedMemberPromo && promo?.code !== assignedMemberPromo.code) {
+  if (assignedPromo && promo?.code !== assignedPromo.code) {
     return {
       ok: false,
       status: 403,
       signupLocked: true,
-      error: "Use the Social Cues member promo code assigned to this email address."
+      error: "Use the Social Cues Alpha code assigned to this email address."
     };
   }
   const promoClaim = validatePromoClaim(model, promo, email);
   if (!promoClaim.ok) return promoClaim;
-  const ownerSignup = isSignupOwnerEmail(email) && !assignedMemberPromo && !promo?.memberOnly;
+  const ownerSignup = isSignupOwnerEmail(email) && !assignedPromo && !promo;
   if (!ownerSignup && !promo) {
     return {
       ok: false,
       status: 403,
       signupLocked: true,
-      error: "Social Cues account creation is invite-only during alpha. Use an active promo code or the owner email."
+      error: "Social Cues account creation is invite-only during alpha. Use an active Alpha code or the owner email."
     };
   }
   if (authMode === "supabase") {
@@ -14039,7 +14112,7 @@ async function createAppAccount(model, input = {}) {
         ownerPending: ownerSignup,
         modelChanged: Boolean(promo),
         error: promo
-          ? "Check your email to verify this Social Cues account. Your promo code will apply after verification and login."
+          ? "Check your email to verify this Social Cues account. Alpha discount eligibility will be saved after verification and login."
           : "Check your email to verify this Social Cues account, then log in."
       };
     }
@@ -14069,7 +14142,7 @@ async function createAppAccount(model, input = {}) {
     user.passwordSetAt = new Date().toISOString();
     user.lastLoginAt = new Date().toISOString();
     hydrateUserAccessState(model, user, { input: { ...input, promoCode: promo?.code || input.promoCode } });
-    return { ok: true, user, providerSession: { sessionProvider: "local-promo" } };
+    return { ok: true, user, providerSession: { sessionProvider: "local-password" } };
   }
   return { ok: false, status: 503, error: authenticationServiceUnavailableMessage };
 }
@@ -14103,7 +14176,7 @@ async function loginAppAccount(model, input = {}) {
     user.name = input.name || user.name || "Social Cues User";
     user.lastLoginAt = new Date().toISOString();
     hydrateUserAccessState(model, user, { input });
-    return { ok: true, user, providerSession: { sessionProvider: "local-promo" } };
+    return { ok: true, user, providerSession: { sessionProvider: "local-password" } };
   }
   return { ok: false, status: 503, error: authenticationServiceUnavailableMessage };
 }
@@ -14326,7 +14399,7 @@ async function sessionFromRequest(model, req) {
     }
   }
   if (!user) return null;
-  if (authMode === "supabase" && device.sessionProvider !== "local-promo") {
+  if (authMode === "supabase" && device.sessionProvider !== "local-password") {
     try {
       const supabaseUser = await getSupabaseAuthUser(token);
       if (!supabaseUser?.id || String(supabaseUser.id) !== String(user.supabaseUserId || user.id)) return null;
@@ -14370,7 +14443,7 @@ function hasActiveAppAccess(user = {}) {
 function appAccessRequiredResponse(res, status = 402) {
   return json(res, status, {
     ok: false,
-    error: "Buy Social Cues or use an active approved promo entitlement before using the app.",
+    error: "An active Social Cues subscription is required before using the app.",
     accessRequired: true,
     checkoutPath: "/api/billing/checkout",
     portalPath: "/portal"
@@ -16020,7 +16093,7 @@ function landingPageHtml() {
           <a class="btn accent" href="/pricing">View pricing</a>
           <a class="btn" href="/portal">Account portal</a>
         </div>
-        <p style="color:var(--muted);margin-top:12px">Monthly pricing is available for review. Checkout and billing activation are unavailable. Promo testers can use the portal for devices, alerts, and app links.</p>
+        <p style="color:var(--muted);margin-top:12px">Monthly pricing is available for review. Checkout and billing activation are unavailable. Signed-in accounts can use the portal for devices, alerts, and account status.</p>
       </div>
       <aside class="hero-panel">
         <div class="metric"><strong>Plan</strong><span class="pill">Platform-native variants</span></div>
@@ -16038,7 +16111,7 @@ function landingPageHtml() {
     <section class="band">
       <div class="wrap">
         <h2 style="margin:0 0 8px">Early access</h2>
-        <p style="max-width:760px">Current access is limited to approved promo testers while billing activation remains unavailable. Use Social Cues to build the campaign proof loop before public launch.</p>
+        <p style="max-width:760px">Account creation remains invite-only while billing activation is unavailable. Alpha codes save a permanent discount; they do not unlock the app.</p>
       </div>
     </section>
   </main>
@@ -16071,6 +16144,7 @@ function pricingPageHtml(pricing) {
   const moveWeights = pricing.moves.weights.map(item => `<div class="status-row"><div><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(`${item.moves} Move${item.moves === 1 ? "" : "s"} per ${item.unit.replaceAll("_", " ")}`)}<br><span>${escapeHtml(item.detail)}</span></div><span class="pill">${escapeHtml(`${item.availability} / ${item.meteringStatus}`)}</span></div>`).join("");
   const movePacks = pricing.moves.packs.map(pack => `<div class="status-row"><div><strong>${escapeHtml(pack.name)}:</strong> ${escapeHtml(pack.priceDisplay)}<br><span>Planned for purchase after Stripe billing is verified.</span></div><span class="pill">${escapeHtml(`${pack.status} / ${pack.purchase.status}`)}</span></div>`).join("");
   const zeroMoveLabels = pricing.moves.zeroMoveActivities.map(item => item.label).join(", ");
+  const standardExperiences = pricing.standardExperiences.map(item => `<div class="status-row"><div><strong>${escapeHtml(item.label)}</strong><br><span>${escapeHtml(item.detail)}</span></div><span class="pill">${escapeHtml(classificationLabel(item.classification))}</span></div>`).join("");
   const services = pricing.services.map(service => `<div class="status-row"><div><strong>${escapeHtml(service.name)}</strong><br><span>${escapeHtml(service.description)}</span></div><span class="pill">${escapeHtml(service.status)}</span></div>`).join("");
   const providers = pricing.providers.map(provider => `<div class="status-row"><div><strong>${escapeHtml(provider.name)}</strong><br><span>${escapeHtml(provider.disclosure)}</span></div><span class="pill">${escapeHtml(`${provider.status} / ${provider.availability}`)}</span></div>`).join("");
   return marketingShell("Social Cues Pricing", `
@@ -16084,10 +16158,13 @@ function pricingPageHtml(pricing) {
         <h1 style="font-size:clamp(38px,6vw,66px);line-height:1;margin:12px 0 16px">Business, Growth, and Agency plans.</h1>
         <p class="lead">${escapeHtml(pricing.positioning)}</p>
         <div class="notice" style="margin-top:18px">Prices are monthly USD list prices. Checkout, Move-pack purchase, and billing activation are unavailable.</div>
+        <div class="notice" style="margin-top:12px"><strong>${escapeHtml(pricing.alphaDiscount.label)}</strong> Eligible accounts can choose Business, Growth, or Agency. The discount changes no access until a normal subscription is active.</div>
       </section>
       <section class="wrap grid" style="align-items:start" data-pricing-catalog-version="${escapeHtml(pricing.catalogVersion)}">${plans}</section>
+      <section class="wrap" style="padding:18px 20px 8px" data-alpha-discount="eligible-policy"><div class="notice"><strong>${escapeHtml(pricing.alphaDiscount.label)}</strong><br>Applies to Business, Growth, or Agency after an eligible account starts a normal subscription. An Alpha code does not grant app access, a plan, Moves, a role, an app-fee waiver, or a free period. Checkout remains unavailable.</div></section>
       <section class="band"><div class="wrap"><h2 style="margin:0 0 8px">How Moves work</h2><p>${escapeHtml(pricing.moves.definition)} Included Moves reset each billing cycle and do not roll over. Purchased Moves are planned to remain available for ${escapeHtml(pricing.moves.purchasedMoves.expirationMonths)} months while the subscription remains active.</p><p>Zero-Move activity: ${escapeHtml(zeroMoveLabels)}.</p><div class="status-list">${moveWeights}${movePacks}</div></div></section>
-      <section class="band"><div class="wrap"><h2 style="margin:0 0 8px">Guided services remain separate</h2><p>Services are scoped independently and are not included automatically with a plan.</p><div class="status-list">${services}</div></div></section>
+      <section class="band"><div class="wrap"><h2 style="margin:0 0 8px">Guided setup is standard</h2><p>Guided setup and onboarding are included for every Social Cues user and are not a separate plan, pilot, or add-on.</p><div class="status-list">${standardExperiences}</div></div></section>
+      ${services ? `<section class="wrap" style="padding:36px 20px 8px"><h2>Optional custom services</h2><div class="status-list">${services}</div></section>` : ""}
       <section class="wrap" style="padding:36px 20px 8px"><h2>Customer-owned providers</h2><p class="lead" style="font-size:17px">${escapeHtml(pricing.thirdPartyChargesDisclosure)}</p><div class="status-list">${providers}</div><div class="notice" style="margin-top:14px">${escapeHtml(pricing.agencyDataPolicy)}</div></section>
     </main>
     <footer class="wrap footer"><a href="/privacy">Privacy</a> - <a href="/terms">Terms</a> - <a href="mailto:${supportEmail}">${supportEmail}</a></footer>
@@ -16197,17 +16274,17 @@ function portalPageHtml() {
     async function api(path, options={}){const headers={...(options.headers||{})};const token=localStorage.getItem(legacyTokenKey);if(token)headers.Authorization="Bearer "+token;const res=await fetch(path,{...options,headers,cache:"no-store",credentials:"same-origin"});const data=await res.json().catch(()=>({}));if(!res.ok||data.ok===false)throw new Error(data.error||"Request failed");return data}
     function escapeHtml(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[c]))}
     function showPane(id){["authBox","recoveryBox","signedInBox"].forEach(key=>$(key)?.classList.add("hidden"));$(id)?.classList.remove("hidden")}
-    function setCreateMode(value){createMode=Boolean(value);showPane("authBox");document.querySelectorAll(".create-only").forEach(el=>el.classList.toggle("hidden",!createMode));$("createBtn").textContent=createMode?"Create account":"Create account";$("loginBtn").textContent=createMode?"Back to login":"Log in";$("authNotice").textContent=createMode?"Alpha signup is invite-only: use the owner email or an active promo code.":"Log in with registered email and password."}
+    function setCreateMode(value){createMode=Boolean(value);showPane("authBox");document.querySelectorAll(".create-only").forEach(el=>el.classList.toggle("hidden",!createMode));$("createBtn").textContent=createMode?"Create account":"Create account";$("loginBtn").textContent=createMode?"Back to login":"Log in";$("authNotice").textContent=createMode?"Alpha signup is invite-only: use the owner email or an active Alpha code. Alpha discount: 20% off forever; the code does not unlock the app.":"Log in with registered email and password."}
     function openRecoveryBox(message="Enter the account email and Social Cues will send a password reset link."){const knownEmail=$("emailInput").value.trim();if(knownEmail&&!$("recoveryEmailInput").value)$("recoveryEmailInput").value=knownEmail;$("recoveryNotice").textContent=message;showPane("recoveryBox")}
-    async function auth(mode){if(mode==="create"&&!createMode){setCreateMode(true);return}if(mode==="login"&&createMode){setCreateMode(false);return}const body={email:$("emailInput").value,password:$("passwordInput").value,device:deviceInfo()};if(createMode){body.name=$("nameInput").value;body.promoCode=$("promoInput").value}if(!body.password||body.password.length<8){$("authNotice").textContent="Use at least 8 characters.";return}try{const data=await api(createMode?"/api/auth/signup":"/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});localStorage.removeItem(legacyTokenKey);$("authNotice").textContent=data.entitlement?.active?"Full access active. Opening workstation.":"Signed in. Payment or promo access is still needed.";renderSignedIn(data);await refreshPortal();if(data.entitlement?.active)location.replace("/app")}catch(error){$("authNotice").textContent=error.message}}
+    async function auth(mode){if(mode==="create"&&!createMode){setCreateMode(true);return}if(mode==="login"&&createMode){setCreateMode(false);return}const body={email:$("emailInput").value,password:$("passwordInput").value,device:deviceInfo()};if(createMode){body.name=$("nameInput").value;body.promoCode=$("promoInput").value}if(!body.password||body.password.length<8){$("authNotice").textContent="Use at least 8 characters.";return}try{const data=await api(createMode?"/api/auth/signup":"/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});localStorage.removeItem(legacyTokenKey);$("authNotice").textContent=data.entitlement?.active?"Subscription active. Opening workstation.":data.alphaDiscount?.eligible?"Alpha discount saved. Choose Business, Growth, or Agency when checkout becomes available.":"Signed in. An active subscription is still needed.";renderSignedIn(data);await refreshPortal();if(data.entitlement?.active)location.replace("/app")}catch(error){$("authNotice").textContent=error.message}}
     async function resendVerification(){const email=$("emailInput").value;if(!email){$("authNotice").textContent="Enter the account email first.";return}try{const data=await api("/api/auth/resend-verification",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});$("authNotice").textContent=data.message||"Verification email resent. Check inbox and spam."}catch(error){$("authNotice").textContent=error.message}}
     async function requestPasswordRecovery(){const email=$("recoveryEmailInput").value.trim();if(!email){$("recoveryNotice").textContent="Enter the registered account email.";return}const button=$("sendRecoveryBtn");button.disabled=true;const original=button.textContent;button.textContent="Sending...";try{const data=await api("/api/auth/password-recovery",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});$("recoveryNotice").textContent=data.message||"If that account exists, a password reset email is on the way."}catch(error){$("recoveryNotice").textContent=error.message}finally{button.disabled=false;button.textContent=original}}
     function renderSignedIn(data){showPane("signedInBox");$("welcomeText").textContent="Signed in"+(data?.user?.name?" as "+data.user.name:"")}
     function renderDevices(devices=[]){$("deviceList").innerHTML=devices.length?devices.map(d=>'<div class="status-row"><div><strong>'+escapeHtml(d.name||"Device")+'</strong><br><span>'+escapeHtml(d.kind||"device")+' - '+escapeHtml(d.lastSeenAt?new Date(d.lastSeenAt).toLocaleString():"not seen yet")+'</span></div><span class="pill">'+(d.active?"remembered":"signed out")+'</span></div>').join(""):'<div class="notice">No remembered devices yet.</div>'}
     function renderAlerts(items){$("alertList").innerHTML=items.length?items.map(item=>'<div class="status-row"><div><strong>'+escapeHtml(item.label)+'</strong><br><span>'+escapeHtml(item.detail)+'</span></div><span class="pill">'+escapeHtml(item.status)+'</span></div>').join(""):'<div class="notice">Checking readiness after login.</div>'}
-    function accessDetail(entitlement){if(!entitlement?.active)return"Billing activation is unavailable. Approved promo access remains separate.";if(entitlement.source==="promo-code"){const until=entitlement.expiresAt?new Date(entitlement.expiresAt).toLocaleDateString():"120 days";return"Promo code "+entitlement.promoCode+" gives highest-tier full access through "+until+". App fee and subscription gate are satisfied for the test window."}return(entitlement.selectedPlan||"Highest-tier paid access")+" active. App fee and subscription gate are satisfied."}
+    function accessDetail(entitlement,alphaDiscount){if(entitlement?.active)return(entitlement.selectedPlan||"Social Cues subscription")+" active.";if(alphaDiscount?.eligible)return alphaDiscount.label+" Choose Business, Growth, or Agency when checkout becomes available. The code does not grant app access.";return"Billing activation is unavailable. An active subscription is required for app access."}
     async function acceptWorkspaceInvite(){const token=pageParams.get("invite");if(!token)return false;const accepted=await api("/api/workspace/invites/accept",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});history.replaceState({},document.title,"/portal?stay=1");$("authNotice").textContent="Workspace invitation accepted.";return Boolean(accepted.accepted)}
-    async function refreshPortal(){let entitlement=null;let session=null;try{session=await api("/api/auth/session");localStorage.removeItem(legacyTokenKey);renderSignedIn(session);renderDevices(session.devices||[]);entitlement=session.entitlement||null;if(pageParams.get("invite"))await acceptWorkspaceInvite();try{entitlement=(await api("/api/auth/entitlement")).entitlement||entitlement}catch{}}catch{}const [authReady,smtp,media]=await Promise.all([fetch("/api/auth/readiness").then(r=>r.json()),fetch("/api/auth/smtp/readiness").then(r=>r.json()),fetch("/api/media/storage/readiness").then(r=>r.json())]);const personalAlerts=(session?.alerts||[]).slice(0,3).map(item=>({label:item.label,status:item.status||"info",detail:item.detail||""}));const coreAlerts=[{label:"Access",status:entitlement?.active?"full access":"activation unavailable",detail:accessDetail(entitlement)},{label:"Account security",status:authReady.alphaLocalFallback?"in progress":"ready",detail:authReady.emailVerificationRequired?"Verified email and remembered-device protection are active.":"Account protection is being prepared."},{label:"Recovery and alerts",status:authReady.passwordRecoveryReady&&authReady.loginAlertingReady&&authReady.rateLimitGuarded?"ready":"in progress",detail:"Email recovery, login alerts, and request limits protect the account lane."},{label:"Account email",status:smtp.ready?"ready":"in progress",detail:smtp.ready?"Verification and recovery email delivery is ready.":"Email delivery is being prepared before public signup."},{label:"Checkout",status:"unavailable",detail:"Checkout and billing activation are unavailable."},{label:"Media storage",status:media.ready?"ready":"in progress",detail:media.ready?"Private media storage is ready.":"Private media storage is being prepared."}];renderAlerts(personalAlerts.length?[...personalAlerts,...coreAlerts]:coreAlerts);if(entitlement?.active&&pageParams.get("stay")!=="1")location.replace("/app")}
+    async function refreshPortal(){let entitlement=null;let alphaDiscount=null;let session=null;try{session=await api("/api/auth/session");localStorage.removeItem(legacyTokenKey);renderSignedIn(session);renderDevices(session.devices||[]);entitlement=session.entitlement||null;alphaDiscount=session.alphaDiscount||session.user?.alphaDiscount||null;if(pageParams.get("invite"))await acceptWorkspaceInvite();try{const access=await api("/api/auth/entitlement");entitlement=access.entitlement||entitlement;alphaDiscount=access.alphaDiscount||alphaDiscount}catch{}}catch{}const [authReady,smtp,media]=await Promise.all([fetch("/api/auth/readiness").then(r=>r.json()),fetch("/api/auth/smtp/readiness").then(r=>r.json()),fetch("/api/media/storage/readiness").then(r=>r.json())]);const personalAlerts=(session?.alerts||[]).slice(0,3).map(item=>({label:item.label,status:item.status||"info",detail:item.detail||""}));const coreAlerts=[{label:"Access",status:entitlement?.active?"full access":"activation unavailable",detail:accessDetail(entitlement,alphaDiscount)},...(alphaDiscount?.eligible?[{label:"Alpha discount",status:"eligible",detail:alphaDiscount.label+" Choose Business, Growth, or Agency; checkout remains unavailable."}]:[]),{label:"Account security",status:authReady.alphaLocalFallback?"in progress":"ready",detail:authReady.emailVerificationRequired?"Verified email and remembered-device protection are active.":"Account protection is being prepared."},{label:"Recovery and alerts",status:authReady.passwordRecoveryReady&&authReady.loginAlertingReady&&authReady.rateLimitGuarded?"ready":"in progress",detail:"Email recovery, login alerts, and request limits protect the account lane."},{label:"Account email",status:smtp.ready?"ready":"in progress",detail:smtp.ready?"Verification and recovery email delivery is ready.":"Email delivery is being prepared before public signup."},{label:"Checkout",status:"unavailable",detail:"Checkout and billing activation are unavailable."},{label:"Media storage",status:media.ready?"ready":"in progress",detail:media.ready?"Private media storage is ready.":"Private media storage is being prepared."}];renderAlerts(personalAlerts.length?[...personalAlerts,...coreAlerts]:coreAlerts);if(entitlement?.active&&pageParams.get("stay")!=="1")location.replace("/app")}
     async function openApp(){try{await api("/api/auth/session");localStorage.removeItem(legacyTokenKey);location.href="/app"}catch(error){$("authNotice").textContent="Log in again before opening the command center.";setCreateMode(false)}}
     $("loginBtn").addEventListener("click",()=>auth("login"));$("createBtn").addEventListener("click",()=>auth("create"));$("resendVerifyBtn").addEventListener("click",resendVerification);$("forgotPasswordBtn").addEventListener("click",()=>openRecoveryBox());$("sendRecoveryBtn").addEventListener("click",requestPasswordRecovery);$("backToLoginBtn").addEventListener("click",()=>setCreateMode(false));document.querySelectorAll(".openAppBtn").forEach(btn=>btn.addEventListener("click",openApp));$("logoutBtn").addEventListener("click",async()=>{await api("/api/auth/logout",{method:"POST"}).catch(()=>{});localStorage.removeItem(legacyTokenKey);location.reload()});$("copyAppLink").addEventListener("click",async()=>{await navigator.clipboard.writeText(location.origin+"/app");alert("App link copied.")});if(hashParams.get("type")==="recovery"&&hashParams.get("access_token")){location.replace("/reset-password"+location.hash)}else{setCreateMode(createMode);if(pageParams.get("verified")==="1"){setCreateMode(false);$("authNotice").textContent="Email verified. Log in with that email and password to open Social Cues."}const inviteCode=pageParams.get("promo")||pageParams.get("code")||"";if(inviteCode)$("promoInput").value=inviteCode.toUpperCase();if(pageParams.get("mode")==="forgot-password"||pageParams.get("mode")==="reset-password")openRecoveryBox("Request a fresh password reset email. The new-password screen opens only from that email link.");refreshPortal()}
   </script>
@@ -16303,7 +16380,7 @@ function lockedAppPreviewHtml() {
       <div>
         <div class="eyebrow">Access required</div>
         <h1>No app access without an active account.</h1>
-        <p class="lead">Social Cues workstations are private. Log in with a paid account or an active tester promo account to continue.</p>
+        <p class="lead">Social Cues workstations are private. Log in with an active subscription to continue.</p>
         <div class="nav-actions" style="margin-top:22px">
           <a class="btn primary" href="/portal">Log in</a>
           <a class="btn" href="/portal?mode=create">Create account</a>
@@ -16311,12 +16388,12 @@ function lockedAppPreviewHtml() {
       </div>
       <aside class="hero-panel">
         <div class="metric"><strong>Account</strong><span class="pill" id="lockedAccountStatus">Checking</span></div>
-        <div class="metric"><strong>Payment or promo</strong><span class="pill" id="lockedAccessStatus">Checking</span></div>
+        <div class="metric"><strong>Subscription</strong><span class="pill" id="lockedAccessStatus">Checking</span></div>
         <div class="metric"><strong>Workstation</strong><span class="pill" id="lockedAppStatus">Private</span></div>
         <div class="notice" id="lockedAccessDetail">Checking this device for a Social Cues session.</div>
         <div class="nav-actions">
           <a class="btn primary" href="/portal">Fix access</a>
-          <a class="btn" href="/portal?mode=create">Use promo code</a>
+          <a class="btn" href="/portal?mode=create">Redeem Alpha code</a>
         </div>
       </aside>
     </section>
@@ -16368,13 +16445,13 @@ function lockedAppPreviewHtml() {
           accountStatus.textContent = "Signed in";
           accessStatus.textContent = "Missing";
           appStatus.textContent = "Locked";
-          detail.textContent = "Signed in as " + (data.user.email || data.user.name || "this user") + ", but this account does not have active paid or promo access yet." + providerNote;
+          detail.textContent = "Signed in as " + (data.user.email || data.user.name || "this user") + ", but this account does not have an active subscription yet." + (data.alphaDiscount?.eligible ? " " + data.alphaDiscount.label + "; choose Business, Growth, or Agency when checkout becomes available." : "") + providerNote;
           return;
         }
         accountStatus.textContent = "Signed out";
         accessStatus.textContent = "Unknown";
         appStatus.textContent = "Locked";
-        detail.textContent = "Log in or create a tester account before opening the private workstation." + providerNote;
+        detail.textContent = "Log in or create an account before opening the private workstation." + providerNote;
       } catch {
         accountStatus.textContent = "Check failed";
         accessStatus.textContent = "Unknown";
@@ -18029,9 +18106,11 @@ function queuedVariants(model, options = {}) {
   const now = Date.parse(options.now || new Date().toISOString());
   const includeFuture = Boolean(options.includeFuture);
   const platforms = new Set((options.platforms || []).filter(Boolean));
+  const user = options.user || null;
   const items = [];
   const seenVariantIds = new Set();
   for (const campaign of contentVariantBatches(model)) {
+    if (!visiblePublishWorkspaceRecord(campaign, user)) continue;
     for (const variant of campaign.variants || []) {
       const queueEligible = variant.status === "queued" || variant.status === "retrying";
       if (!queueEligible) continue;
@@ -18046,6 +18125,7 @@ function queuedVariants(model, options = {}) {
     }
   }
   for (const record of Array.isArray(model.publishQueue) ? model.publishQueue : []) {
+    if (!visiblePublishWorkspaceRecord(record, user)) continue;
     const status = String(record.status || "").toLowerCase();
     if (!["queued", "retrying"].includes(status)) continue;
     const variantId = String(record.variantId || record.item?.id || record.id || "");
@@ -21828,7 +21908,7 @@ async function route(req, res) {
         type: "login",
         status: "notice",
         label: "Sign-in successful",
-        detail: "The account signed in, but full app access is still gated by payment or promo entitlement.",
+        detail: "The account signed in, but full app access still requires an active subscription.",
         deviceId: device.deviceId,
         deviceName: device.name || "This device"
       });
@@ -21933,9 +22013,10 @@ async function route(req, res) {
     return json(res, 200, {
       ok: true,
       entitlement: publicEntitlement(session.user),
+      alphaDiscount: publicAlphaDiscountEligibility(session.user),
       accessMessage: publicEntitlement(session.user).active
-        ? "Full test access is active for this account."
-        : "No paid or promo access is active yet."
+        ? "An active Social Cues subscription is available for this account."
+        : "No active Social Cues subscription is available yet."
     });
   }
 
@@ -21997,7 +22078,7 @@ async function route(req, res) {
     const model = await getModel();
     const session = await sessionFromRequest(model, req);
     if (!session?.user) return json(res, 401, { ok: false, error: "Sign in before managing multi-factor authentication." });
-    if (!supabaseAuthEnabled() || session.device.sessionProvider === "local-promo") {
+    if (!supabaseAuthEnabled() || session.device.sessionProvider === "local-password") {
       return json(res, 409, { ok: false, configured: false, error: "MFA requires a verified Supabase Auth account." });
     }
     const factors = await listSupabaseMfaFactors(session.token);
@@ -22018,7 +22099,7 @@ async function route(req, res) {
     const input = await bodyJson(req);
     const model = await getModel();
     const session = await sessionFromRequest(model, req);
-    if (!session?.user || !supabaseAuthEnabled() || session.device.sessionProvider === "local-promo") {
+    if (!session?.user || !supabaseAuthEnabled() || session.device.sessionProvider === "local-password") {
       return json(res, 409, { ok: false, error: "Sign in with a verified Supabase account before enrolling an authenticator." });
     }
     const factor = await enrollSupabaseTotp(session.token, input.friendlyName);
@@ -22691,6 +22772,7 @@ async function route(req, res) {
     const user = session?.user || null;
     const model = user ? await modelForSession(session, sharedModel) : sharedModel;
     const items = queuedVariants(model, {
+      user,
       includeFuture: input.includeFuture === true,
       now: input.now || new Date().toISOString(),
       platforms: Array.isArray(input.platforms) ? input.platforms : []

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   STRIPE_BILLING_API_VERSION,
+  STRIPE_ALPHA_DISCOUNT_READINESS,
   STRIPE_BILLING_CANONICAL_PLAN_IDS,
   STRIPE_BILLING_RELEASE_STAGE,
   STRIPE_BILLING_SUPPORTED_PRICING_VERSION,
@@ -50,6 +51,18 @@ equal(disabled.safeReadiness.releaseStage, STRIPE_BILLING_RELEASE_STAGE);
 equal(disabled.safeReadiness.checkoutAvailable, false);
 equal(disabled.safeReadiness.portalAvailable, false);
 equal(disabled.safeReadiness.webhookProcessingAvailable, false);
+assert.deepEqual(disabled.safeReadiness.alphaDiscount, STRIPE_ALPHA_DISCOUNT_READINESS);
+checks += 1;
+equal(STRIPE_ALPHA_DISCOUNT_READINESS.label, "Alpha discount: 20% off forever");
+equal(STRIPE_ALPHA_DISCOUNT_READINESS.percentOff, 20);
+equal(STRIPE_ALPHA_DISCOUNT_READINESS.duration, "forever");
+assert.deepEqual(STRIPE_ALPHA_DISCOUNT_READINESS.applicablePlanIds, ["business", "growth", "agency"]);
+checks += 1;
+equal(STRIPE_ALPHA_DISCOUNT_READINESS.eligibilityAuthority, "social_cues_account");
+equal(STRIPE_ALPHA_DISCOUNT_READINESS.requiresDurableAccountEligibility, true);
+equal(STRIPE_ALPHA_DISCOUNT_READINESS.stripeMapping, "coupon_or_promotion_code");
+equal(STRIPE_ALPHA_DISCOUNT_READINESS.stripeObjectConfigured, false);
+equal(STRIPE_ALPHA_DISCOUNT_READINESS.mutationAvailable, false);
 
 for (const mode of ["test", "live"]) {
   const result = resolveStripeBillingConfiguration(validEnvironment(mode));
@@ -60,6 +73,8 @@ for (const mode of ["test", "live"]) {
   equal(result.internal.gatewayConfiguration.apiVersion, STRIPE_BILLING_API_VERSION);
   equal(result.safeReadiness.configured, true);
   equal(result.safeReadiness.releaseStage, "readiness_only");
+  assert.deepEqual(result.safeReadiness.alphaDiscount, STRIPE_ALPHA_DISCOUNT_READINESS);
+  checks += 1;
   assert.deepEqual(Object.keys(result.internal.lifecycleConfiguration.priceIdsByPlan).sort(), [...STRIPE_BILLING_CANONICAL_PLAN_IDS].sort());
   checks += 1;
   const safe = safeSerialized(result);

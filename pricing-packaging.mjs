@@ -58,7 +58,15 @@ function support(label, queuePriority, detail) {
   };
 }
 
+const guidedSetupCapability = capability(
+  "guided-setup",
+  "Guided setup and onboarding",
+  "available_not_tier_gated",
+  "Guided setup and onboarding are included for every Social Cues user on Business, Growth, and Agency."
+);
+
 const sharedCapabilities = [
+  guidedSetupCapability,
   capability("publishing-calendar", "Publishing calendar", "available_not_tier_gated", "Calendar and scheduling workflows are available; provider publishing still depends on each connected provider's approval and permissions."),
   capability("approval-workflow", "Approval workflow", "available_not_tier_gated", "Human review and approval controls are available across current plans."),
   capability("response-management", "Response management", "available_not_tier_gated", "The response inbox is available where connected providers supply supported comment or message data."),
@@ -152,6 +160,7 @@ export const PRICING_CONFIGURATION = deepFreeze({
   classificationLabels,
   moveMetering: MOVE_METERING_CONFIGURATION,
   costAccounting: OPENAI_COST_ACCOUNTING_DEFAULTS,
+  standardExperiences: [guidedSetupCapability],
   plans: [
     plan({
       id: "business",
@@ -211,8 +220,6 @@ export const PRICING_CONFIGURATION = deepFreeze({
     { id: "automation-capacity", name: "Additional automation capacity", status: "planned", price: null }
   ],
   services: [
-    { id: "guided-setup", name: "Guided Setup", status: "configurable", price: null, description: "Work with Social Cues to configure an authorized workspace and its initial operating workflow." },
-    { id: "guided-pilot", name: "Guided Pilot", status: "configurable", price: null, description: "Work with Social Cues to configure, run, and evaluate a focused campaign or workflow. The purpose is to collect evidence, identify what worked, identify what did not, and determine practical next steps. Results vary." },
     { id: "custom-implementation", name: "Custom Implementation", status: "configurable", price: null, description: "Scope implementation support for an approved operational requirement." }
   ],
   providers: [

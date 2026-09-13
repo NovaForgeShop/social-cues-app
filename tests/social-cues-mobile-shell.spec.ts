@@ -5,15 +5,10 @@ test('first-run workspace stays usable on Android and iPhone', async ({ page }, 
   test.skip(!process.env.E2E_USE_LOCAL_SERVER, 'Mobile account creation runs against the isolated local alpha only.');
 
   const stamp = Date.now();
-  const promoCode = testInfo.project.name === 'mobile-safari'
-    ? 'SC-LOCAL-PULSE-6R8N'
-    : 'SC-LOCAL-LAUNCH-3V5K';
-
   await page.goto('/portal?mode=create&stay=1');
   await page.locator('#nameInput').fill(`Mobile ${testInfo.project.name}`);
-  await page.locator('#emailInput').fill(`mobile-${testInfo.project.name}-${stamp}@socialcuesapp.test`);
+  await page.locator('#emailInput').fill(`barton.cory.m+mobile-${testInfo.project.name}-${stamp}@gmail.com`);
   await page.locator('#passwordInput').fill(`Mobile-shell-${stamp}!`);
-  await page.locator('#promoInput').fill(promoCode);
   const [mobileSignupResponse] = await Promise.all([
     page.waitForResponse(response => response.url().endsWith('/api/auth/signup') && response.request().method() === 'POST'),
     page.locator('#createBtn').click()

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile, access } from "node:fs/promises";
 import path from "node:path";
-import { createLocalPilot, syntheticPromoCode, syntheticSecondPromoCode } from "./scripts/run-local-pilot.mjs";
+import { createLocalPilot } from "./scripts/run-local-pilot.mjs";
 
 const pilot = await createLocalPilot();
 let checks = 0;
@@ -14,8 +14,8 @@ const call = async (route, token, body) => {
   return { status: response.status, body: await response.json() };
 };
 const signup = async label => {
-  const response = await call("/api/auth/signup", null, { name: "Synthetic " + label, email: label + randomUUID() + "@example.test",
-    password: "Synthetic-only-" + randomUUID() + "!", promoCode: label === "beta" ? syntheticSecondPromoCode : syntheticPromoCode, device: { deviceId: "device-" + randomUUID() } });
+  const response = await call("/api/auth/signup", null, { name: "Synthetic " + label, email: "barton.cory.m+revisioned-" + label + "-" + randomUUID() + "@gmail.com",
+    password: "Synthetic-only-" + randomUUID() + "!", device: { deviceId: "device-" + randomUUID() } });
   check(response.status === 200, "fresh signup status " + response.status + " code " + (response.body.code || "none"));
   return { ...response.body, token: response.body.session.token };
 };

@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { chromium, webkit } from "playwright";
-import { createLocalPilot, projectRoot, syntheticPromoCode } from "./scripts/run-local-pilot.mjs";
+import { createLocalPilot, projectRoot } from "./scripts/run-local-pilot.mjs";
 import { parseCsv } from "./posting-pack.contract.test.mjs";
 import { project as recoveryContent } from "./content-recovery.contract.test.mjs";
 
@@ -23,10 +23,10 @@ export async function runPilotRehearsal() {
       const run = { profile: profile.name, steps: [], applicationRoutesMocked: false, browserExternalBlocked: [], responses: [], inspectionRequests: [] };
       report.profiles.push(run);
       let browser, context, page, inspectingSnapshot = false, step = "start";
-      const email = "synthetic-pilot-" + randomUUID().slice(0, 8) + "@example.test";
+      const email = "barton.cory.m+synthetic-pilot-" + randomUUID().slice(0, 8) + "@gmail.com";
       const password = "Synthetic-only-" + randomUUID() + "!";
       await writeFile(path.join(pilot.dataDir, "pilot-access.json"), JSON.stringify({
-        label: "SYNTHETIC LOCAL TEST ACCOUNT ONLY", email, password, promoCode: syntheticPromoCode
+        label: "SYNTHETIC LOCAL TEST ACCOUNT ONLY", email, password
       }, null, 2));
       const pageErrors = [];
       const screenshot = async name => {
@@ -91,7 +91,6 @@ export async function runPilotRehearsal() {
         await page.locator("#nameInput").fill("Synthetic Pilot Operator");
         await page.locator("#emailInput").fill(email);
         await page.locator("#passwordInput").fill(password);
-        await page.locator("#promoInput").fill(syntheticPromoCode);
         await responseAfter("/api/auth/signup", () => page.locator("#createBtn").click());
         await page.waitForURL(/\/app/);
         await page.locator("#onboarding").waitFor({ state: "visible" });

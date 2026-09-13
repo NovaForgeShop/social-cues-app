@@ -285,11 +285,17 @@ test("planned capabilities and agency isolation remain truthfully labeled", () =
   assert.equal(PRICING_CONFIGURATION.agencyDataPolicy, "Client data remains isolated by workspace and is never combined.");
 });
 
-test("Guided Pilot stays neutral, unpriced, and free of outcome promises", () => {
-  const pilot = PRICING_CONFIGURATION.services.find(service => service.id === "guided-pilot");
-  assert.equal(pilot.name, "Guided Pilot");
-  assert.equal(pilot.price, null);
-  assert.match(pilot.description, /collect evidence/i);
-  assert.match(pilot.description, /Results vary\./);
-  assert.doesNotMatch(`${pilot.name} ${pilot.description}`, /prove|validate|guarantee|success|profit|return on investment/i);
+test("guided setup and onboarding are universal rather than a plan, pilot, or add-on", () => {
+  assert.deepEqual(PRICING_CONFIGURATION.standardExperiences, [{
+    id: "guided-setup",
+    label: "Guided setup and onboarding",
+    classification: "available_not_tier_gated",
+    detail: "Guided setup and onboarding are included for every Social Cues user on Business, Growth, and Agency."
+  }]);
+  for (const plan of PRICING_CONFIGURATION.plans) {
+    assert.deepEqual(plan.capabilities.find(item => item.id === "guided-setup"), PRICING_CONFIGURATION.standardExperiences[0]);
+  }
+  assert.equal(PRICING_CONFIGURATION.services.some(service => /guided|pilot/i.test(`${service.id} ${service.name}`)), false);
+  assert.equal(PRICING_CONFIGURATION.addOns.some(addOn => /guided|pilot/i.test(`${addOn.id} ${addOn.name}`)), false);
+  assert.deepEqual(PRICING_CONFIGURATION.services.map(service => service.id), ["custom-implementation"]);
 });

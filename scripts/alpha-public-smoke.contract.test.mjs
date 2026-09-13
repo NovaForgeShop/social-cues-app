@@ -82,7 +82,7 @@ function responseBodies() {
       rateLimitGuarded: true,
       signupAccess: {
         mode: "invite-only",
-        allowed: "Owner allowlist or active Social Cues promo code",
+        allowed: "Owner allowlist or active Social Cues Alpha code",
         ownerEmailCount: 1,
         activePromoCodeCount: 0
       }

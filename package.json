@@ -9,6 +9,7 @@
     "alpha:smoke": "node scripts/alpha-public-smoke.mjs",
     "test:alpha-public-smoke": "node scripts/alpha-public-smoke.contract.test.mjs",
     "test:release-readiness": "node release-readiness.contract.test.mjs",
+    "test:alpha-discount": "node --test alpha-discount.contract.test.mjs",
     "test:pricing": "node pricing-packaging.contract.test.mjs",
     "test:pricing-presentation": "node pricing-presentation.contract.test.mjs",
     "test:move-ledger": "node move-ledger.contract.test.mjs",

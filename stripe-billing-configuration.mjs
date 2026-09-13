@@ -1,4 +1,5 @@
 import { PRICING_CONFIGURATION, resolvePricingPlan } from "./pricing-packaging.mjs";
+import { ALPHA_DISCOUNT_POLICY } from "./alpha-discount.mjs";
 import {
   STRIPE_BILLING_LIFECYCLE_CONFIGURATION_VERSION,
   validateStripeBillingConfiguration
@@ -34,6 +35,21 @@ function deepFreeze(value) {
   return Object.freeze(value);
 }
 
+export const STRIPE_ALPHA_DISCOUNT_READINESS = deepFreeze({
+  state: "contract_defined_activation_held",
+  policyId: ALPHA_DISCOUNT_POLICY.id,
+  label: ALPHA_DISCOUNT_POLICY.label,
+  percentOff: ALPHA_DISCOUNT_POLICY.percentOff,
+  duration: ALPHA_DISCOUNT_POLICY.duration,
+  applicablePlanIds: [...ALPHA_DISCOUNT_POLICY.applicablePlanIds],
+  appliesTo: "subscription_checkout",
+  eligibilityAuthority: "social_cues_account",
+  requiresDurableAccountEligibility: true,
+  stripeMapping: "coupon_or_promotion_code",
+  stripeObjectConfigured: false,
+  mutationAvailable: false
+});
+
 function environmentValue(environment, name) {
   const value = environment?.[name];
   return typeof value === "string" ? value.trim() : "";
@@ -54,7 +70,8 @@ function safeReadiness(state, mode, configured, reasonCode = null) {
     reasonCode,
     checkoutAvailable: false,
     portalAvailable: false,
-    webhookProcessingAvailable: false
+    webhookProcessingAvailable: false,
+    alphaDiscount: STRIPE_ALPHA_DISCOUNT_READINESS
   });
 }
 

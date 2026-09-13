@@ -78,8 +78,6 @@ const SYNTHETIC_DISCORD_COMMUNITY_CLIENT_SECRET = "p28-discord-client-secret";
 const SYNTHETIC_DISCORD_COMMUNITY_AUTH_SECRET = "p28-discord-auth-secret-material-2026";
 const SYNTHETIC_DISCORD_COMMUNITY_ENCRYPTION_KEY = "p28-discord-encryption-key-material-2026";
 const SYNTHETIC_DISCORD_COMMUNITY_ACCESS_TOKEN = "p28-discord-access-token";
-const SYNTHETIC_DISCORD_COMMUNITY_OWNER_PROMO = "P28-DISCORD-OWNER";
-const SYNTHETIC_DISCORD_COMMUNITY_FOREIGN_PROMO = "P28-DISCORD-FOREIGN";
 const SYNTHETIC_DISCORD_COMMUNITY_PROVIDER_ID = "280000000000000002";
 const SYNTHETIC_DISCORD_COMMUNITY_GUILD_ID = "280000000000000003";
 const DISCORD_COMMUNITY_SCOPES = Object.freeze(["identify", "guilds"]);
@@ -142,8 +140,6 @@ const SYNTHETIC_TWITCH_CALLBACK_ACCESS_TOKEN = "twitch-fixture-callback-access-t
 const SYNTHETIC_TWITCH_CALLBACK_REFRESH_TOKEN = "twitch-fixture-callback-refresh-token";
 const SYNTHETIC_TWITCH_CALLBACK_CODE = "twitch-fixture-callback-code";
 const SYNTHETIC_TWITCH_TOKEN_ENCRYPTION_KEY = "twitch-fixture-token-encryption-key";
-const SYNTHETIC_TWITCH_PROMO_CODE = "TWITCH-PORTAL-FIXTURE";
-const SYNTHETIC_TWITCH_SECOND_PROMO_CODE = "TWITCH-PORTAL-FOREIGN";
 
 function twitchScenarioEnv({ baseEnv = process.env, overrides = {} } = {}) {
   const env = { ...baseEnv };
@@ -199,13 +195,10 @@ const SYNTHETIC_GOOGLE_FAILURE_CODE = "p20-google-failure-code";
 const SYNTHETIC_YOUTUBE_SUCCESS_CODE = "p20-youtube-success-code";
 const SYNTHETIC_GOOGLE_BUSINESS_SUCCESS_CODE = "p20-google-business-success-code";
 const SYNTHETIC_GOOGLE_TOKEN_ENCRYPTION_KEY = "p20-google-token-encryption-key";
-const SYNTHETIC_GOOGLE_OWNER_PROMO_CODE = "P20-GOOGLE-OWNER";
-const SYNTHETIC_GOOGLE_FOREIGN_PROMO_CODE = "P20-GOOGLE-FOREIGN";
 const SYNTHETIC_GOOGLE_START_CLIENT_ID = "p25-google-start-client.apps.googleusercontent.com";
 const SYNTHETIC_GOOGLE_START_CLIENT_SECRET = "p25-google-start-client-secret";
 const SYNTHETIC_GOOGLE_START_AUTH_SECRET = "p25-google-start-auth-secret-material-2026";
 const SYNTHETIC_GOOGLE_START_ENCRYPTION_KEY = "p25-google-start-encryption-key-material-2026";
-const SYNTHETIC_GOOGLE_START_FOREIGN_PROMO_CODE = "P25-GOOGLE-START-FOREIGN";
 
 const X_ACCOUNT_ENV_NAMES = Object.freeze([
   "X_CLIENT_ID",
@@ -233,8 +226,6 @@ const SYNTHETIC_X_ACCOUNT_CLIENT_SECRET = "p26-x-client-secret";
 const SYNTHETIC_X_ACCOUNT_AUTH_SECRET = "p26-x-auth-secret-material-2026";
 const SYNTHETIC_X_ACCOUNT_ENCRYPTION_KEY = "p26-x-encryption-key-material-2026";
 const SYNTHETIC_X_ACCOUNT_ACCESS_TOKEN = "fake-test-token-marker";
-const SYNTHETIC_X_ACCOUNT_OWNER_PROMO = "P26-X-OWNER";
-const SYNTHETIC_X_ACCOUNT_FOREIGN_PROMO = "P26-X-FOREIGN";
 const SYNTHETIC_X_ACCOUNT_PROVIDER_ID = "test-p26-x-owner";
 const X_ACCOUNT_READ_SCOPES = Object.freeze(["tweet.read", "users.read", "offline.access"]);
 const X_ACCOUNT_WRITE_SCOPES = Object.freeze(["tweet.read", "tweet.write", "users.read", "offline.access"]);
@@ -311,7 +302,6 @@ const SYNTHETIC_META_START_APP_ID = "p21-meta-app-id";
 const SYNTHETIC_META_START_APP_SECRET = "p21-meta-app-secret";
 const SYNTHETIC_META_START_AUTH_SECRET = "p21-meta-session-secret";
 const SYNTHETIC_META_START_ENCRYPTION_KEY = "p21-meta-encryption-key";
-const SYNTHETIC_META_START_OWNER_PROMO = "P21-META-OWNER";
 const SYNTHETIC_META_ASSETS_APP_ID = "220000000000001";
 const SYNTHETIC_META_ASSETS_APP_SECRET = "p22-meta-assets-app-secret";
 const SYNTHETIC_META_ASSETS_USER_ID = "220000000000002";
@@ -321,15 +311,11 @@ const SYNTHETIC_META_ASSETS_PAGE_TOKEN = "p22-facebook-page-token";
 const SYNTHETIC_META_ASSETS_INSTAGRAM_ID = "220000000000004";
 const SYNTHETIC_META_ASSETS_AUTH_SECRET = "p22-meta-assets-session-secret";
 const SYNTHETIC_META_ASSETS_ENCRYPTION_KEY = "p22-meta-assets-encryption-key";
-const SYNTHETIC_META_ASSETS_OWNER_PROMO = "P22-META-ASSETS-OWNER";
-const SYNTHETIC_META_ASSETS_FOREIGN_PROMO = "P22-META-ASSETS-FOREIGN";
 const SYNTHETIC_META_CALLBACK_APP_ID = "230000000000001";
 const SYNTHETIC_META_CALLBACK_APP_SECRET = "p23-meta-callback-app-secret";
 const SYNTHETIC_META_CALLBACK_AUTH_SECRET = "p23-meta-callback-session-secret";
 const SYNTHETIC_META_CALLBACK_ENCRYPTION_KEY = "p23-meta-callback-encryption-key";
 const SYNTHETIC_META_CALLBACK_FAILURE_CODE = "p23-meta-callback-failure-code";
-const SYNTHETIC_META_CALLBACK_OWNER_PROMO = "P23-META-CALLBACK-OWNER";
-const SYNTHETIC_META_CALLBACK_FOREIGN_PROMO = "P23-META-CALLBACK-FOREIGN";
 const SYNTHETIC_META_ATOMIC_APP_ID = "240000000000001";
 const SYNTHETIC_META_ATOMIC_APP_SECRET = "p24-meta-callback-app-secret";
 const SYNTHETIC_META_ATOMIC_AUTH_SECRET = "p24-meta-callback-session-secret";
@@ -342,8 +328,6 @@ const SYNTHETIC_META_ATOMIC_PAGE_TOKEN = "p24-meta-page-token";
 const SYNTHETIC_META_ATOMIC_USER_ID = "240000000000002";
 const SYNTHETIC_META_ATOMIC_PAGE_ID = "240000000000003";
 const SYNTHETIC_META_ATOMIC_INSTAGRAM_ID = "240000000000004";
-const SYNTHETIC_META_ATOMIC_OWNER_PROMO = "P24-META-CALLBACK-OWNER";
-const SYNTHETIC_META_ATOMIC_FOREIGN_PROMO = "P24-META-CALLBACK-FOREIGN";
 const META_CALLBACK_UNISSUED_ERROR = "OAuth state was not issued by this backend or was already used.";
 const META_CALLBACK_OWNER_REQUIRED_ERROR = "Sign in to the same Social Cues account that started this connection, then try again.";
 const META_CALLBACK_OWNER_MISMATCH_ERROR = "OAuth state belongs to a different signed-in Social Cues user. Start the connection again from the app.";
@@ -1277,10 +1261,7 @@ async function runMetaOAuthStartScenario() {
       AUTH_SESSION_SECRET: SYNTHETIC_META_START_AUTH_SECRET,
       OAUTH_TOKEN_ENCRYPTION_KEY: SYNTHETIC_META_START_ENCRYPTION_KEY,
       SOCIAL_CUES_DATA_DIR: scenarioDataDir,
-      SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
-      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
-        { code: SYNTHETIC_META_START_OWNER_PROMO, label: "P21 Meta owner", days: 1, active: true }
-      ])
+      SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath
     }
   });
   const retainedCredentialNames = Object.keys(childEnv)
@@ -1345,9 +1326,8 @@ async function runMetaOAuthStartScenario() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: "P21 Meta Owner",
-        email: `p21-meta-owner-${Date.now()}@example.test`,
+        email: `barton.cory.m+p21-meta-owner-${Date.now()}@gmail.com`,
         password: ownerPassword,
-        promoCode: SYNTHETIC_META_START_OWNER_PROMO,
         workspaceName: "P21 Meta Workspace"
       })
     });
@@ -1373,7 +1353,7 @@ async function runMetaOAuthStartScenario() {
     );
     const modelAfterTesting = await shopifyScenarioResponse(scenarioBaseUrl, "/api/model", ownerAuth);
     if (normal.status !== 302 || !normal.location || testing.status !== 302 || !testing.location) {
-      throw new Error("Meta start fixture did not redirect both authenticated Facebook lanes");
+      throw new Error(`Meta start fixture did not redirect both authenticated Facebook lanes (${normal.status}/${testing.status})`);
     }
     const normalUrl = new URL(normal.location);
     const testingUrl = new URL(testing.location);
@@ -1542,10 +1522,7 @@ async function runGoogleOAuthStartScenario() {
       OAUTH_TOKEN_ENCRYPTION_KEY: SYNTHETIC_GOOGLE_START_ENCRYPTION_KEY,
       SOCIAL_CUES_DATA_DIR: scenarioDataDir,
       SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
-      SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath,
-      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
-        { code: SYNTHETIC_GOOGLE_START_FOREIGN_PROMO_CODE, label: "P25 Google start foreign", days: 1, active: true }
-      ])
+      SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath
     }
   });
   const retainedCredentialNames = Object.keys(childEnv)
@@ -1609,9 +1586,8 @@ async function runGoogleOAuthStartScenario() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: "P25 Google Start Foreign",
-        email: `p25-google-start-foreign-${Date.now()}@example.test`,
+        email: `barton.cory.m+p25-google-start-foreign-${Date.now()}@gmail.com`,
         password: foreignPassword,
-        promoCode: SYNTHETIC_GOOGLE_START_FOREIGN_PROMO_CODE,
         workspaceName: "P25 Google Start Foreign Workspace"
       })
     });
@@ -1620,7 +1596,7 @@ async function runGoogleOAuthStartScenario() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: "P25 Google Start Owner",
-        email: `mr.barton+p25-google-start-${Date.now()}@socialcuesapp.com`,
+        email: `barton.cory.m+p25-google-start-owner-${Date.now()}@gmail.com`,
         password: ownerPassword,
         workspaceName: "P25 Google Start Owner Workspace"
       })
@@ -1889,11 +1865,7 @@ async function runXAccountBoundaryScenario() {
       OAUTH_TOKEN_ENCRYPTION_KEY: SYNTHETIC_X_ACCOUNT_ENCRYPTION_KEY,
       SOCIAL_CUES_DATA_DIR: scenarioDataDir,
       SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
-      SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath,
-      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
-        { code: SYNTHETIC_X_ACCOUNT_OWNER_PROMO, label: "P26 X owner", days: 1, active: true },
-        { code: SYNTHETIC_X_ACCOUNT_FOREIGN_PROMO, label: "P26 X foreign", days: 1, active: true }
-      ])
+      SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath
     }
   });
   const retainedXNames = Object.keys(childEnv)
@@ -1962,7 +1934,7 @@ async function runXAccountBoundaryScenario() {
       || response.body?.accessRequired !== true
       || response.body?.checkoutPath !== "/api/billing/checkout"
       || response.body?.portalPath !== "/portal"
-      || response.body?.error !== "Buy Social Cues or use an active approved promo entitlement before using the app."
+      || response.body?.error !== "An active Social Cues subscription is required before using the app."
       || JSON.stringify(keys) !== JSON.stringify(expectedKeys)
       || response.location
       || response.headers["set-cookie"]
@@ -1981,16 +1953,14 @@ async function runXAccountBoundaryScenario() {
     });
     const ownerSignup = await signup({
       name: "P26 X Owner",
-      email: `p26-x-owner-${Date.now()}@example.test`,
+      email: `barton.cory.m+p26-x-owner-${Date.now()}@gmail.com`,
       password: ownerPassword,
-      promoCode: SYNTHETIC_X_ACCOUNT_OWNER_PROMO,
       workspaceName: "P26 X Owner Workspace"
     });
     const foreignSignup = await signup({
       name: "P26 X Foreign",
-      email: `p26-x-foreign-${Date.now()}@example.test`,
+      email: `barton.cory.m+p26-x-foreign-${Date.now()}@gmail.com`,
       password: foreignPassword,
-      promoCode: SYNTHETIC_X_ACCOUNT_FOREIGN_PROMO,
       workspaceName: "P26 X Foreign Workspace"
     });
     const ownerToken = ownerSignup.body?.session?.token || "";
@@ -2274,11 +2244,7 @@ async function runDiscordCommunityBoundaryScenario() {
       SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
       SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath,
       SOCIAL_CUES_TEST_MOCK_DISCORD_COMMUNITY: "true",
-      SOCIAL_CUES_TEST_DISCORD_ACCESS_TOKEN: SYNTHETIC_DISCORD_COMMUNITY_ACCESS_TOKEN,
-      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
-        { code: SYNTHETIC_DISCORD_COMMUNITY_OWNER_PROMO, label: "P28 Discord owner", days: 1, active: true },
-        { code: SYNTHETIC_DISCORD_COMMUNITY_FOREIGN_PROMO, label: "P28 Discord foreign", days: 1, active: true }
-      ])
+      SOCIAL_CUES_TEST_DISCORD_ACCESS_TOKEN: SYNTHETIC_DISCORD_COMMUNITY_ACCESS_TOKEN
     }
   });
   const retainedDiscordNames = Object.keys(childEnv)
@@ -2346,7 +2312,7 @@ async function runDiscordCommunityBoundaryScenario() {
       || response.body?.accessRequired !== true
       || response.body?.checkoutPath !== "/api/billing/checkout"
       || response.body?.portalPath !== "/portal"
-      || response.body?.error !== "Buy Social Cues or use an active approved promo entitlement before using the app."
+      || response.body?.error !== "An active Social Cues subscription is required before using the app."
       || JSON.stringify(keys) !== JSON.stringify(expectedKeys)
       || response.location
       || response.headers["set-cookie"]
@@ -2365,16 +2331,14 @@ async function runDiscordCommunityBoundaryScenario() {
     });
     const ownerSignup = await signup({
       name: "P28 Discord Owner",
-      email: `p28-discord-owner-${Date.now()}@example.test`,
+      email: `barton.cory.m+p28-discord-owner-${Date.now()}@gmail.com`,
       password: ownerPassword,
-      promoCode: SYNTHETIC_DISCORD_COMMUNITY_OWNER_PROMO,
       workspaceName: "P28 Discord Owner Workspace"
     });
     const foreignSignup = await signup({
       name: "P28 Discord Foreign",
-      email: `p28-discord-foreign-${Date.now()}@example.test`,
+      email: `barton.cory.m+p28-discord-foreign-${Date.now()}@gmail.com`,
       password: foreignPassword,
-      promoCode: SYNTHETIC_DISCORD_COMMUNITY_FOREIGN_PROMO,
       workspaceName: "P28 Discord Foreign Workspace"
     });
     const ownerToken = ownerSignup.body?.session?.token || "";
@@ -2670,11 +2634,7 @@ async function runMetaAssetsScenario() {
       SOCIAL_CUES_TEST_META_USER_TOKEN: SYNTHETIC_META_ASSETS_USER_TOKEN,
       SOCIAL_CUES_TEST_META_PAGE_ID: SYNTHETIC_META_ASSETS_PAGE_ID,
       SOCIAL_CUES_TEST_META_PAGE_TOKEN: SYNTHETIC_META_ASSETS_PAGE_TOKEN,
-      SOCIAL_CUES_TEST_META_INSTAGRAM_ID: SYNTHETIC_META_ASSETS_INSTAGRAM_ID,
-      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
-        { code: SYNTHETIC_META_ASSETS_OWNER_PROMO, label: "P22 Meta assets owner", days: 1, active: true },
-        { code: SYNTHETIC_META_ASSETS_FOREIGN_PROMO, label: "P22 Meta assets foreign", days: 1, active: true }
-      ])
+      SOCIAL_CUES_TEST_META_INSTAGRAM_ID: SYNTHETIC_META_ASSETS_INSTAGRAM_ID
     }
   });
   const retainedCredentialNames = Object.keys(childEnv)
@@ -2772,27 +2732,25 @@ async function runMetaAssetsScenario() {
       throw new Error("Unauthenticated Meta assets denial attempted provider traffic");
     }
 
-    const signup = async ({ name, email, password, promoCode, workspaceName }) => shopifyScenarioResponse(
+    const signup = async ({ name, email, password, workspaceName }) => shopifyScenarioResponse(
       scenarioBaseUrl,
       "/api/auth/signup",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password, promoCode, workspaceName })
+        body: JSON.stringify({ name, email, password, workspaceName })
       }
     );
     const ownerSignup = await signup({
       name: "P22 Meta Assets Owner",
-      email: `p22-meta-owner-${Date.now()}@example.test`,
+      email: `barton.cory.m+p22-meta-owner-${Date.now()}@gmail.com`,
       password: ownerPassword,
-      promoCode: SYNTHETIC_META_ASSETS_OWNER_PROMO,
       workspaceName: "P22 Meta Assets Workspace"
     });
     const foreignSignup = await signup({
       name: "P22 Meta Assets Foreign",
-      email: `p22-meta-foreign-${Date.now()}@example.test`,
+      email: `barton.cory.m+p22-meta-foreign-${Date.now()}@gmail.com`,
       password: foreignPassword,
-      promoCode: SYNTHETIC_META_ASSETS_FOREIGN_PROMO,
       workspaceName: "P22 Foreign Workspace"
     });
     const ownerToken = ownerSignup.body?.session?.token || "";
@@ -3070,11 +3028,7 @@ async function runMetaCallbackRejectionScenario() {
       SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath,
       SOCIAL_CUES_TEST_MOCK_META_CALLBACK: "true",
       SOCIAL_CUES_TEST_MOCK_META_ASSETS: "",
-      SOCIAL_CUES_TEST_META_FAILURE_CODE: SYNTHETIC_META_CALLBACK_FAILURE_CODE,
-      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
-        { code: SYNTHETIC_META_CALLBACK_OWNER_PROMO, label: "P23 Meta callback owner", days: 1, active: true },
-        { code: SYNTHETIC_META_CALLBACK_FOREIGN_PROMO, label: "P23 Meta callback foreign", days: 1, active: true }
-      ])
+      SOCIAL_CUES_TEST_META_FAILURE_CODE: SYNTHETIC_META_CALLBACK_FAILURE_CODE
     }
   });
   const retainedCredentialNames = Object.keys(childEnv)
@@ -3155,7 +3109,7 @@ async function runMetaCallbackRejectionScenario() {
 
   try {
     await waitForShopifyScenarioServer(child, scenarioBaseUrl, "P23 Meta callback");
-    const signup = async ({ name, promoCode, password, workspaceName }) => shopifyScenarioResponse(
+    const signup = async ({ name, password, workspaceName }) => shopifyScenarioResponse(
       scenarioBaseUrl,
       "/api/auth/signup",
       {
@@ -3163,9 +3117,8 @@ async function runMetaCallbackRejectionScenario() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          email: `p23-meta-${name.toLowerCase()}-${Date.now()}-${randomBytes(4).toString("hex")}@example.test`,
+          email: `barton.cory.m+p23-meta-${name.toLowerCase()}-${Date.now()}-${randomBytes(4).toString("hex")}@gmail.com`,
           password,
-          promoCode,
           workspaceName
         })
       }
@@ -3173,13 +3126,11 @@ async function runMetaCallbackRejectionScenario() {
     const ownerSignup = await signup({
       name: "Owner",
       password: ownerPassword,
-      promoCode: SYNTHETIC_META_CALLBACK_OWNER_PROMO,
       workspaceName: "P23 Meta Owner Workspace"
     });
     const foreignSignup = await signup({
       name: "Foreign",
       password: foreignPassword,
-      promoCode: SYNTHETIC_META_CALLBACK_FOREIGN_PROMO,
       workspaceName: "P23 Meta Foreign Workspace"
     });
     const ownerToken = ownerSignup.body?.session?.token || "";
@@ -3421,11 +3372,7 @@ async function runMetaCallbackAtomicPersistenceScenario() {
       SOCIAL_CUES_TEST_META_ATOMIC_PAGE_TOKEN: SYNTHETIC_META_ATOMIC_PAGE_TOKEN,
       SOCIAL_CUES_TEST_META_ATOMIC_USER_ID: SYNTHETIC_META_ATOMIC_USER_ID,
       SOCIAL_CUES_TEST_META_ATOMIC_PAGE_ID: SYNTHETIC_META_ATOMIC_PAGE_ID,
-      SOCIAL_CUES_TEST_META_ATOMIC_INSTAGRAM_ID: SYNTHETIC_META_ATOMIC_INSTAGRAM_ID,
-      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
-        { code: SYNTHETIC_META_ATOMIC_OWNER_PROMO, label: "P24 Meta callback owner", days: 1, active: true },
-        { code: SYNTHETIC_META_ATOMIC_FOREIGN_PROMO, label: "P24 Meta callback foreign", days: 1, active: true }
-      ])
+      SOCIAL_CUES_TEST_META_ATOMIC_INSTAGRAM_ID: SYNTHETIC_META_ATOMIC_INSTAGRAM_ID
     }
   });
   const retainedCredentialNames = Object.keys(childEnv)
@@ -3511,7 +3458,7 @@ async function runMetaCallbackAtomicPersistenceScenario() {
   child = startScenarioServer();
   try {
     await waitForShopifyScenarioServer(child, scenarioBaseUrl, "P24 Meta callback atomic persistence");
-    const signup = async ({ name, password, promoCode, workspaceName }) => shopifyScenarioResponse(
+    const signup = async ({ name, password, workspaceName }) => shopifyScenarioResponse(
       scenarioBaseUrl,
       "/api/auth/signup",
       {
@@ -3519,9 +3466,8 @@ async function runMetaCallbackAtomicPersistenceScenario() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          email: `p24-meta-${name.toLowerCase()}-${Date.now()}-${randomBytes(4).toString("hex")}@example.test`,
+          email: `barton.cory.m+p24-meta-${name.toLowerCase()}-${Date.now()}-${randomBytes(4).toString("hex")}@gmail.com`,
           password,
-          promoCode,
           workspaceName
         })
       }
@@ -3529,13 +3475,11 @@ async function runMetaCallbackAtomicPersistenceScenario() {
     const ownerSignup = await signup({
       name: "Owner",
       password: ownerPassword,
-      promoCode: SYNTHETIC_META_ATOMIC_OWNER_PROMO,
       workspaceName: "P24 Meta Owner Workspace"
     });
     const foreignSignup = await signup({
       name: "Foreign",
       password: foreignPassword,
-      promoCode: SYNTHETIC_META_ATOMIC_FOREIGN_PROMO,
       workspaceName: "P24 Meta Foreign Workspace"
     });
     const ownerToken = ownerSignup.body?.session?.token || "";
@@ -3870,10 +3814,6 @@ async function runGoogleCallbackPersistenceScenario() {
       SOCIAL_CUES_TEST_MOCK_GOOGLE_CALLBACK: "true",
       SOCIAL_CUES_TEST_GOOGLE_FAILURE_CODE: SYNTHETIC_GOOGLE_FAILURE_CODE,
       SOCIAL_CUES_TEST_GOOGLE_BUSINESS_SUCCESS_CODE: SYNTHETIC_GOOGLE_BUSINESS_SUCCESS_CODE,
-      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
-        { code: SYNTHETIC_GOOGLE_OWNER_PROMO_CODE, label: "P20 Google owner", days: 1, active: true },
-        { code: SYNTHETIC_GOOGLE_FOREIGN_PROMO_CODE, label: "P20 Google foreign", days: 1, active: true }
-      ]),
       AUTH_SESSION_SECRET: "p20-google-session-secret",
       OAUTH_TOKEN_ENCRYPTION_KEY: SYNTHETIC_GOOGLE_TOKEN_ENCRYPTION_KEY,
       GOOGLE_CLIENT_ID: SYNTHETIC_GOOGLE_CLIENT_ID,
@@ -3945,9 +3885,8 @@ async function runGoogleCallbackPersistenceScenario() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: "P20 Google Foreign",
-        email: `p20-google-foreign-${Date.now()}@example.test`,
+        email: `barton.cory.m+p20-google-foreign-${Date.now()}@gmail.com`,
         password: "p20-google-foreign-password-2026",
-        promoCode: SYNTHETIC_GOOGLE_FOREIGN_PROMO_CODE,
         workspaceName: "P20 Google Foreign Workspace"
       })
     });
@@ -3956,9 +3895,8 @@ async function runGoogleCallbackPersistenceScenario() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: "P20 Google Owner",
-        email: `p20-google-owner-${Date.now()}@example.test`,
+        email: `barton.cory.m+p20-google-owner-${Date.now()}@gmail.com`,
         password: "p20-google-owner-password-2026",
-        promoCode: SYNTHETIC_GOOGLE_OWNER_PROMO_CODE,
         workspaceName: "P20 Google Owner Workspace"
       })
     });
@@ -4244,10 +4182,6 @@ async function runTwitchPortalCredentialScenario() {
       SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
       SOCIAL_CUES_TEST_PROVIDER_MOCK_LOG: providerMockLogPath,
       SOCIAL_CUES_TEST_MOCK_TWITCH_CALLBACK: "true",
-      SOCIAL_CUES_PROMO_CODES: JSON.stringify([
-        { code: SYNTHETIC_TWITCH_PROMO_CODE, label: "Twitch portal fixture", days: 1, active: true },
-        { code: SYNTHETIC_TWITCH_SECOND_PROMO_CODE, label: "Twitch foreign-workspace fixture", days: 1, active: true }
-      ]),
       OAUTH_TOKEN_ENCRYPTION_KEY: SYNTHETIC_TWITCH_TOKEN_ENCRYPTION_KEY,
       WORKER_SECRET: "twitch-portal-fixture-worker-secret",
       TWITCH_APP_ID: SYNTHETIC_TWITCH_APP_ID,
@@ -4311,9 +4245,8 @@ async function runTwitchPortalCredentialScenario() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: "Twitch Foreign Workspace Fixture",
-        email: `twitch-portal-foreign-${Date.now()}@example.test`,
+        email: `barton.cory.m+twitch-portal-foreign-${Date.now()}@gmail.com`,
         password: "twitch-portal-foreign-password-2026",
-        promoCode: SYNTHETIC_TWITCH_SECOND_PROMO_CODE,
         workspaceName: "Twitch Foreign Workspace"
       })
     });
@@ -4326,9 +4259,8 @@ async function runTwitchPortalCredentialScenario() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: "Twitch Portal Fixture",
-        email: `twitch-portal-${Date.now()}@example.test`,
+        email: `barton.cory.m+twitch-portal-${Date.now()}@gmail.com`,
         password: "twitch-portal-fixture-password-2026",
-        promoCode: SYNTHETIC_TWITCH_PROMO_CODE,
         workspaceName: "Twitch Portal Fixture Workspace"
       })
     });
@@ -4780,7 +4712,6 @@ async function runShopifyCredentialScenario(scenario) {
   const scenarioShop = `social-cues-fixture-${sequence}.myshopify.com`;
   const scenarioDataDir = path.join(process.cwd(), ".tmp", `shopify-credential-${sequence}-${Date.now()}`);
   const requestLogPath = path.join(scenarioDataDir, "external-http-requests.ndjson");
-  const workspacePromoCode = `SC-SHOPIFY-${String(sequence).padStart(4, "0")}`;
   const workspaceEncryptionKey = scenario.workspaceTokenFixture ? `shopify-fixture-encryption-${randomBytes(12).toString("hex")}` : "";
   const workspaceTokenMarker = scenario.workspaceTokenFixture ? `shopify-fixture-workspace-token-${randomBytes(12).toString("hex")}` : "";
   const authSessionMarker = `shopify-fixture-session-${randomBytes(12).toString("hex")}`;
@@ -4803,7 +4734,6 @@ async function runShopifyCredentialScenario(scenario) {
       SHOPIFY_API_VERSION: "2026-07",
       SOCIAL_CUES_DATA_DIR: scenarioDataDir,
       SOCIAL_CUES_TEST_EXTERNAL_REQUEST_LOG: requestLogPath,
-      SOCIAL_CUES_PROMO_CODES: JSON.stringify([{ code: workspacePromoCode, label: "Shopify fixture", days: 1, active: true }]),
       OAUTH_TOKEN_ENCRYPTION_KEY: workspaceEncryptionKey,
       AUTH_SESSION_SECRET: authSessionMarker,
       WORKER_SECRET: workerSecretMarker,
@@ -4892,9 +4822,8 @@ async function runShopifyCredentialScenario(scenario) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Shopify Fixture User",
-          email: `shopify-fixture-${sequence}@example.test`,
+          email: `barton.cory.m+shopify-fixture-${sequence}@gmail.com`,
           password: "shopify-fixture-password-2026",
-          promoCode: workspacePromoCode,
           workspaceName: `Shopify Fixture Workspace ${sequence}`
         })
       });
@@ -5709,13 +5638,13 @@ function providerStateFixtureAccounts(owner) {
   ].map(account => ({ ...account, ownerUserId: owner.id, workspaceId: owner.workspaceId }));
 }
 
-async function mutateProviderStateFixture({ user, workspaceId, mutate }) {
+async function mutateProviderStateFixture({ user, workspaceId, mutate, dataDir = testDataDir }) {
   const seedSource = await readFile(new URL("./social-cues-model-seed.json", import.meta.url), "utf8");
   const seed = JSON.parse(seedSource.replace(/^\uFEFF/, ""));
   const owner = { ...user, id: String(user?.id || ""), workspaceId: String(workspaceId || "") };
   if (!owner.id || !owner.workspaceId) throw new Error("provider-state fixture is missing its canonical owner identity");
   const unavailable = () => { throw new Error("provider-state fixture must not invoke a browser merge callback"); };
-  const store = await openLocalWorkspacePersistence({ dataDir: testDataDir, seed, mergeClient: unavailable, recoverClient: unavailable });
+  const store = await openLocalWorkspacePersistence({ dataDir, seed, mergeClient: unavailable, recoverClient: unavailable });
   try {
     const sharedModel = await store.load();
     const model = store.view(sharedModel, owner.workspaceId);
@@ -5724,6 +5653,35 @@ async function mutateProviderStateFixture({ user, workspaceId, mutate }) {
   } finally {
     await store.close();
   }
+}
+
+async function grantSyntheticPaidSubscription({ user, workspaceId, plan = "business", dataDir = testDataDir }) {
+  const email = String(user?.email || "").trim().toLowerCase();
+  if (!email) throw new Error("synthetic paid-subscription fixture requires an account email");
+  await mutateProviderStateFixture({
+    user,
+    workspaceId,
+    dataDir,
+    mutate(model) {
+      model.billing = model.billing || {};
+      model.billing.paidEmails = Array.isArray(model.billing.paidEmails) ? model.billing.paidEmails : [];
+      const existing = model.billing.paidEmails.find(item => String(item.email || "").trim().toLowerCase() === email);
+      const payment = {
+        email,
+        active: true,
+        selectedPlan: plan,
+        plan,
+        access: plan,
+        tier: plan,
+        subscriptionPaid: true,
+        appFeePaid: true,
+        paymentStatus: "paid",
+        reason: "Synthetic local subscription fixture"
+      };
+      if (existing) Object.assign(existing, payment);
+      else model.billing.paidEmails.push(payment);
+    }
+  });
 }
 
 async function bindBillingCheckoutNonOwnerDeviceFixture({ owner, nonOwner }) {
@@ -5770,11 +5728,8 @@ function revisionedModelSaveEnvelope(model) {
 }
 
 const localPromoCodes = [
-  { code: "SC-LOCAL-BEACON-4M7Q", label: "Local test account 1", days: 120, active: true },
-  { code: "SC-LOCAL-SIGNAL-9X2P", label: "Local test account 2", days: 120, active: true },
-  { code: "SC-LOCAL-PULSE-6R8N", label: "Local test account 3", days: 120, active: true },
-  { code: "SC-LOCAL-LAUNCH-3V5K", label: "Local test account 4", days: 120, active: true },
-  { code: "SC-LOCAL-MEMBER-8N4Q", label: "Email-bound member account", email: "mr.barton+member-promo@socialcuesapp.com", days: 120, memberOnly: true, active: true }
+  { code: "SC-LOCAL-MEMBER-8N4Q", label: "Email-bound Alpha account", email: "alpha-member-r47@socialcuesapp.com", percentOff: 99, duration: "once", active: true },
+  { code: "SC-LOCAL-ALPHA-9K2M", label: "Single-account Alpha redemption", active: true }
 ];
 const mainTestServerEnv = {
     ...discordScenarioEnv({
@@ -6460,7 +6415,7 @@ try {
   if (!serverSource.includes('"/api/security/audit"') || !serverSource.includes('accessLevel === "operator"') || !serverSource.includes("socialCuesProviderOperator(session.user)")) throw new Error("internal diagnostics must require the Social Cues owner role");
   if (!serverSource.includes('status: "healthy"') || serverSource.includes("supabaseConfigured: supabaseEnabled")) throw new Error("public health output must not advertise internal persistence or provider configuration");
   if (!vercelConfigSource.includes('"server.mjs"') || vercelConfigSource.includes('"api/server.mjs"') || vercelConfigSource.includes('"routes"')) throw new Error("Vercel must use the single root server entrypoint without a stale catch-all function route");
-  if (!serverSource.includes("promo.email !== normalizedEmail") || !serverSource.includes("memberOnly: Boolean(promo.memberOnly)") || !serverSource.includes("if (entitlement.memberOnly) return \"Member\"") || !serverSource.includes("const assignedMemberPromo = testPromoCodes.find")) throw new Error("email-bound member promo codes must not inherit owner/admin access");
+  if (!serverSource.includes("promo.email !== normalizedEmail") || !serverSource.includes("if (alphaDiscountEligible(user)) return user.entitlement") || !serverSource.includes("const assignedPromo = testPromoCodes.find")) throw new Error("email-bound Alpha codes must not inherit owner/admin access");
   if (!serverSource.includes("REDDIT_DEVVIT_PROJECT_READY") || !serverSource.includes("redditDevvitProjectDeclaredReady") || !serverSource.includes('if (runtimeMode === "vercel") return redditDevvitProjectDeclaredReady')) throw new Error("production Reddit readiness must use verified flags instead of packaging the Devvit toolchain");
   if (serverSource.includes("promoFromSupabaseUser") || /raw_user_meta_data[\s\S]{0,400}promo/i.test(serverSource)) throw new Error("user-editable Supabase metadata must never grant promo authorization");
   const authPolicyStart = serverSource.indexOf("function authenticationExecutionMode");
@@ -6929,7 +6884,7 @@ try {
   if (!serverSource.includes("model.metaConnection?.instagramCount") || !serverSource.includes("model.metaHealth?.assetSync?.instagramAvailable") || !appHtml.includes("Meta sees IG asset") || !appHtml.includes("needs token-backed bind")) throw new Error("growth and account cards should show Meta-detected Instagram assets without falsely marking them usable");
   if (!/url\.pathname === "\/api\/campaigns\/coming-soon"[\s\S]*?buildComingSoonShotCampaign\(session\.user\)/.test(serverSource)) throw new Error("coming-soon campaign should be creatable in the signed-in hosted workspace");
   if (!serverSource.includes('url.pathname === "/social-cues-coming-soon.png"')) throw new Error("coming-soon graphic should be publicly served for provider media URLs");
-  if (!serverSource.includes("lockedAccessDetail") || !serverSource.includes("sc_last_oauth_return") || !serverSource.includes("Signed in as ") || !serverSource.includes("does not have active paid or promo access yet")) throw new Error("locked app gate should explain signed-in, signed-out, and OAuth-return access states");
+  if (!serverSource.includes("lockedAccessDetail") || !serverSource.includes("sc_last_oauth_return") || !serverSource.includes("Signed in as ") || !serverSource.includes("does not have an active subscription yet")) throw new Error("locked app gate should explain signed-in, signed-out, and OAuth-return access states");
   const oauthReturnCallbacks = [...serverSource.matchAll(/url\.pathname === "\/api\/oauth\/([^/]+)\/callback"[\s\S]*?return html\(res, 200, oauthReturnBody\("([^"]+)"/g)]
     .map(match => ({ provider: match[1], block: match[0] }));
   const callbacksMissingSessionRenewal = oauthReturnCallbacks
@@ -7073,38 +7028,55 @@ try {
   const missingMemberPromoResponse = await fetch(base + "/api/auth/signup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "Workspace Member", email: "mr.barton+member-promo@socialcuesapp.com", password: "test-password-2026", workspaceName: "Fresh Member Workspace" })
+    body: JSON.stringify({ name: "Workspace Member", email: "alpha-member-r47@socialcuesapp.com", password: "test-password-2026", workspaceName: "Fresh Member Workspace" })
   });
   const missingMemberPromo = await missingMemberPromoResponse.json();
-  if (missingMemberPromoResponse.status !== 403 || !missingMemberPromo.signupLocked || !/member promo code assigned/i.test(missingMemberPromo.error || "")) throw new Error("an email assigned to a member-only promo must never fall through to owner signup");
+  if (missingMemberPromoResponse.status !== 403 || !missingMemberPromo.signupLocked || !/Alpha code assigned/i.test(missingMemberPromo.error || "")) throw new Error("an email assigned to an Alpha code must never fall through to owner signup");
 
   const memberPromoSignup = await request("/api/auth/signup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "Workspace Member", email: "mr.barton+member-promo@socialcuesapp.com", password: "test-password-2026", promoCode: "SC-LOCAL-MEMBER-8N4Q", workspaceName: "Fresh Member Workspace" })
+    body: JSON.stringify({ name: "Workspace Member", email: "alpha-member-r47@socialcuesapp.com", password: "test-password-2026", promoCode: "SC-LOCAL-MEMBER-8N4Q", workspaceName: "Fresh Member Workspace" })
   });
-  if (!memberPromoSignup.ok || memberPromoSignup.user?.role !== "Member" || memberPromoSignup.entitlement?.memberOnly !== true) throw new Error("member-only promo must override the owner-email alias rule");
-  const memberWorkspace = await request("/api/model", { headers: { Authorization: `Bearer ${memberPromoSignup.session.token}` } });
-  if (memberWorkspace.campaigns?.length || memberWorkspace.quickPosts?.length || memberWorkspace.connectedAccounts?.some(account => account.status === "connected")) throw new Error("member promo signup must receive a fresh blank isolated workspace");
+  if (!memberPromoSignup.ok || memberPromoSignup.user?.role !== "Member" || memberPromoSignup.entitlement?.active !== false) throw new Error("Alpha redemption must remain an ordinary unpaid member account");
+  if (memberPromoSignup.alphaDiscount?.label !== "Alpha discount: 20% off forever" || memberPromoSignup.alphaDiscount?.percentOff !== 20 || memberPromoSignup.alphaDiscount?.duration !== "forever") throw new Error("Alpha redemption did not preserve the canonical discount");
+  if (JSON.stringify(memberPromoSignup).includes("SC-LOCAL-MEMBER-8N4Q")) throw new Error("Alpha code leaked through the signup response");
+  const memberProtectedResponse = await fetch(base + "/api/responses", { headers: { Authorization: `Bearer ${memberPromoSignup.session.token}` } });
+  if (memberProtectedResponse.status !== 402) throw new Error("Alpha redemption must not grant protected application access");
+  await stopMainTestServer();
+  await grantSyntheticPaidSubscription({ user: memberPromoSignup.user, workspaceId: memberPromoSignup.workspace.id });
+  startMainTestServer();
+  await waitForServer();
+  const paidMemberWorkspace = await request("/api/model", { headers: { Authorization: `Bearer ${memberPromoSignup.session.token}` } });
+  if (paidMemberWorkspace.workspace?.id !== memberPromoSignup.workspace.id) throw new Error("ordinary paid activation did not restore the Alpha account workspace");
+  if (paidMemberWorkspace.currentUser?.role !== "Customer") throw new Error("an Alpha account must resolve to Customer only after ordinary paid activation");
 
-  const accountEmail = `alpha-${Date.now()}@socialcuesapp.com`;
+  const accountEmail = `barton.cory.m+r47-owner-${Date.now()}@gmail.com`;
   const accountPassword = "test-password-2026";
   const signup = await request("/api/auth/signup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "Alpha Tester", email: accountEmail, password: accountPassword, promoCode: "SC-LOCAL-BEACON-4M7Q", workspaceName: "Social Cues Alpha" })
+    body: JSON.stringify({ name: "Test Owner", email: accountEmail, password: accountPassword, workspaceName: "Social Cues Test" })
   });
-  if (!signup.ok || signup.workspace.name !== "Social Cues Alpha" || !signup.session?.token) throw new Error("signup failed");
-  if (signup.entitlement?.access !== "highest-tier-test" || signup.entitlement?.source !== "promo-code" || !signup.entitlement?.subscriptionPaid || !signup.entitlement?.appFeePaid) throw new Error("promo entitlement failed");
-  if (signup.user?.role !== "Alpha tester") throw new Error("promo tester signup should not be treated as Owner");
+  if (!signup.ok || signup.workspace.name !== "Social Cues Test" || !signup.session?.token) throw new Error("signup failed");
+  if (signup.entitlement?.source !== "owner-allowlist" || !signup.entitlement?.active) throw new Error("test owner entitlement failed");
+  if (signup.user?.role !== "Owner") throw new Error("owner fixture did not receive owner access");
+
+  const ledgerAlphaSignup = await request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Ledger Alpha Account", email: `ledger-alpha-${Date.now()}@socialcuesapp.com`, password: accountPassword, promoCode: "SC-LOCAL-ALPHA-9K2M", workspaceName: "Ledger Alpha" })
+  });
+  if (ledgerAlphaSignup.entitlement?.active !== false || ledgerAlphaSignup.alphaDiscount?.label !== "Alpha discount: 20% off forever") throw new Error("ledger Alpha fixture did not remain discount-only");
+  if (JSON.stringify(ledgerAlphaSignup).includes("SC-LOCAL-ALPHA-9K2M")) throw new Error("unbound Alpha code leaked through the signup response");
 
   const duplicatePromoResponse = await fetch(base + "/api/auth/signup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "Duplicate Tester", email: `duplicate-promo-${Date.now()}@socialcuesapp.com`, password: accountPassword, promoCode: "SC-LOCAL-BEACON-4M7Q", workspaceName: "Duplicate Promo" })
+    body: JSON.stringify({ name: "Duplicate Alpha Account", email: `duplicate-promo-${Date.now()}@socialcuesapp.com`, password: accountPassword, promoCode: "SC-LOCAL-ALPHA-9K2M", workspaceName: "Duplicate Alpha" })
   });
   const duplicatePromo = await duplicatePromoResponse.json();
-  if (duplicatePromoResponse.status !== 409 || !/already been assigned/i.test(duplicatePromo.error || "")) throw new Error("promo codes should be one tester account each");
+  if (duplicatePromoResponse.status !== 409 || !/already been assigned/i.test(duplicatePromo.error || "")) throw new Error("Alpha codes should be bound to one account and email");
 
   const badLoginResponse = await fetch(base + "/api/auth/login", {
     method: "POST",
@@ -7124,10 +7096,10 @@ try {
   const login = await request("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "Alpha Tester", email: accountEmail, password: accountPassword, workspaceName: "Social Cues Alpha" })
+    body: JSON.stringify({ name: "Test Owner", email: accountEmail, password: accountPassword, workspaceName: "Social Cues Test" })
   });
-  if (!login.ok || login.workspace.name !== "Social Cues Alpha" || !login.session?.token) throw new Error("login failed");
-  if (login.user?.role !== "Alpha tester") throw new Error("promo tester login should preserve the Alpha tester role");
+  if (!login.ok || login.workspace.name !== "Social Cues Test" || !login.session?.token) throw new Error("login failed");
+  if (login.user?.role !== "Owner") throw new Error("owner fixture login should preserve the Owner role");
   const patreonStartResponse = await fetch(base + "/api/oauth/patreon/start", {
     redirect: "manual",
     headers: { Authorization: `Bearer ${login.session.token}` }
@@ -8072,11 +8044,11 @@ try {
   );
   if (!dailyLoopModel.activity?.some(item => item.type === "daily-provider-ownership-loop") || !dailyAnalyticsStored) throw new Error("daily provider ownership loop was not stored in the user workspace");
 
-  const secondEmail = `alpha-second-${Date.now()}@socialcuesapp.com`;
+  const secondEmail = `barton.cory.m+r47-second-${Date.now()}@gmail.com`;
   const secondSignup = await request("/api/auth/signup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "Second Tester", email: secondEmail, password: accountPassword, promoCode: "SC-LOCAL-SIGNAL-9X2P", workspaceName: "Second Workspace" })
+    body: JSON.stringify({ name: "Second Test Owner", email: secondEmail, password: accountPassword, workspaceName: "Second Workspace" })
   });
   if (!secondSignup.ok || !secondSignup.session?.token) throw new Error("second signup failed");
   const secondUserModel = await request("/api/model", {
@@ -8184,7 +8156,7 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ queueId: queued.queueItem.id, approved: true })
   });
-  if (unauthenticatedApproval.status !== 402) throw new Error("queue approval must require authenticated paid or promo access");
+  if (unauthenticatedApproval.status !== 402) throw new Error("queue approval must require authenticated subscription access");
 
   const prematureQueueConfirmation = await fetch(base + "/api/publish/queue/approval", {
     method: "POST",
@@ -8263,6 +8235,21 @@ try {
   if (scheduledSave.receipt?.operationId !== scheduledSaveEnvelope.operationId
     || JSON.stringify(scheduledSave.receipt?.committedRevision) !== JSON.stringify(scheduledSave.persistence?.revision)) {
     throw new Error("scheduled campaign save did not return its committed workspace revision");
+  }
+  const secondWorkspacePublishQueue = await request("/api/publish/queue", {
+    headers: { Authorization: `Bearer ${secondSignup.session.token}` }
+  });
+  if (!secondWorkspacePublishQueue.ok || secondWorkspacePublishQueue.rows?.some(item =>
+    scheduledCampaign.variants.some(variant => variant.id === item.variantId))) {
+    throw new Error("publish queue exposed another workspace's scheduled variants");
+  }
+  const secondWorkspaceDuePublish = await request("/api/publish/due", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${secondSignup.session.token}` },
+    body: JSON.stringify({ includeFuture: true, live: false, platforms: ["facebook", "youtube"] })
+  });
+  if (!secondWorkspaceDuePublish.ok || secondWorkspaceDuePublish.attempted !== 0 || secondWorkspaceDuePublish.results?.length !== 0) {
+    throw new Error("due publish crossed the signed-in workspace boundary");
   }
   const duePublish = await request("/api/publish/due", {
     method: "POST",
@@ -8833,10 +8820,10 @@ try {
     if (!oauthDebugLog.rows.some(row => row.provider === "youtube" && row.event === expectedEvent)) throw new Error(`OAuth debug log missing ${expectedEvent} for YouTube`);
   }
   if (JSON.stringify(oauthDebugLog).includes("fake-code") || JSON.stringify(oauthDebugLog).includes(youtubeState)) throw new Error("OAuth debug log leaked a raw code or full state value");
-  const promoDebugResponse = await fetch(base + "/api/oauth/debug-log", {
-    headers: { Authorization: `Bearer ${login.session.token}` }
+  const customerDebugResponse = await fetch(base + "/api/oauth/debug-log", {
+    headers: { Authorization: `Bearer ${memberPromoSignup.session.token}` }
   });
-  if (promoDebugResponse.status !== 403) throw new Error("OAuth debug log should be owner/admin-only for signed-in users");
+  if (customerDebugResponse.status !== 403) throw new Error("OAuth debug log should be owner/admin-only for signed-in users");
   const ownerDebug = await request("/api/oauth/debug-log", {
     headers: { Authorization: `Bearer ${ownerSignup.session.token}` }
   });
@@ -9442,7 +9429,7 @@ try {
     || discordCommunity.accessRequired !== true
     || discordCommunity.checkoutPath !== "/api/billing/checkout"
     || discordCommunity.portalPath !== "/portal"
-    || discordCommunity.error !== "Buy Social Cues or use an active approved promo entitlement before using the app."
+    || discordCommunity.error !== "An active Social Cues subscription is required before using the app."
     || JSON.stringify(Object.keys(discordCommunity).sort()) !== JSON.stringify(["accessRequired", "checkoutPath", "error", "ok", "portalPath"])) {
     throw new Error("anonymous Discord community reads should require app access before workspace account lookup");
   }
@@ -9470,7 +9457,8 @@ try {
 
   const authReady = await request("/api/auth/readiness");
   if (!authReady.ok || !["emailVerificationRequired", "passwordRecoveryReady", "loginAlertingReady", "rateLimitGuarded"].every(key => Object.prototype.hasOwnProperty.call(authReady, key))) throw new Error("auth readiness failed");
-  if (authReady.signupAccess?.mode !== "invite-only" || authReady.signupAccess?.activePromoCodeCount < 4) throw new Error("auth readiness must expose invite-only signup policy");
+  const activeAlphaCodeCount = localPromoCodes.filter(item => item.active !== false).length;
+  if (authReady.signupAccess?.mode !== "invite-only" || authReady.signupAccess?.activePromoCodeCount !== activeAlphaCodeCount) throw new Error("auth readiness must expose the exact invite-only Alpha-code count");
   if (["sessionStorage", "nextSwitch", "missingEnv", "customSmtpReady", "refreshTokenRotationReady"].some(key => Object.prototype.hasOwnProperty.call(authReady, key))) throw new Error("public auth readiness must not expose internal implementation or environment details");
 
   const passwordRecoveryNoEmail = await fetch(base + "/api/auth/password-recovery", {

@@ -1,15 +1,8 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Response, type Route } from '@playwright/test';
 
 // This journey owns the synthetic upload boundary. A previously installed PWA
 // worker can satisfy the request before Playwright sees it, especially in WebKit.
 test.use({ serviceWorkers: 'block' });
-
-const promoCodes: Record<string, string> = {
-  chromium: 'SC-LOCAL-BEACON-4M7Q',
-  webkit: 'SC-LOCAL-SIGNAL-9X2P',
-  'mobile-chrome': 'SC-LOCAL-PULSE-6R8N',
-  'mobile-safari': 'SC-LOCAL-LAUNCH-3V5K'
-};
 
 const imageBytes = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAD0lEQVR42mNk+M9QzwAEYgH9Fj5l7QAAAABJRU5ErkJggg==',
@@ -19,6 +12,66 @@ const videoBytes = Buffer.from('00000018667479706d703432000000006d70343269736f6d
 
 type JsonResult = { ok: boolean; status: number; body: any };
 type TestCredentials = { email: string; password: string };
+
+function postedModelSnapshot(response: Response) {
+  if (!response.url().endsWith('/api/model') || response.request().method() !== 'POST') return null;
+  try {
+    const payload = response.request().postDataJSON();
+    return payload?.kind === 'model-save' && payload.request ? payload.request : payload;
+  } catch {
+    return null;
+  }
+}
+
+function snapshotHasQuickVariant(response: Response, predicate: (variant: any) => boolean) {
+  const snapshot = postedModelSnapshot(response);
+  return Boolean((snapshot?.quickPosts || []).some((batch: any) => (batch.variants || []).some(predicate)));
+}
+
+async function workspaceSaveFailureSummary(response: Response) {
+  const body = await response.json().catch(() => ({}));
+  return JSON.stringify({
+    status: response.status(),
+    code: body?.code || '',
+    error: body?.error || '',
+    commitStatus: body?.commitStatus || '',
+    receiptStatus: body?.receipt?.status || ''
+  });
+}
+
+async function installHermeticProviderReadiness(page: Page) {
+  const fulfillUnavailableReadiness = (route: Route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      ok: true,
+      configured: false,
+      ready: false,
+      accounts: [],
+      pages: [],
+      instagramAccounts: [],
+      comments: [],
+      conversations: [],
+      messages: [],
+      items: [],
+      posts: [],
+      replies: [],
+      metrics: []
+    })
+  });
+  await page.route(/\/api\/meta\/health(?:\?.*)?$/, route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, configured: true, ready: false, capabilities: [], accounts: [], pages: [], instagramAccounts: [] })
+  }));
+  await page.route(/\/api\/meta\/(?:instagram\/accounts|comments|messages)(?:\?.*)?$/, fulfillUnavailableReadiness);
+  await page.route(/\/api\/x\/account(?:\?.*)?$/, route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, configured: false, ready: false, account: null, connectionState: { connected: false, expired: false, needsReconnect: false } })
+  }));
+  await page.route(/\/api\/x\/engagement(?:\/readiness)?(?:\?.*)?$/, fulfillUnavailableReadiness);
+}
 
 async function sameOriginJson(page: Page, path: string, init: Record<string, unknown> = {}): Promise<JsonResult> {
   return page.evaluate(async ({ route, requestInit }) => {
@@ -40,13 +93,12 @@ async function sameOriginJson(page: Page, path: string, init: Record<string, unk
 
 async function createIsolatedWorkspace(page: Page, projectName: string): Promise<TestCredentials> {
   const stamp = Date.now();
-  const email = `media-${projectName}-${stamp}@socialcuesapp.test`;
+  const email = `barton.cory.m+media-${projectName}-${stamp}@gmail.com`;
   const password = `Media-journey-${stamp}!`;
   await page.goto('/portal?mode=create&stay=1');
   await page.locator('#nameInput').fill(`Media Journey ${projectName}`);
   await page.locator('#emailInput').fill(email);
   await page.locator('#passwordInput').fill(password);
-  await page.locator('#promoInput').fill(promoCodes[projectName] || promoCodes.chromium);
   await page.locator('#createBtn').click();
   await page.waitForURL(/\/app$/, { timeout: 10_000 });
 
@@ -98,15 +150,23 @@ async function seedPostingIdentities(page: Page, credentials: TestCredentials) {
       ]
     })
   });
-  let result = await seed();
-  if (!result.ok && /sign in/i.test(String(result.body?.error || ''))) {
-    const login = await sameOriginJson(page, '/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: credentials.email, password: credentials.password })
-    });
-    expect(login.ok, JSON.stringify(login.body)).toBeTruthy();
+  let result: JsonResult = { ok: false, status: 0, body: null };
+  let relogged = false;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
     result = await seed();
+    if (result.ok) break;
+    if (!relogged && /sign in/i.test(String(result.body?.error || ''))) {
+      const login = await sameOriginJson(page, '/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: credentials.email, password: credentials.password })
+      });
+      expect(login.ok, JSON.stringify(login.body)).toBeTruthy();
+      relogged = true;
+      continue;
+    }
+    if (result.body?.code !== 'workspace_authorization_failed' || result.body?.commitStatus !== 'not_committed' || attempt === 3) break;
+    await page.waitForTimeout(100 * (attempt + 1));
   }
   expect(result.ok, JSON.stringify(result.body)).toBeTruthy();
   expect(result.body.accounts?.find((account: any) => account.platform === 'facebook')?.tokenStored).toBe(true);
@@ -197,6 +257,7 @@ test('media selection reaches a durable provider handoff on desktop and mobile',
   let directUploads = 0;
   let completedUploads = 0;
 
+  await installHermeticProviderReadiness(page);
   const credentials = await createIsolatedWorkspace(page, projectName);
   await ensureAppShell(page, credentials);
   await seedPostingIdentities(page, credentials);
@@ -211,25 +272,39 @@ test('media selection reaches a durable provider handoff on desktop and mobile',
   });
   await page.route(/\/api\/media\/assets$/, async route => {
     if (route.request().method() !== 'POST') return route.continue();
-    const upstream = await route.fetch();
-    const body = await upstream.json();
-    reservation = body.asset;
+    const input = route.request().postDataJSON() as { fileName?: string; kind?: string; contentType?: string; size?: number; title?: string };
+    const assetId = `e2e-media-${Date.now()}`;
+    reservation = {
+      id: assetId,
+      provider: 'supabase-storage',
+      kind: input.kind || 'image',
+      title: input.title || input.fileName || 'Synthetic media',
+      fileName: input.fileName || 'synthetic-media',
+      storagePath: `e2e-private-media/${assetId}/${encodeURIComponent(input.fileName || 'synthetic-media')}`,
+      status: 'storage-not-configured',
+      contentType: input.contentType || 'application/octet-stream',
+      expectedSize: Number(input.size || 0),
+      createdAt: new Date().toISOString()
+    };
     const origin = new URL(route.request().url()).origin;
     await route.fulfill({
-      response: upstream,
+      status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        ...body,
+        ok: true,
+        asset: reservation,
         upload: {
-          ...body.upload,
+          provider: 'supabase-storage',
+          bucket: 'e2e-private-media',
+          storagePath: reservation.storagePath,
           ready: true,
           method: 'PUT',
           token: 'e2e-upload-signature',
-          signedUrl: `${origin}/__e2e-media-upload/${body.asset.id}`,
+          signedUrl: `${origin}/__e2e-media-upload/${assetId}`,
           resumable: {
-            endpoint: `${origin}/__e2e-media-tus/${body.asset.id}`,
+            endpoint: `${origin}/__e2e-media-tus/${assetId}`,
             bucket: 'e2e-private-media',
-            objectName: body.asset.storagePath,
+            objectName: reservation.storagePath,
             chunkSize: 1024 * 1024
           }
         }
@@ -245,24 +320,26 @@ test('media selection reaches a durable provider handoff on desktop and mobile',
   await page.route(/\/api\/model$/, async route => {
     if (route.request().method() !== 'POST') return route.continue();
     const payload = route.request().postDataJSON();
-    for (const batch of payload.quickPosts || []) {
+    const snapshot = payload?.kind === 'model-save' && payload.request ? payload.request : payload;
+    for (const batch of snapshot.quickPosts || []) {
       for (const variant of batch.variants || []) {
         if (!variant.media?.assetId) continue;
         variant.media.hostedUrl = `https://media.socialcues.test/${encodeURIComponent(variant.media.assetId)}`;
       }
     }
+    const headers = { ...route.request().headers(), 'content-type': 'application/json' };
+    delete headers['content-length'];
     const upstream = await route.fetch({
       postData: JSON.stringify(payload),
-      headers: { ...route.request().headers(), 'content-type': 'application/json' }
+      headers
     });
     await route.fulfill({ response: upstream });
   });
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await ensureAppShell(page, credentials);
-  await seedPostingIdentities(page, credentials);
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await ensureAppShell(page, credentials);
+  await expect(page.locator('#socialAccountList [data-account-lane="facebook"]')).toContainText('Media Journey Page');
+  await expect(page.locator('#socialAccountList [data-account-lane="x"]')).toContainText('Media Journey X');
   const seededModel = await sameOriginJson(page, '/api/model');
   expect(seededModel.body.connectedAccounts?.find((account: any) => account.platform === 'x')?.tokenStored).toBe(true);
   await openStudio(page, projectName);
@@ -273,9 +350,15 @@ test('media selection reaches a durable provider handoff on desktop and mobile',
   await page.locator('#quickPostCaptionInput').fill('Know the room before you speak. Create, schedule, conquer with Social Cues.');
   await page.locator('#quickPostDestinationInput').fill('https://socialcuesapp.com');
   await page.locator('#quickPostIncludeLinks').check();
+  const preparedSave = page.waitForResponse(response => snapshotHasQuickVariant(
+    response,
+    variant => variant.platform === 'facebook' && variant.status === 'draft' && variant.media?.assetId
+  ));
   await page.locator('#prepareQuickPostEverywhere').click();
 
   await expect(page.locator('#appResult')).toContainText('Quick post prepared', { timeout: 15_000 });
+  const preparedSaveResponse = await preparedSave;
+  expect(preparedSaveResponse.ok(), `prepared model save failed ${await workspaceSaveFailureSummary(preparedSaveResponse)}`).toBeTruthy();
   await expect(page.locator('#quickPostUploadStatus')).toContainText('private, verified, and ready for approval');
   await expect(page.locator('#quickPostList [data-quick-batch]')).toHaveCount(1);
   expect(reservation?.status).toBe('storage-not-configured');
@@ -295,14 +378,16 @@ test('media selection reaches a durable provider handoff on desktop and mobile',
   const preparedVariant = preparedModel.body.quickPosts?.[0]?.variants?.find((variant: any) => variant.platform === 'facebook');
   const queuedVariantId = preparedVariant?.id;
   expect(queuedVariantId).toBeTruthy();
-  const approvedSave = page.waitForResponse(response => response.url().endsWith('/api/model') && response.request().method() === 'POST' && response.ok());
+  const approvedSave = page.waitForResponse(response => snapshotHasQuickVariant(response, variant => variant.id === queuedVariantId && variant.status === 'approved'));
   await quickCard.locator(`[data-quick-action="approve"][data-quick-variant="${queuedVariantId}"]`).click();
-  await approvedSave;
+  const approvedSaveResponse = await approvedSave;
+  expect(approvedSaveResponse.ok(), `approved model save returned ${approvedSaveResponse.status()}`).toBeTruthy();
   await expect(quickCard.locator('[data-quick-batch-action="queue-all"]')).toBeEnabled();
-  const queuedSave = page.waitForResponse(response => response.url().endsWith('/api/model') && response.request().method() === 'POST' && response.ok());
+  const queuedSave = page.waitForResponse(response => snapshotHasQuickVariant(response, variant => variant.id === queuedVariantId && variant.status === 'queued'));
   page.once('dialog', dialog => dialog.accept());
   await quickCard.locator('[data-quick-batch-action="queue-all"]').click();
-  await queuedSave;
+  const queuedSaveResponse = await queuedSave;
+  expect(queuedSaveResponse.ok(), `queued model save returned ${queuedSaveResponse.status()}`).toBeTruthy();
   const queuedModel = await sameOriginJson(page, '/api/model');
   const queuedVariant = (queuedModel.body.quickPosts || [])
     .flatMap((batch: any) => batch.variants || [])
@@ -318,6 +403,8 @@ test('media selection reaches a durable provider handoff on desktop and mobile',
     body: JSON.stringify({ includeFuture: true, live: false, platforms: ['facebook'] })
   });
   expect(handoff.ok, JSON.stringify(handoff.body)).toBeTruthy();
+  expect(handoff.body.attempted).toBe(1);
+  expect(handoff.body.results?.every((item: any) => item.variantId === queuedVariantId)).toBe(true);
   const handoffResult = handoff.body.results?.find((item: any) => item.variantId === queuedVariantId);
   expect(handoffResult?.ok, JSON.stringify(handoffResult)).toBe(true);
   expect(handoffResult?.provider).toBe('meta');
@@ -325,6 +412,7 @@ test('media selection reaches a durable provider handoff on desktop and mobile',
   expect(handoffResult?.wouldPost?.url || handoffResult?.wouldPost?.file_url).toMatch(/^https:\/\//);
 
   const queue = await sameOriginJson(page, '/api/publish/queue');
+  expect(queue.body.rows?.every((item: any) => item.workspaceId === queuedModel.body.workspace.id)).toBe(true);
   const queueRow = queue.body.rows?.find((item: any) => item.variantId === queuedVariantId);
   if (queueRow) {
     expect(queueRow.status).toBe('dry-run-ready');

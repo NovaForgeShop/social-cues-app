@@ -2,7 +2,10 @@ import { PRICING_CONFIGURATION, resolvePricingPlan } from "./pricing-packaging.m
 import { createStripeBillingLifecycle } from "./stripe-billing-lifecycle.mjs";
 import { createStripeBillingGateway } from "./stripe-billing-gateway.mjs";
 import { createStripeBillingRepository } from "./stripe-billing-repository.mjs";
-import { STRIPE_BILLING_RELEASE_STAGE } from "./stripe-billing-configuration.mjs";
+import {
+  STRIPE_ALPHA_DISCOUNT_READINESS,
+  STRIPE_BILLING_RELEASE_STAGE
+} from "./stripe-billing-configuration.mjs";
 
 const HELD_CAPABILITIES = Object.freeze({
   checkoutAvailable: false,
@@ -24,6 +27,7 @@ function safeReadiness(state, mode, configured, databaseReady = false) {
     configured,
     databaseReady,
     releaseStage: STRIPE_BILLING_RELEASE_STAGE,
+    alphaDiscount: STRIPE_ALPHA_DISCOUNT_READINESS,
     ...HELD_CAPABILITIES
   });
 }

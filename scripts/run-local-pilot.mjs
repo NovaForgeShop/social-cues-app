@@ -8,8 +8,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createInterface } from "node:readline";
 
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const syntheticPromoCode = "SC-LOCAL-BEACON-4M7Q";
-export const syntheticSecondPromoCode = "SC-LOCAL-SECOND-7Q9R";
 const owner = "social-cues-local-pilot.v1";
 const fixtureModule = path.join(projectRoot, "tests", "support", "tester-loop-provider-fixture.mjs");
 
@@ -20,7 +18,6 @@ export function pilotEnvironment(config, parent = process.env) {
   return { ...env, HOST: "127.0.0.1", PORT: String(config.port), PUBLIC_APP_URL: config.url,
     AUTH_PROVIDER: "alpha-local", NODE_ENV: "test", SUPABASE_ENABLED: "false",
     AUTH_SESSION_SECRET: config.sessionSecret, SOCIAL_CUES_DATA_DIR: config.dataDir,
-    SOCIAL_CUES_PROMO_CODES: JSON.stringify([syntheticPromoCode, syntheticSecondPromoCode].map(code => ({ code, label: "Synthetic local pilot", days: 120, active: true }))),
     E2E_USE_LOCAL_SERVER: "1", SOCIAL_CUES_TESTER_LOOP_PROVIDER_FIXTURE: "1",
     SOCIAL_CUES_TESTER_LOOP_SERVER_PROCESS: "1",
     SOCIAL_CUES_TESTER_LOOP_PROVIDER_FIXTURE_LOG: path.join(config.dataDir, "provider-fixture.jsonl"),
