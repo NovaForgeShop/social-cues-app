@@ -9,6 +9,12 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { localContentCollections } from "./local-workspace-persistence.mjs";
+import {
+  readPartitionedLocalWorkspaceFixture,
+  writePartitionedLocalWorkspaceFixture
+} from "./test-support/local-workspace-fixture.mjs";
+
 const root = path.dirname(fileURLToPath(import.meta.url));
 const serverPath = path.join(root, "server.mjs");
 const seedPath = path.join(root, "social-cues-model-seed.json");
@@ -112,6 +118,7 @@ function twitchAccount({ user, providerAccountId, accessToken, refreshToken, con
 
 function buildModel(seed, accountMode = "none") {
   const model = structuredClone(seed);
+  for (const collection of localContentCollections) model[collection] = [];
   model.authUsers = [structuredClone(userA), structuredClone(userB)];
   model.deviceSessions = [
     {
@@ -138,9 +145,10 @@ function buildModel(seed, accountMode = "none") {
     }
   ];
   model.workspaces = [
-    { id: userA.workspaceId, name: "Workspace A", ownerUserId: userA.id },
-    { id: userB.workspaceId, name: "Workspace B", ownerUserId: userB.id }
+    { id: userA.workspaceId, name: "Workspace A", ownerUserId: userA.id, createdAt: "2026-08-15T12:00:00.000Z" },
+    { id: userB.workspaceId, name: "Workspace B", ownerUserId: userB.id, createdAt: "2026-08-15T12:00:00.000Z" }
   ];
+  model.workspace = structuredClone(model.workspaces[accountMode === "banked-b" ? 1 : 0]);
   model.oauthStates = [];
   model.oauthEvents = [];
   model.connectedAccounts = (model.connectedAccounts || []).filter(account => account.platform !== "twitch");
@@ -275,7 +283,7 @@ async function readGuardLog(logPath) {
 }
 
 async function readModel(dataDir) {
-  return JSON.parse(await readFile(path.join(dataDir, "model.json"), "utf8"));
+  return readPartitionedLocalWorkspaceFixture(path.join(dataDir, "model.json"), userA.workspaceId);
 }
 
 function oauthStateCount(model) {
@@ -664,7 +672,7 @@ try {
     const dataDir = path.join(temporaryRoot, `scenario-${index}`);
     const logPath = path.join(dataDir, "request-log.ndjson");
     await mkdir(dataDir, { recursive: true });
-    await writeFile(path.join(dataDir, "model.json"), JSON.stringify(buildModel(seed, scenario.accountMode), null, 2), "utf8");
+    await writePartitionedLocalWorkspaceFixture({ dataDir, model: buildModel(seed, scenario.accountMode) });
     let stdout = "";
     let stderr = "";
     const env = twitchScenarioEnv({

@@ -3,9 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const migrationPath = new URL("./SUPABASE-HEYGEN-DURABLE-PERSISTENCE.sql", import.meta.url);
+const hardeningMigrationPath = new URL("./SUPABASE-HEYGEN-DURABLE-PERSISTENCE-HARDENING.sql", import.meta.url);
 const starterSchemaPath = new URL("./supabase-schema.sql", import.meta.url);
 const beginMarker = "-- BEGIN SOCIAL CUES HEYGEN DURABLE PERSISTENCE (exact standalone migration)";
 const endMarker = "-- END SOCIAL CUES HEYGEN DURABLE PERSISTENCE";
+const hardeningBeginMarker = "-- BEGIN SOCIAL CUES HEYGEN DURABLE PERSISTENCE HARDENING (exact standalone migration)";
+const hardeningEndMarker = "-- END SOCIAL CUES HEYGEN DURABLE PERSISTENCE HARDENING";
 
 function normalizeLines(value) {
   return String(value).replaceAll("\r\n", "\n").replaceAll("\r", "\n");
@@ -14,8 +17,8 @@ function normalizeLines(value) {
 test("clean-install schema embeds the exact durable HeyGen migration", async () => {
   const migration = normalizeLines(await readFile(migrationPath, "utf8"));
   const starterSchema = normalizeLines(await readFile(starterSchemaPath, "utf8"));
-  assert.equal(starterSchema.split(beginMarker).length - 1, 1);
-  assert.equal(starterSchema.split(endMarker).length - 1, 1);
+  assert.equal(starterSchema.split(`${beginMarker}\n`).length - 1, 1);
+  assert.equal(starterSchema.split(`${endMarker}\n`).length - 1, 1);
   const blockStart = starterSchema.indexOf(`${beginMarker}\n`) + beginMarker.length + 1;
   const blockEnd = starterSchema.indexOf(endMarker, blockStart);
   assert.ok(blockStart > beginMarker.length);
@@ -46,4 +49,28 @@ test("migration keeps state, tokens, operation evidence, and request arguments p
     migration.match(/grant select \([\s\S]*?\) on public\.heygen_media_jobs to authenticated;/u)?.[0] || "",
     /request_arguments|request_fingerprint|result_fingerprint/u
   );
+});
+
+test("clean-install schema embeds the exact durable HeyGen hardening migration", async () => {
+  const migration = normalizeLines(await readFile(hardeningMigrationPath, "utf8"));
+  const starterSchema = normalizeLines(await readFile(starterSchemaPath, "utf8"));
+  assert.equal(starterSchema.split(hardeningBeginMarker).length - 1, 1);
+  assert.equal(starterSchema.split(hardeningEndMarker).length - 1, 1);
+  const blockStart = starterSchema.indexOf(`${hardeningBeginMarker}\n`) + hardeningBeginMarker.length + 1;
+  const blockEnd = starterSchema.indexOf(hardeningEndMarker, blockStart);
+  assert.ok(blockStart > hardeningBeginMarker.length);
+  assert.ok(blockEnd > blockStart);
+  assert.equal(starterSchema.slice(blockStart, blockEnd), migration);
+});
+
+test("hardening migration adds only an index and explicit deny-only client policies", async () => {
+  const migration = normalizeLines(await readFile(hardeningMigrationPath, "utf8"));
+  assert.match(migration, /create index if not exists heygen_oauth_states_connected_account_idx\n  on social_cues_private\.heygen_oauth_states\(connected_account_id\);/u);
+  for (const table of ["heygen_oauth_states", "heygen_operation_receipts"]) {
+    assert.match(migration, new RegExp(`create policy "client roles cannot access heygen ${table === "heygen_oauth_states" ? "oauth states" : "operation receipts"}"[\\s\\S]*?on social_cues_private\\.${table}[\\s\\S]*?as restrictive for all to anon, authenticated[\\s\\S]*?using \\(false\\)[\\s\\S]*?with check \\(false\\);`, "u"));
+  }
+  assert.match(migration, /revoke all on schema social_cues_private from public, anon, authenticated;/u);
+  assert.match(migration, /revoke all on table[\s\S]*?social_cues_private\.heygen_oauth_states,[\s\S]*?social_cues_private\.heygen_operation_receipts[\s\S]*?from public, anon, authenticated;/u);
+  assert.doesNotMatch(migration, /\bgrant\b/iu);
+  assert.doesNotMatch(migration, /create or replace function|create table|alter table public\./iu);
 });

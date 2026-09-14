@@ -22,6 +22,7 @@ import {
 
 const repoDirectory = path.dirname(fileURLToPath(import.meta.url));
 const migrationPath = path.join(repoDirectory, "SUPABASE-HEYGEN-DURABLE-PERSISTENCE.sql");
+const hardeningMigrationPath = path.join(repoDirectory, "SUPABASE-HEYGEN-DURABLE-PERSISTENCE-HARDENING.sql");
 const images = [POSTGRES_RUNTIME_IMAGE, POSTGRES_POSTGREST_IMAGE];
 const passed = [];
 let externalRequests = 0;
@@ -199,10 +200,100 @@ async function runImage(image) {
       values (${quoteLiteral(sourceAssetId)}::uuid, ${quoteLiteral(workspaceA)}::uuid, 'upload', 'video', 'Source');
     `);
 
-    await check(image, "migration applies cleanly and is rerunnable", async () => {
+    await check(image, "base and hardening migrations apply cleanly and are rerunnable", async () => {
       await applySqlFile(state, migrationPath, { timeoutMs: 90_000 });
       await applySqlFile(state, migrationPath, { timeoutMs: 90_000 });
+      await applySqlFile(state, hardeningMigrationPath, { timeoutMs: 90_000 });
+      await applySqlFile(state, hardeningMigrationPath, { timeoutMs: 90_000 });
       assert.equal(await queryScalar(state, "select count(*) from public.heygen_media_jobs;"), "0");
+    });
+
+    await check(image, "hardening adds the exact FK index and deny-only private policies without client grants", async () => {
+      const catalog = await queryJson(state, `
+        with target_policies as (
+          select tablename, policyname, permissive, roles, cmd, qual, with_check
+          from pg_catalog.pg_policies
+          where schemaname = 'social_cues_private'
+            and tablename in ('heygen_oauth_states', 'heygen_operation_receipts')
+        )
+        select pg_catalog.jsonb_build_object(
+          'index_ok', (
+            select count(*) = 1
+            from pg_catalog.pg_index i
+            join pg_catalog.pg_class idx on idx.oid = i.indexrelid
+            join pg_catalog.pg_class rel on rel.oid = i.indrelid
+            join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace
+            join pg_catalog.pg_am am on am.oid = idx.relam
+            where ns.nspname = 'social_cues_private'
+              and rel.relname = 'heygen_oauth_states'
+              and idx.relname = 'heygen_oauth_states_connected_account_idx'
+              and am.amname = 'btree'
+              and not i.indisunique
+              and i.indisvalid
+              and i.indisready
+              and i.indnkeyatts = 1
+              and i.indnatts = 1
+              and i.indpred is null
+              and i.indexprs is null
+              and pg_catalog.pg_get_indexdef(i.indexrelid, 1, true) = 'connected_account_id'
+          ),
+          'rls_forced', (
+            select count(*) = 2
+            from pg_catalog.pg_class rel
+            join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace
+            where ns.nspname = 'social_cues_private'
+              and rel.relname in ('heygen_oauth_states', 'heygen_operation_receipts')
+              and rel.relrowsecurity
+              and rel.relforcerowsecurity
+          ),
+          'policy_count', (select count(*) from target_policies),
+          'policies_deny_only', (
+            select coalesce(pg_catalog.bool_and(
+              permissive = 'RESTRICTIVE'
+              and cmd = 'ALL'
+              and roles @> array['anon', 'authenticated']::name[]
+              and pg_catalog.cardinality(roles) = 2
+              and qual = 'false'
+              and with_check = 'false'
+              and (
+                (tablename = 'heygen_oauth_states' and policyname = 'client roles cannot access heygen oauth states')
+                or (tablename = 'heygen_operation_receipts' and policyname = 'client roles cannot access heygen operation receipts')
+              )
+            ), false)
+            from target_policies
+          ),
+          'client_schema_usage', exists (
+            select 1
+            from pg_catalog.unnest(array['anon', 'authenticated']) role_name
+            where pg_catalog.has_schema_privilege(role_name, 'social_cues_private', 'USAGE')
+          ),
+          'client_table_grants', (
+            select count(*)
+            from information_schema.table_privileges
+            where table_schema = 'social_cues_private'
+              and table_name in ('heygen_oauth_states', 'heygen_operation_receipts')
+              and grantee in ('PUBLIC', 'anon', 'authenticated')
+          ),
+          'client_function_grants', (
+            select count(*)
+            from information_schema.routine_privileges
+            where grantee in ('PUBLIC', 'anon', 'authenticated')
+              and (
+                (specific_schema = 'public' and routine_name like 'social_cues_heygen_%')
+                or specific_schema = 'social_cues_private'
+              )
+          )
+        )
+      `);
+      assert.deepEqual(catalog, {
+        client_function_grants: 0,
+        client_schema_usage: false,
+        client_table_grants: 0,
+        index_ok: true,
+        policies_deny_only: true,
+        policy_count: 2,
+        rls_forced: true
+      });
     });
 
     await check(image, "repository health and RPC grants are service-role-only", async () => {

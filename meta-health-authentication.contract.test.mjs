@@ -10,6 +10,12 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { localContentCollections } from "./local-workspace-persistence.mjs";
+import {
+  readPartitionedLocalWorkspaceFixture,
+  writePartitionedLocalWorkspaceFixture
+} from "./test-support/local-workspace-fixture.mjs";
+
 const root = path.dirname(fileURLToPath(import.meta.url));
 const serverPath = path.join(root, "server.mjs");
 const seedPath = path.join(root, "social-cues-model-seed.json");
@@ -146,6 +152,7 @@ function metaAccount({ id, user, providerAccountId, token, name }) {
 
 function buildModel(seed) {
   const model = structuredClone(seed);
+  for (const collection of localContentCollections) model[collection] = [];
   model.authUsers = [structuredClone(userA), structuredClone(userB)];
   model.deviceSessions = [
     deviceSession({ id: "meta-health-device-a", token: bearerA, user: userA }),
@@ -157,6 +164,7 @@ function buildModel(seed) {
       id: userA.workspaceId,
       name: "Meta Health Workspace A",
       ownerUserId: userA.id,
+      createdAt: "2026-08-30T12:00:00.000Z",
       metaHealth: { marker: "workspace-a-health-before" },
       analytics: { marker: "workspace-a-analytics-before" }
     },
@@ -164,10 +172,12 @@ function buildModel(seed) {
       id: userB.workspaceId,
       name: "Meta Health Workspace B",
       ownerUserId: userB.id,
+      createdAt: "2026-08-30T12:00:00.000Z",
       metaHealth: { marker: "workspace-b-health-before" },
       analytics: { marker: "workspace-b-analytics-before" }
     }
   ];
+  model.workspace = structuredClone(model.workspaces[0]);
   model.connectedAccounts = (model.connectedAccounts || [])
     .filter(account => !["meta", "facebook", "instagram"].includes(account.platform));
   model.connectedAccounts.push(
@@ -209,8 +219,8 @@ function buildModel(seed) {
   model.analytics = { marker: "root-analytics-before" };
   model.metaConnection = { marker: "root-connection-before" };
   model.integrations = { ...(model.integrations || {}), meta: "root-integration-before" };
-  model.activity = [{ id: "activity-before", type: "fixture" }];
-  model.actions = [{ id: "action-before", type: "fixture" }];
+  model.activity = [{ id: "activity-before", type: "fixture", workspaceId: userA.workspaceId, ownerUserId: userA.id }];
+  model.actions = [{ id: "action-before", type: "fixture", workspaceId: userA.workspaceId, ownerUserId: userA.id }];
   model.oauthEvents = [{ id: "oauth-before", provider: "fixture" }];
   return model;
 }
@@ -331,8 +341,12 @@ async function startScenario({ temporaryRoot, label, model, hosted = false, guar
   const dataDir = path.join(temporaryRoot, label);
   const requestLogPath = path.join(dataDir, "external-requests.ndjson");
   const modelPath = path.join(dataDir, "model.json");
-  await mkdir(dataDir, { recursive: true });
-  await writeFile(modelPath, JSON.stringify(model, null, 2), "utf8");
+  if (hosted) {
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(modelPath, JSON.stringify(model, null, 2), "utf8");
+  } else {
+    await writePartitionedLocalWorkspaceFixture({ dataDir, model });
+  }
   const port = await availablePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const env = scenarioEnvironment({ dataDir, requestLogPath, hosted });
@@ -581,8 +595,7 @@ try {
     deepEqual("invalidSessions", await readRequestLog(localScenario.requestLogPath), beforeRequests, `${label} session attempted a provider or external request`);
   }
 
-  const authenticatedBeforeSource = await readFile(localScenario.modelPath, "utf8");
-  const authenticatedBefore = JSON.parse(authenticatedBeforeSource);
+  const authenticatedBefore = await readPartitionedLocalWorkspaceFixture(localScenario.modelPath, userA.workspaceId);
   const foreignWorkspaceBefore = structuredClone(authenticatedBefore.workspaces.find(item => item.id === userB.workspaceId));
   const foreignAccountsBefore = structuredClone(authenticatedBefore.connectedAccounts.filter(item => item.ownerUserId === userB.id));
   const sideEffectsBefore = snapshotSideEffectCollections(authenticatedBefore);
@@ -603,7 +616,7 @@ try {
   check("authenticated", Boolean(authenticated.body?.analytics), "authenticated Meta health response omitted analytics");
   check("authenticated", Object.keys(authenticated.body || {}).every(key => ["ok", "metaConnection", "health", "diagnostic", "accounts", "capabilities", "analytics"].includes(key)), "authenticated Meta health response added an unapproved top-level field");
   check("authenticated", !Object.prototype.hasOwnProperty.call(authenticated.body?.health || {}, "token"), "authenticated Meta health response exposed the raw token-health key");
-  const authenticatedAfter = JSON.parse(await readFile(localScenario.modelPath, "utf8"));
+  const authenticatedAfter = await readPartitionedLocalWorkspaceFixture(localScenario.modelPath, userA.workspaceId);
   check("authenticated", JSON.stringify(authenticatedAfter.metaHealth) !== JSON.stringify(metaHealthBefore), "authenticated Meta health did not update health state");
   check("authenticated", JSON.stringify(authenticatedAfter.analytics) !== JSON.stringify(analyticsBefore), "authenticated Meta health did not update analytics state");
   check("authenticated", JSON.stringify(authenticatedAfter.metaConnection) !== JSON.stringify(metaConnectionBefore), "authenticated Meta health did not update connection state");
@@ -635,9 +648,11 @@ try {
   assertProtectedValuesAbsent("safety", localScenario.output(), "local stdout or stderr");
   assertProtectedValuesAbsent("safety", authenticatedMockRequests, "mock request log");
 
-  const hostedFixturePrime = await request(localScenario.baseUrl, "/api/model", { bearer: bearerA });
-  equal("safety", hostedFixturePrime.status, 200, "hosted fixture normalization failed");
-  const hostedFixtureModel = JSON.parse(await readFile(localScenario.modelPath, "utf8"));
+  const hostedFixtureModel = await readPartitionedLocalWorkspaceFixture(localScenario.modelPath, userA.workspaceId);
+  const hostedMetaAccount = hostedFixtureModel.connectedAccounts.find(account => account.platform === "meta" && account.ownerUserId === userA.id);
+  check("safety", Boolean(hostedMetaAccount?.name), "hosted fixture omitted the owned Meta account");
+  hostedFixtureModel.integrations.meta = `Logged in as ${hostedMetaAccount.name}`;
+  hostedFixtureModel.updatedAt = "2026-08-30T12:00:00.000Z";
 
   hostedScenario = await startScenario({
     temporaryRoot,

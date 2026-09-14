@@ -17,6 +17,7 @@ import {
   jwtClaims,
   prepareState,
   psql,
+  queryJson,
   queryScalar,
   quoteLiteral,
   registerSecret,
@@ -27,7 +28,9 @@ import {
 
 const repoDirectory = path.dirname(fileURLToPath(import.meta.url));
 const migrationPath = path.join(repoDirectory, "SUPABASE-HEYGEN-DURABLE-PERSISTENCE.sql");
+const hardeningMigrationPath = path.join(repoDirectory, "SUPABASE-HEYGEN-DURABLE-PERSISTENCE-HARDENING.sql");
 const migrationSql = await readFile(migrationPath, "utf8");
+const hardeningMigrationSql = await readFile(hardeningMigrationPath, "utf8");
 const state = createHarnessState("heygen-postgrest");
 const passed = [];
 let externalRequests = 0;
@@ -320,12 +323,17 @@ let primaryError = null;
 try {
   await prepareState(state);
   const crlfMigrationPath = path.join(state.tempDirectory, "heygen-durable-postgrest-crlf.sql");
+  const crlfHardeningMigrationPath = path.join(state.tempDirectory, "heygen-durable-hardening-postgrest-crlf.sql");
   const canonicalMigration = migrationSql.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+  const canonicalHardeningMigration = hardeningMigrationSql.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   await writeFile(crlfMigrationPath, canonicalMigration.replaceAll("\n", "\r\n"), "utf8");
+  await writeFile(crlfHardeningMigrationPath, canonicalHardeningMigration.replaceAll("\n", "\r\n"), "utf8");
   await createNetwork(state);
   await startPostgres(state, { image: POSTGRES_POSTGREST_IMAGE, networked: true });
   await psql(state, baseFixtureSql);
   await applySqlFile(state, crlfMigrationPath, { timeoutMs: 90_000 });
+  await applySqlFile(state, crlfHardeningMigrationPath, { timeoutMs: 90_000 });
+  await applySqlFile(state, crlfHardeningMigrationPath, { timeoutMs: 90_000 });
   await psql(state, postMigrationFixtureSql);
   await startPostgrest(state);
 
@@ -339,6 +347,99 @@ try {
     aud: "authenticated",
     exp: Math.floor(Date.now() / 1000) + 3600
   }));
+
+  await check("hardening is rerunnable and adds exact deny-only private catalog state without client grants", async () => {
+    const catalog = await queryJson(state, `
+      with target_policies as (
+        select tablename, policyname, permissive, roles, cmd, qual, with_check
+        from pg_catalog.pg_policies
+        where schemaname = 'social_cues_private'
+          and tablename in ('heygen_oauth_states', 'heygen_operation_receipts')
+      )
+      select pg_catalog.jsonb_build_object(
+        'index_ok', (
+          select count(*) = 1
+          from pg_catalog.pg_index i
+          join pg_catalog.pg_class idx on idx.oid = i.indexrelid
+          join pg_catalog.pg_class rel on rel.oid = i.indrelid
+          join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace
+          join pg_catalog.pg_am am on am.oid = idx.relam
+          where ns.nspname = 'social_cues_private'
+            and rel.relname = 'heygen_oauth_states'
+            and idx.relname = 'heygen_oauth_states_connected_account_idx'
+            and am.amname = 'btree'
+            and not i.indisunique
+            and i.indisvalid
+            and i.indisready
+            and i.indnkeyatts = 1
+            and i.indnatts = 1
+            and i.indpred is null
+            and i.indexprs is null
+            and pg_catalog.pg_get_indexdef(i.indexrelid, 1, true) = 'connected_account_id'
+        ),
+        'rls_forced', (
+          select count(*) = 2
+          from pg_catalog.pg_class rel
+          join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace
+          where ns.nspname = 'social_cues_private'
+            and rel.relname in ('heygen_oauth_states', 'heygen_operation_receipts')
+            and rel.relrowsecurity
+            and rel.relforcerowsecurity
+        ),
+        'policy_count', (select count(*) from target_policies),
+        'policies_deny_only', (
+          select coalesce(pg_catalog.bool_and(
+            permissive = 'RESTRICTIVE'
+            and cmd = 'ALL'
+            and roles @> array['anon', 'authenticated']::name[]
+            and pg_catalog.cardinality(roles) = 2
+            and qual = 'false'
+            and with_check = 'false'
+            and (
+              (tablename = 'heygen_oauth_states' and policyname = 'client roles cannot access heygen oauth states')
+              or (tablename = 'heygen_operation_receipts' and policyname = 'client roles cannot access heygen operation receipts')
+            )
+          ), false)
+          from target_policies
+        ),
+        'client_schema_usage', exists (
+          select 1
+          from pg_catalog.unnest(array['anon', 'authenticated']) role_name
+          where pg_catalog.has_schema_privilege(role_name, 'social_cues_private', 'USAGE')
+        ),
+        'client_table_grants', (
+          select count(*)
+          from information_schema.table_privileges
+          where table_schema = 'social_cues_private'
+            and table_name in ('heygen_oauth_states', 'heygen_operation_receipts')
+            and grantee in ('PUBLIC', 'anon', 'authenticated')
+        ),
+        'client_function_grants', (
+          select count(*)
+          from information_schema.routine_privileges
+          where grantee in ('PUBLIC', 'anon', 'authenticated')
+            and (
+              (specific_schema = 'public' and routine_name like 'social_cues_heygen_%')
+              or specific_schema = 'social_cues_private'
+            )
+        )
+      )
+    `);
+    assert.deepEqual(catalog, {
+      client_function_grants: 0,
+      client_schema_usage: false,
+      client_table_grants: 0,
+      index_ok: true,
+      policies_deny_only: true,
+      policy_count: 2,
+      rls_forced: true
+    });
+    const health = assertObject(await rpc("social_cues_heygen_repository_health", {}, serviceToken));
+    assert.deepEqual(health, {
+      contract_version: "social-cues.heygen-durable.v1",
+      interface_fingerprint: "heygen-durable-v1-oauth-account-job-lineage"
+    });
+  });
 
   await check("OpenAPI and PostgreSQL expose only exact service RPC signatures", async () => {
     const response = await httpJson(state, "/", {
