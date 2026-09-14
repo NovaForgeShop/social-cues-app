@@ -70,6 +70,11 @@ import {
   createHeyGenApplication,
   sanitizeHeyGenApplicationError
 } from "./heygen-application.mjs";
+import {
+  createHeyGenDurableRepository,
+  HeyGenDurableRepositoryError,
+  sanitizeHeyGenDurableRepositoryError
+} from "./heygen-durable-repository.mjs";
 import http from "node:http";
 import crypto from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -10574,7 +10579,51 @@ const heygenOAuthStateManager = createHeyGenOAuthStateManager({
   unprotectVerifier: decryptedToken
 });
 
-function heygenApplicationFor(persistStateLedger = async () => {}) {
+const heygenDurableRepository = createHeyGenDurableRepository({
+  request: (pathname, options = {}) => supabaseRequest(pathname, {
+    ...options,
+    tracePathname: "/heygen-durable"
+  })
+});
+
+let heygenDurableReadinessCache = null;
+let heygenDurableReadinessExpiresAt = 0;
+let heygenDurableReadinessPromise = null;
+
+async function heygenDurableReadiness({ force = false } = {}) {
+  if (runtimeMode !== "vercel") {
+    return Object.freeze({ ready: true, state: "local_repository_not_required", contractVersion: null, interfaceFingerprint: null });
+  }
+  if (!supabaseEnabled || !supabaseAuthReady()) {
+    return Object.freeze({ ready: false, state: "hosted_authentication_unavailable", contractVersion: null, interfaceFingerprint: null });
+  }
+  if (!oauthTokenEncryptionReadiness().productionReady) {
+    return Object.freeze({ ready: false, state: "token_encryption_missing", contractVersion: null, interfaceFingerprint: null });
+  }
+  if (!force && heygenDurableReadinessCache && Date.now() < heygenDurableReadinessExpiresAt) return heygenDurableReadinessCache;
+  if (!heygenDurableReadinessPromise) {
+    heygenDurableReadinessPromise = heygenDurableRepository.probeReadiness()
+      .then(result => {
+        heygenDurableReadinessCache = result;
+        heygenDurableReadinessExpiresAt = Date.now() + (result.ready ? 30_000 : 5_000);
+        return result;
+      })
+      .finally(() => { heygenDurableReadinessPromise = null; });
+  }
+  return heygenDurableReadinessPromise;
+}
+
+function requireHeygenDurableReadiness(readiness) {
+  if (readiness?.ready) return;
+  throw new HeyGenDurableRepositoryError(
+    "heygen_durable_repository_unavailable",
+    "HeyGen durable persistence is temporarily unavailable.",
+    503,
+    readiness?.state || "unavailable"
+  );
+}
+
+function heygenApplicationFor({ repository = null, persistStateLedger = async () => {} } = {}) {
   return createHeyGenApplication({
     configuration: heygenConfiguration,
     oauthClient: heygenOAuthClient,
@@ -10585,11 +10634,14 @@ function heygenApplicationFor(persistStateLedger = async () => {}) {
     stateManager: heygenOAuthStateManager,
     protectToken: encryptedToken,
     unprotectToken: decryptedToken,
+    repository,
+    createId: repository ? () => crypto.randomUUID() : undefined,
     persistStateLedger
   });
 }
 
 function publicHeygenFailure(error) {
+  if (error?.name === "HeyGenDurableRepositoryError") return sanitizeHeyGenDurableRepositoryError(error);
   if (error?.name === "HeyGenWorkflowError") return sanitizeHeyGenWorkflowError(error);
   if (error?.name === "HeyGenApplicationError") return sanitizeHeyGenApplicationError(error);
   if (error?.name === "HeyGenOAuthError") return sanitizeHeyGenOAuthError(error);
@@ -14639,6 +14691,30 @@ async function heygenRequestContext(req) {
   };
 }
 
+async function heygenPersistenceForContext(context, { required = true } = {}) {
+  if (runtimeMode !== "vercel") {
+    return Object.freeze({ ready: true, adapterReady: true, state: "local_repository_not_required", repository: null });
+  }
+  const databaseReadiness = isUuid(context?.actorId) && isUuid(context?.workspaceId)
+    ? await heygenDurableReadiness()
+    : Object.freeze({ ready: false, state: "hosted_identity_invalid", contractVersion: null, interfaceFingerprint: null });
+  if (required) requireHeygenDurableReadiness(databaseReadiness);
+  const providerReady = heygenConfiguration.safeReadiness.readyToDiscover;
+  if (required && !providerReady) {
+    throw new HeyGenDurableRepositoryError(
+      heygenConfiguration.safeReadiness.state,
+      "HeyGen OAuth remains unavailable until domain approval and client registration are complete.",
+      503,
+      "configuration"
+    );
+  }
+  return Object.freeze({
+    ...databaseReadiness,
+    adapterReady: databaseReadiness.ready && providerReady,
+    repository: databaseReadiness.ready && providerReady ? heygenDurableRepository : null
+  });
+}
+
 async function heygenWorkflowActor(actorId, workspaceId) {
   const sharedModel = await loadModel();
   const user = (sharedModel.authUsers || []).find(item => String(item.id || "") === String(actorId || ""));
@@ -14648,7 +14724,7 @@ async function heygenWorkflowActor(actorId, workspaceId) {
 }
 
 const heygenWorkflowApplication = heygenApplicationFor();
-const heygenMediaWorkflow = createHeyGenMediaWorkflow({
+const localHeygenMediaWorkflow = createHeyGenMediaWorkflow({
   mutationsEnabled: runtimeMode !== "vercel",
   async authorize({ actorId, workspaceId }) {
     return Boolean(await heygenWorkflowActor(actorId, workspaceId));
@@ -14667,6 +14743,27 @@ const heygenMediaWorkflow = createHeyGenMediaWorkflow({
     return heygenWorkflowApplication.invokeAccountAction(account, { action, args, operationId });
   }
 });
+
+function durableHeygenMediaWorkflow(context, repository) {
+  const application = heygenApplicationFor({ repository });
+  return createHeyGenMediaWorkflow({
+    repository,
+    mutationsEnabled: true,
+    async authorize({ actorId, workspaceId }) {
+      return String(actorId) === String(context.actorId) && String(workspaceId) === String(context.workspaceId);
+    },
+    async invoke({ account, action, args, operationId }) {
+      return application.invokeAccountAction(account, { action, args, operationId });
+    }
+  });
+}
+
+async function heygenMediaWorkflowFor(context) {
+  const persistence = await heygenPersistenceForContext(context);
+  return persistence.repository
+    ? durableHeygenMediaWorkflow(context, persistence.repository)
+    : localHeygenMediaWorkflow;
+}
 
 function workspaceSeedItemId(item, key, index, user = {}) {
   const base = item?.id || `${key}-seed-${index + 1}`;
@@ -16905,21 +17002,25 @@ function renewOAuthReturnSession(res, sharedModel, workspaceModel, owner, record
     workspaceModel.oauthStates = cloneJson(sharedModel.oauthStates || []);
     workspaceModel.currentUser = publicAppUser(owner);
   }
-  const account = oauthConnectedAccountForRecord(workspaceModel || sharedModel, record, owner);
-  const exchangeOk = Boolean(account && isRealConnectedAccount(account) && hasStoredToken(account));
+  const durablePersistenceVerified = record.provider === "heygen" && record.persistenceVerified === true;
+  const account = durablePersistenceVerified ? null : oauthConnectedAccountForRecord(workspaceModel || sharedModel, record, owner);
+  const exchangeOk = durablePersistenceVerified || Boolean(account && isRealConnectedAccount(account) && hasStoredToken(account));
   recordOAuthEvent(sharedModel || workspaceModel, {
     provider: record.provider || account?.oauthProvider || account?.platform || "unknown",
     platform: record.platform || account?.platform || record.provider || "unknown",
     event: "token_exchange_result",
     outcome: exchangeOk ? "stored" : "failed",
-    state: record.state || "",
+    state: durablePersistenceVerified ? "" : record.state || "",
     record,
-    message: account?.connectionEvidence || (exchangeOk ? "Token-backed account stored." : "No token-backed account was stored."),
+    message: durablePersistenceVerified
+      ? "Durable HeyGen account and encrypted token transaction committed."
+      : account?.connectionEvidence || (exchangeOk ? "Token-backed account stored." : "No token-backed account was stored."),
     details: {
-      accountPlatform: account?.platform || "",
-      providerAccountIdPresent: Boolean(account?.providerAccountId),
-      tokenStored: Boolean(account && hasStoredToken(account)),
-      status: account?.status || "",
+      accountPlatform: account?.platform || (durablePersistenceVerified ? "heygen" : ""),
+      providerAccountIdPresent: durablePersistenceVerified || Boolean(account?.providerAccountId),
+      tokenStored: durablePersistenceVerified || Boolean(account && hasStoredToken(account)),
+      status: account?.status || (durablePersistenceVerified ? "connected" : ""),
+      durablePersistenceVerified,
       appSessionPreserved: preservedSession
     }
   });
@@ -17913,14 +18014,15 @@ function oauthRecordForState(model = {}, provider = "", state = "") {
 function recordOAuthEvent(model = {}, input = {}) {
   if (!model || typeof model !== "object") return null;
   const record = input.record || {};
-  const state = input.state || record.state || "";
+  const provider = String(input.provider || record.provider || "unknown");
+  const state = provider === "heygen" ? "" : input.state || record.state || "";
   const ownerUserId = input.ownerUserId || record.ownerUserId || record.userId || "";
   const workspaceId = input.workspaceId || record.workspaceId || (ownerUserId ? "" : "local-dev-workspace");
   const event = {
     id: uid("oauth-event"),
     type: "oauth-event",
     at: new Date().toISOString(),
-    provider: String(input.provider || record.provider || "unknown"),
+    provider,
     platform: String(input.platform || record.platform || input.provider || record.provider || "unknown"),
     event: String(input.event || "oauth_event"),
     outcome: String(input.outcome || ""),
@@ -17932,7 +18034,7 @@ function recordOAuthEvent(model = {}, input = {}) {
     redirectUri: input.redirectUri || record.redirectUri || "",
     oauthMode: input.oauthMode || record.oauthMode || "",
     scopes: Array.isArray(input.scopes) ? input.scopes : Array.isArray(record.requestedScopes) ? record.requestedScopes : [],
-    stateFingerprint: oauthStateFingerprint(state),
+    stateFingerprint: provider === "heygen" ? null : oauthStateFingerprint(state),
     details: safeOAuthEventDetails(input.details || {})
   };
   if (input.error) event.details.error = String(input.error).slice(0, 300);
@@ -17944,7 +18046,7 @@ function recordOAuthEvent(model = {}, input = {}) {
     outcome: event.outcome,
     ownerUserId: event.ownerUserId || null,
     workspaceId: event.workspaceId || null,
-    stateHash: event.stateFingerprint?.sha256 || null
+    stateHash: provider === "heygen" ? null : event.stateFingerprint?.sha256 || null
   });
   return event;
 }
@@ -19846,33 +19948,53 @@ async function route(req, res) {
   if (url.pathname === "/api/heygen/readiness" && req.method === "GET") {
     const context = await heygenRequestContext(req);
     if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
-    const account = heygenAccountForUser(context.model, context.session.user);
-    return json(res, 200, heyGenReadiness({
-      configuration: heygenConfiguration,
-      account,
-      durableRepositoryReady: runtimeMode !== "vercel"
-    }));
+    try {
+      const persistence = await heygenPersistenceForContext(context, { required: false });
+      const account = persistence.repository
+        ? await persistence.repository.getAccount(context)
+        : runtimeMode === "vercel" ? null : heygenAccountForUser(context.model, context.session.user);
+      return json(res, 200, heyGenReadiness({
+        configuration: heygenConfiguration,
+        account,
+        durableRepositoryReady: persistence.ready
+      }));
+    } catch (error) {
+      return heygenJsonFailure(res, error);
+    }
   }
 
   if (url.pathname === "/api/heygen/account" && req.method === "GET") {
     const context = await heygenRequestContext(req);
     if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
-    const account = heygenAccountForUser(context.model, context.session.user);
-    return json(res, 200, {
-      ok: true,
-      connected: Boolean(account && providerAccountConnectionState(account).connected),
-      account: account ? publicAccount(account) : null
-    });
+    try {
+      const persistence = await heygenPersistenceForContext(context);
+      const account = persistence.repository
+        ? await persistence.repository.getAccount(context)
+        : heygenAccountForUser(context.model, context.session.user);
+      return json(res, 200, {
+        ok: true,
+        connected: Boolean(account && providerAccountConnectionState(account).connected),
+        account: account ? publicAccount(account) : null
+      });
+    } catch (error) {
+      return heygenJsonFailure(res, error);
+    }
   }
 
   if (url.pathname === "/api/oauth/heygen/start" && req.method === "GET") {
     const context = await heygenRequestContext(req);
     if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
-    context.model.heygenOAuthStates = Array.isArray(context.model.heygenOAuthStates) ? context.model.heygenOAuthStates : [];
-    const application = heygenApplicationFor(async () => saveModelForUser(context.model, context.session.user));
     try {
+      const persistence = await heygenPersistenceForContext(context);
+      const application = heygenApplicationFor({
+        repository: persistence.repository,
+        persistStateLedger: async () => saveModelForUser(context.model, context.session.user)
+      });
+      if (!persistence.repository) {
+        context.model.heygenOAuthStates = Array.isArray(context.model.heygenOAuthStates) ? context.model.heygenOAuthStates : [];
+      }
       const started = await application.beginOAuth({
-        ledger: context.model.heygenOAuthStates,
+        ledger: persistence.repository ? undefined : context.model.heygenOAuthStates,
         actorId: context.actorId,
         workspaceId: context.workspaceId
       });
@@ -19886,15 +20008,22 @@ async function route(req, res) {
   if (url.pathname === "/api/oauth/heygen/callback" && req.method === "GET") {
     const context = await heygenRequestContext(req);
     if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
-    context.model.heygenOAuthStates = Array.isArray(context.model.heygenOAuthStates) ? context.model.heygenOAuthStates : [];
-    const application = heygenApplicationFor(async () => saveModelForUser(context.model, context.session.user));
     const state = url.searchParams.get("state") || "";
     const code = cleanOAuthCode(url.searchParams.get("code") || "");
     const providerStopped = Boolean(url.searchParams.get("error"));
     try {
+      const persistence = await heygenPersistenceForContext(context);
+      const durable = Boolean(persistence.repository);
+      const application = heygenApplicationFor({
+        repository: persistence.repository,
+        persistStateLedger: async () => saveModelForUser(context.model, context.session.user)
+      });
+      if (!durable) {
+        context.model.heygenOAuthStates = Array.isArray(context.model.heygenOAuthStates) ? context.model.heygenOAuthStates : [];
+      }
       if (providerStopped || !code) {
         await application.cancelOAuth({
-          ledger: context.model.heygenOAuthStates,
+          ledger: durable ? undefined : context.model.heygenOAuthStates,
           actorId: context.actorId,
           workspaceId: context.workspaceId,
           state
@@ -19909,46 +20038,51 @@ async function route(req, res) {
         }), "/app");
       }
       const completed = await application.completeOAuth({
-        ledger: context.model.heygenOAuthStates,
+        ledger: durable ? undefined : context.model.heygenOAuthStates,
         actorId: context.actorId,
         workspaceId: context.workspaceId,
         state,
         code
       });
-      context.model.connectedAccounts = Array.isArray(context.model.connectedAccounts) ? context.model.connectedAccounts : [];
-      const existingIndex = context.model.connectedAccounts.findIndex(account => account.platform === "heygen"
-        && ownedByUser(account, context.actorId)
-        && String(account.workspaceId || "") === context.workspaceId);
-      if (existingIndex >= 0) {
-        completed.account.id = context.model.connectedAccounts[existingIndex].id || completed.account.id;
-        context.model.connectedAccounts[existingIndex] = completed.account;
-      } else {
-        context.model.connectedAccounts.push(completed.account);
+      if (!durable) {
+        context.model.connectedAccounts = Array.isArray(context.model.connectedAccounts) ? context.model.connectedAccounts : [];
+        const existingIndex = context.model.connectedAccounts.findIndex(account => account.platform === "heygen"
+          && ownedByUser(account, context.actorId)
+          && String(account.workspaceId || "") === context.workspaceId);
+        if (existingIndex >= 0) {
+          completed.account.id = context.model.connectedAccounts[existingIndex].id || completed.account.id;
+          context.model.connectedAccounts[existingIndex] = completed.account;
+        } else {
+          context.model.connectedAccounts.push(completed.account);
+        }
+        context.model.integrations = context.model.integrations || {};
+        context.model.integrations.heygen = "HeyGen MCP OAuth connected and current-user identity verified";
       }
-      context.model.integrations = context.model.integrations || {};
-      context.model.integrations.heygen = "HeyGen MCP OAuth connected and current-user identity verified";
       renewOAuthReturnSession(res, context.sharedModel, context.model, context.session.user, {
         provider: "heygen",
         platform: "heygen",
         ownerUserId: context.actorId,
         workspaceId: context.workspaceId,
-        state
+        state: durable ? "" : state,
+        persistenceVerified: durable
       }, req, context.session);
-      if (context.model !== context.sharedModel && !localWorkspacePersistence) await saveModel(context.sharedModel);
-      await saveModelForUser(context.model, context.session.user);
-      const persistence = await confirmPersistedProviderAccount(
-        context.session.user,
-        "heygen",
-        completed.account.providerAccountId,
-        context.sharedModel,
-        completed.account
-      );
-      if (!persistence.ok && !persistence.pending && !persistence.skipped) {
-        return json(res, 503, {
-          ok: false,
-          code: "heygen_persistence_unverified",
-          error: "HeyGen authorized, but secure account persistence could not be verified. Reconnect before using video tools."
-        });
+      if (!durable) {
+        if (context.model !== context.sharedModel && !localWorkspacePersistence) await saveModel(context.sharedModel);
+        await saveModelForUser(context.model, context.session.user);
+        const persistenceProof = await confirmPersistedProviderAccount(
+          context.session.user,
+          "heygen",
+          completed.account.providerAccountId,
+          context.sharedModel,
+          completed.account
+        );
+        if (!persistenceProof.ok && !persistenceProof.pending && !persistenceProof.skipped) {
+          return json(res, 503, {
+            ok: false,
+            code: "heygen_persistence_unverified",
+            error: "HeyGen authorized, but secure account persistence could not be verified. Reconnect before using video tools."
+          });
+        }
       }
       return html(res, 200, oauthReturnBody("HeyGen", "Your HeyGen account is connected through MCP OAuth.", {
         provider: "heygen",
@@ -19968,17 +20102,31 @@ async function route(req, res) {
   if (url.pathname === "/api/heygen/refresh" && req.method === "POST") {
     const context = await heygenRequestContext(req);
     if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
-    const account = heygenAccountForUser(context.model, context.session.user);
-    if (!account) return json(res, 409, { ok: false, code: "heygen_account_required", error: "Connect HeyGen before refreshing access." });
     try {
-      const refreshed = await heygenApplicationFor().refreshAccount(account);
-      const index = context.model.connectedAccounts.indexOf(account);
-      context.model.connectedAccounts[index] = refreshed;
-      await saveModelForUser(context.model, context.session.user);
+      const input = await bodyJson(req);
+      if (!input || typeof input !== "object" || Array.isArray(input)
+        || Object.keys(input).some(key => key !== "operationId")) {
+        return json(res, 400, { ok: false, code: "heygen_input_invalid", error: "HeyGen refresh input is invalid." });
+      }
+      const persistence = await heygenPersistenceForContext(context);
+      const account = persistence.repository
+        ? await persistence.repository.getAccount(context)
+        : heygenAccountForUser(context.model, context.session.user);
+      if (!account) return json(res, 409, { ok: false, code: "heygen_account_required", error: "Connect HeyGen before refreshing access." });
+      const refreshed = await heygenApplicationFor({ repository: persistence.repository }).refreshAccount(account, {
+        actorId: context.actorId,
+        workspaceId: context.workspaceId,
+        operationId: input.operationId
+      });
+      if (!persistence.repository) {
+        const index = context.model.connectedAccounts.indexOf(account);
+        context.model.connectedAccounts[index] = refreshed;
+        await saveModelForUser(context.model, context.session.user);
+      }
       return json(res, 200, {
         ok: true,
         account: publicAccount(refreshed),
-        readiness: heyGenReadiness({ configuration: heygenConfiguration, account: refreshed, durableRepositoryReady: runtimeMode !== "vercel" })
+        readiness: heyGenReadiness({ configuration: heygenConfiguration, account: refreshed, durableRepositoryReady: persistence.ready })
       });
     } catch (error) {
       return heygenJsonFailure(res, error);
@@ -19994,33 +20142,47 @@ async function route(req, res) {
   if (url.pathname === "/api/heygen/disconnect" && req.method === "POST") {
     const context = await heygenRequestContext(req);
     if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
-    const account = heygenAccountForUser(context.model, context.session.user);
-    let remoteRevocation = { attempted: false, state: "remote_revocation_unavailable" };
-    if (account) {
-      try {
-        ({ remoteRevocation } = await heygenApplicationFor().disconnect(account));
-      } catch {
-        remoteRevocation = { attempted: true, state: "remote_revocation_failed" };
+    try {
+      const input = await bodyJson(req);
+      if (!input || typeof input !== "object" || Array.isArray(input)
+        || Object.keys(input).some(key => key !== "operationId")) {
+        return json(res, 400, { ok: false, code: "heygen_input_invalid", error: "HeyGen disconnect input is invalid." });
       }
+      const persistence = await heygenPersistenceForContext(context);
+      const account = persistence.repository
+        ? await persistence.repository.getAccount(context)
+        : heygenAccountForUser(context.model, context.session.user);
+      let remoteRevocation = { attempted: false, state: "remote_revocation_unavailable" };
+      if (account || persistence.repository) {
+        ({ remoteRevocation } = await heygenApplicationFor({ repository: persistence.repository }).disconnect(account, {
+          actorId: context.actorId,
+          workspaceId: context.workspaceId,
+          operationId: input.operationId
+        }));
+      }
+      if (!persistence.repository) {
+        context.model.connectedAccounts = (context.model.connectedAccounts || []).filter(item => item !== account);
+        context.model.integrations = context.model.integrations || {};
+        context.model.integrations.heygen = "HeyGen disconnected; local credentials deleted";
+        await saveModelForUser(context.model, context.session.user);
+        await clearNormalizedProviderRowsForPlatform(context.session.user, "heygen");
+      }
+      return json(res, 200, {
+        ok: true,
+        connected: false,
+        localCredentialsDeleted: true,
+        remoteRevocation
+      });
+    } catch (error) {
+      return heygenJsonFailure(res, error);
     }
-    context.model.connectedAccounts = (context.model.connectedAccounts || []).filter(item => item !== account);
-    context.model.integrations = context.model.integrations || {};
-    context.model.integrations.heygen = "HeyGen disconnected; local credentials deleted";
-    await saveModelForUser(context.model, context.session.user);
-    await clearNormalizedProviderRowsForPlatform(context.session.user, "heygen");
-    return json(res, 200, {
-      ok: true,
-      connected: false,
-      localCredentialsDeleted: true,
-      remoteRevocation
-    });
   }
 
   if (url.pathname === "/api/heygen/jobs" && req.method === "GET") {
     const context = await heygenRequestContext(req);
     if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
     try {
-      const jobs = await heygenMediaWorkflow.listJobs(context);
+      const jobs = await (await heygenMediaWorkflowFor(context)).listJobs(context);
       return json(res, 200, { ok: true, jobs });
     } catch (error) {
       return heygenJsonFailure(res, error);
@@ -20036,7 +20198,7 @@ async function route(req, res) {
         || Object.keys(input).some(key => !["action", "args", "operationId"].includes(key))) {
         return json(res, 400, { ok: false, code: "heygen_input_invalid", error: "HeyGen generation input is invalid." });
       }
-      const result = await heygenMediaWorkflow.createJob(context, input);
+      const result = await (await heygenMediaWorkflowFor(context)).createJob(context, input);
       return json(res, result.replayed ? 200 : 202, result);
     } catch (error) {
       return heygenJsonFailure(res, error);
@@ -20048,7 +20210,7 @@ async function route(req, res) {
     const context = await heygenRequestContext(req);
     if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
     try {
-      return json(res, 200, await heygenMediaWorkflow.pollJob(context, heygenPollMatch[1]));
+      return json(res, 200, await (await heygenMediaWorkflowFor(context)).pollJob(context, heygenPollMatch[1]));
     } catch (error) {
       return heygenJsonFailure(res, error);
     }
@@ -20059,7 +20221,7 @@ async function route(req, res) {
     const context = await heygenRequestContext(req);
     if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
     try {
-      const jobs = await heygenMediaWorkflow.listJobs(context);
+      const jobs = await (await heygenMediaWorkflowFor(context)).listJobs(context);
       const job = jobs.find(item => item.id === heygenJobMatch[1]);
       return job ? json(res, 200, { ok: true, job }) : json(res, 404, { ok: false, error: "That HeyGen job is not available in this workspace." });
     } catch (error) {
@@ -20071,7 +20233,7 @@ async function route(req, res) {
     const context = await heygenRequestContext(req);
     if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
     try {
-      const versions = await heygenMediaWorkflow.listVersions(context);
+      const versions = await (await heygenMediaWorkflowFor(context)).listVersions(context);
       return json(res, 200, { ok: true, versions });
     } catch (error) {
       return heygenJsonFailure(res, error);
@@ -20083,7 +20245,7 @@ async function route(req, res) {
     const context = await heygenRequestContext(req);
     if (!context.ok) return json(res, context.status, { ok: false, error: context.error });
     try {
-      const versions = await heygenMediaWorkflow.listVersions(context);
+      const versions = await (await heygenMediaWorkflowFor(context)).listVersions(context);
       const version = versions.find(item => item.id === heygenVersionMatch[1]);
       return version ? json(res, 200, { ok: true, version }) : json(res, 404, { ok: false, error: "That HeyGen version is not available in this workspace." });
     } catch (error) {

@@ -22,7 +22,7 @@ const advertisedTools = [
   { name: "video_agent", inputSchema: { type: "object", properties: { prompt: { type: "string" }, operation_id: { type: "string" } }, required: ["prompt"] } }
 ];
 
-function fixture({ identityAccountId = "provider-user-a", failIdentity = false } = {}) {
+function fixture({ identityAccountId = "provider-user-a", failIdentity = false, repository = null, createId = () => "account-r48" } = {}) {
   const events = [];
   let mcpCalls = 0;
   const configuration = resolveHeyGenConfiguration({
@@ -54,7 +54,7 @@ function fixture({ identityAccountId = "provider-user-a", failIdentity = false }
     async revoke(discovered, input) {
       events.push("revoke");
       assert.equal(discovered.revocationEndpoint, metadata.revocationEndpoint);
-      assert.equal(input.token, "access-token-r48");
+      assert.match(input.token, /^access-token-(?:r48|refreshed)$/u);
       return { attempted: true, state: "remote_revocation_confirmed" };
     }
   };
@@ -92,9 +92,10 @@ function fixture({ identityAccountId = "provider-user-a", failIdentity = false }
     stateManager,
     protectToken,
     unprotectToken,
+    repository,
     persistStateLedger: async ({ reason }) => { events.push(reason); },
     clock: () => new Date("2026-09-13T12:00:00.000Z"),
-    createId: () => "account-r48"
+    createId
   });
   return { application, events, counts: () => ({ mcpCalls }) };
 }
@@ -128,6 +129,108 @@ test("full mocked OAuth lifecycle verifies identity before returning protected a
   assert.equal(events.indexOf("exchange") < events.indexOf("current-user:access-token-r48"), true);
   assert.equal(counts().mcpCalls, 1);
   assert.equal(application.readiness({ account: completed.account }).generation.ready, true);
+});
+
+test("durable OAuth completion is digest-backed and replays without a second provider exchange", async () => {
+  let issuedState = null;
+  let committedAccount = null;
+  let completed = false;
+  const repository = {
+    async issueOAuthState(input) { issuedState = input; return { issued: true }; },
+    async consumeOAuthState(input) {
+      assert.equal(input.stateDigest, issuedState.stateDigest);
+      if (completed) return { replayed: true, account: committedAccount, capabilities: committedAccount.profile.capabilities };
+      return {
+        replayed: false,
+        stateDigest: issuedState.stateDigest,
+        verifier: issuedState.protectedVerifier,
+        metadata: issuedState.metadata
+      };
+    },
+    async commitConnection(input) {
+      assert.equal(input.stateDigest, issuedState.stateDigest);
+      completed = true;
+      committedAccount = input.account;
+      return { replayed: false, account: committedAccount };
+    }
+  };
+  const durable = fixture({
+    repository,
+    createId: () => "33333333-3333-4333-8333-333333333333"
+  });
+  const started = await durable.application.beginOAuth({
+    actorId: "11111111-1111-4111-8111-111111111111",
+    workspaceId: "22222222-2222-4222-8222-222222222222"
+  });
+  assert.equal(issuedState.stateDigest.length, 43);
+  assert.equal(JSON.stringify(issuedState).includes(started.state), false);
+  const first = await durable.application.completeOAuth({
+    actorId: "11111111-1111-4111-8111-111111111111",
+    workspaceId: "22222222-2222-4222-8222-222222222222",
+    state: started.state,
+    code: "authorization-code-r48"
+  });
+  const replay = await durable.application.completeOAuth({
+    actorId: "11111111-1111-4111-8111-111111111111",
+    workspaceId: "22222222-2222-4222-8222-222222222222",
+    state: started.state,
+    code: "authorization-code-r48"
+  });
+  assert.equal(first.replayed, false);
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.account.id, first.account.id);
+  assert.equal(durable.events.filter(event => event === "exchange").length, 1);
+  assert.equal(durable.counts().mcpCalls, 1);
+});
+
+test("durable refresh and disconnect replay stable operation ids without duplicate provider calls", async () => {
+  const original = fixture();
+  const ledger = [];
+  const started = await original.application.beginOAuth({ ledger, actorId: "user-a", workspaceId: "workspace-a" });
+  const connected = await original.application.completeOAuth({ ledger, actorId: "user-a", workspaceId: "workspace-a", state: started.state, code: "authorization-code-r48" });
+  let refreshedAccount = null;
+  let refreshComplete = false;
+  let disconnectComplete = false;
+  let disconnectResult = null;
+  const repository = {
+    async beginAccountOperation({ action }) {
+      if (action === "refresh") return refreshComplete
+        ? { outcome: "completed", account: refreshedAccount, safeResult: {} }
+        : { outcome: "acquired", account: connected.account, safeResult: {} };
+      return disconnectComplete
+        ? { outcome: "completed", account: null, safeResult: disconnectResult }
+        : { outcome: "acquired", account: refreshedAccount || connected.account, safeResult: {} };
+    },
+    async completeRefresh({ account }) {
+      refreshComplete = true;
+      refreshedAccount = account;
+      return { replayed: false, account };
+    },
+    async completeDisconnect({ safeResult }) {
+      disconnectComplete = true;
+      disconnectResult = safeResult;
+      throw new Error("simulated response loss after commit");
+    },
+    async failAccountOperation() { return { failed: false }; }
+  };
+  const durable = fixture({ repository });
+  const operationContext = {
+    actorId: "11111111-1111-4111-8111-111111111111",
+    workspaceId: "22222222-2222-4222-8222-222222222222"
+  };
+  const firstRefresh = await durable.application.refreshAccount(connected.account, { ...operationContext, operationId: "refresh-stable" });
+  const replayRefresh = await durable.application.refreshAccount(connected.account, { ...operationContext, operationId: "refresh-stable" });
+  assert.equal(firstRefresh.credentialUpdatedAt, replayRefresh.credentialUpdatedAt);
+  assert.equal(durable.events.filter(event => event === "refresh-token").length, 1);
+
+  await assert.rejects(
+    durable.application.disconnect(firstRefresh, { ...operationContext, operationId: "disconnect-stable" }),
+    /simulated response loss/u
+  );
+  const replayDisconnect = await durable.application.disconnect(null, { ...operationContext, operationId: "disconnect-stable" });
+  assert.equal(replayDisconnect.replayed, true);
+  assert.deepEqual(replayDisconnect.remoteRevocation, { attempted: true, state: "remote_revocation_confirmed" });
+  assert.equal(durable.events.filter(event => event === "revoke").length, 1);
 });
 
 test("refresh re-verifies the same current-user account and rejects account switching", async () => {

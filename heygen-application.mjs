@@ -42,6 +42,7 @@ export function createHeyGenApplication({
   stateManager,
   protectToken,
   unprotectToken,
+  repository = null,
   persistStateLedger = async () => {},
   clock = () => new Date(),
   createId = prefix => prefix + "-" + crypto.randomBytes(12).toString("base64url")
@@ -60,13 +61,33 @@ export function createHeyGenApplication({
     }
     const metadata = await oauthClient.discover();
     const pkce = createHeyGenPkce();
-    const state = stateManager.issue(ledger, {
+    const issued = repository
+      ? stateManager.issueRecord({
+        actorId,
+        workspaceId,
+        verifier: pkce.verifier,
+        metadata
+      })
+      : null;
+    const state = issued?.state || stateManager.issue(ledger, {
       actorId,
       workspaceId,
       verifier: pkce.verifier,
       metadata
     });
-    await persistStateLedger({ ledger, actorId, workspaceId, reason: "heygen-oauth-state-issued" });
+    if (repository) {
+      await repository.issueOAuthState({
+        actorId,
+        workspaceId,
+        stateDigest: issued.record.stateHash,
+        protectedVerifier: issued.record.protectedVerifier,
+        metadata: issued.record.metadata,
+        issuedAt: new Date(issued.record.issuedAt).toISOString(),
+        expiresAt: new Date(issued.record.expiresAt).toISOString()
+      });
+    } else {
+      await persistStateLedger({ ledger, actorId, workspaceId, reason: "heygen-oauth-state-issued" });
+    }
     return {
       authorizationUrl: oauthClient.authorizationUrl(metadata, {
         clientId: configuration.internal.clientId,
@@ -81,8 +102,27 @@ export function createHeyGenApplication({
   }
 
   async function completeOAuth({ ledger, actorId, workspaceId, state, code } = {}) {
-    const consumed = stateManager.consume(ledger, { actorId, workspaceId, state });
-    await persistStateLedger({ ledger, actorId, workspaceId, reason: "heygen-oauth-state-consumed" });
+    let durableState = null;
+    let consumed;
+    if (repository) {
+      const verified = stateManager.verify(state, { actorId, workspaceId });
+      durableState = await repository.consumeOAuthState({ actorId, workspaceId, stateDigest: verified.stateHash });
+      if (durableState.replayed) {
+        return {
+          account: durableState.account,
+          capabilities: durableState.capabilities || durableState.account?.profile?.capabilities || [],
+          replayed: true
+        };
+      }
+      consumed = {
+        metadata: durableState.metadata,
+        verifier: unprotectToken(durableState.verifier)
+      };
+      if (!consumed.verifier) throw appError("heygen_verifier_unavailable", "HeyGen OAuth state could not be decrypted.", 503);
+    } else {
+      consumed = stateManager.consume(ledger, { actorId, workspaceId, state });
+      await persistStateLedger({ ledger, actorId, workspaceId, reason: "heygen-oauth-state-consumed" });
+    }
     const token = await oauthClient.exchangeCode(consumed.metadata, {
       code,
       verifier: consumed.verifier,
@@ -99,8 +139,7 @@ export function createHeyGenApplication({
       throw appError("heygen_identity_capability_missing", "HeyGen did not advertise an account-identity capability.", 502);
     }
     const now = clock();
-    return {
-      account: {
+    const account = {
         id: createId("acct-heygen"),
         platform: "heygen",
         oauthProvider: "heygen",
@@ -127,65 +166,129 @@ export function createHeyGenApplication({
           billingRelationship: "customer-owned-heygen-plan"
         },
         connectionEvidence: "Authenticated HeyGen current-user identity and advertised MCP capabilities verified."
-      },
+      };
+    if (repository) {
+      const committed = await repository.commitConnection({
+        actorId,
+        workspaceId,
+        stateDigest: durableState.stateDigest,
+        account
+      });
+      return {
+        account: committed.account,
+        capabilities: committed.account.profile?.capabilities || capabilities,
+        replayed: committed.replayed === true
+      };
+    }
+    return {
+      account,
       capabilities
     };
   }
 
   async function cancelOAuth({ ledger, actorId, workspaceId, state } = {}) {
-    stateManager.consume(ledger, { actorId, workspaceId, state });
-    await persistStateLedger({ ledger, actorId, workspaceId, reason: "heygen-oauth-state-cancelled" });
+    if (repository) {
+      const verified = stateManager.verify(state, { actorId, workspaceId });
+      await repository.cancelOAuthState({ actorId, workspaceId, stateDigest: verified.stateHash });
+    } else {
+      stateManager.consume(ledger, { actorId, workspaceId, state });
+      await persistStateLedger({ ledger, actorId, workspaceId, reason: "heygen-oauth-state-cancelled" });
+    }
     return { ok: true };
   }
 
-  async function refreshAccount(account) {
+  async function refreshAccount(account, { actorId, workspaceId, operationId } = {}) {
     if (!account || account.platform !== "heygen" || account.oauthProvider !== "heygen") {
       throw appError("heygen_account_required", "Connect HeyGen before refreshing access.", 409);
     }
-    const metadata = account.profile?.oauthMetadata;
-    const refreshToken = unprotectToken(account.refreshCredential);
-    const token = await oauthClient.refresh(metadata, {
-      refreshToken,
-      clientId: configuration.internal.clientId,
-      clientSecret: configuration.internal.clientSecret
-    });
-    const mcp = mcpClientFactory(token.accessToken);
-    const { identity, tools: advertisedTools } = await mcp.getCurrentUser();
-    if (String(identity.accountId) !== String(account.providerAccountId)) {
-      throw appError("heygen_account_changed", "HeyGen refreshed a different account. Reconnect explicitly.", 409);
+    const requestFingerprint = crypto.createHash("sha256").update(JSON.stringify({ action: "refresh", accountId: account.id })).digest("base64url");
+    let operation = null;
+    let sourceAccount = account;
+    if (repository) {
+      operation = await repository.beginAccountOperation({ action: "refresh", actorId, workspaceId, operationId, requestFingerprint });
+      if (operation.outcome === "completed") return operation.account;
+      if (operation.outcome === "in_progress") throw appError("heygen_operation_in_progress", "That HeyGen refresh is already in progress.", 409);
+      if (operation.outcome === "failed") throw appError("heygen_refresh_retry_required", "Start a new HeyGen refresh attempt.", 409);
+      sourceAccount = operation.account;
     }
-    const now = clock();
-    const capabilities = classifyHeyGenTools(advertisedTools);
-    return {
-      ...account,
-      status: "connected",
-      credential: protectToken(token.accessToken),
-      refreshCredential: token.refreshToken ? protectToken(token.refreshToken) : account.refreshCredential,
-      credentialUpdatedAt: now.toISOString(),
-      tokenExpiresAt: token.expiresIn ? new Date(now.getTime() + token.expiresIn * 1000).toISOString() : account.tokenExpiresAt || null,
-      scopes: String(token.scope || "").split(/\s+/).filter(Boolean),
-      profile: {
-        ...(account.profile || {}),
-        plan: identity.plan || "",
-        credits: identity.credits,
-        advertisedTools: advertisedTools.slice(0, 100).map(tool => ({ name: clean(tool.name, 160) })),
-        capabilities: capabilities.map(item => ({ id: item.id, label: item.label, toolName: item.toolName }))
-      },
-      connectionEvidence: "HeyGen access refreshed and current-user identity reverified."
-    };
-  }
-
-  async function disconnect(account) {
-    if (!account) return { remoteRevocation: { attempted: false, state: "remote_revocation_unavailable" } };
-    const token = unprotectToken(account.credential);
-    const remoteRevocation = token
-      ? await oauthClient.revoke(account.profile?.oauthMetadata, {
-        token,
+    try {
+      const metadata = sourceAccount.profile?.oauthMetadata;
+      const refreshToken = unprotectToken(sourceAccount.refreshCredential);
+      const token = await oauthClient.refresh(metadata, {
+        refreshToken,
         clientId: configuration.internal.clientId,
         clientSecret: configuration.internal.clientSecret
-      })
-      : { attempted: false, state: "remote_revocation_unavailable" };
-    return { remoteRevocation };
+      });
+      const mcp = mcpClientFactory(token.accessToken);
+      const { identity, tools: advertisedTools } = await mcp.getCurrentUser();
+      if (String(identity.accountId) !== String(sourceAccount.providerAccountId)) {
+        throw appError("heygen_account_changed", "HeyGen refreshed a different account. Reconnect explicitly.", 409);
+      }
+      const now = clock();
+      const capabilities = classifyHeyGenTools(advertisedTools);
+      const refreshed = {
+        ...sourceAccount,
+        status: "connected",
+        credential: protectToken(token.accessToken),
+        refreshCredential: token.refreshToken ? protectToken(token.refreshToken) : sourceAccount.refreshCredential,
+        credentialUpdatedAt: now.toISOString(),
+        tokenExpiresAt: token.expiresIn ? new Date(now.getTime() + token.expiresIn * 1000).toISOString() : sourceAccount.tokenExpiresAt || null,
+        scopes: String(token.scope || "").split(/\s+/).filter(Boolean),
+        profile: {
+          ...(sourceAccount.profile || {}),
+          plan: identity.plan || "",
+          credits: identity.credits,
+          advertisedTools: advertisedTools.slice(0, 100).map(tool => ({ name: clean(tool.name, 160) })),
+          capabilities: capabilities.map(item => ({ id: item.id, label: item.label, toolName: item.toolName }))
+        },
+        connectionEvidence: "HeyGen access refreshed and current-user identity reverified."
+      };
+      if (!repository) return refreshed;
+      return (await repository.completeRefresh({ actorId, workspaceId, operationId, requestFingerprint, account: refreshed })).account;
+    } catch (error) {
+      if (repository && operation?.outcome === "acquired") {
+        await repository.failAccountOperation({ actorId, workspaceId, action: "refresh", operationId, requestFingerprint, failureCode: error?.code || "heygen_refresh_failed" }).catch(() => null);
+      }
+      throw error;
+    }
+  }
+
+  async function disconnect(account, { actorId, workspaceId, operationId } = {}) {
+    if (!account && !repository) return { remoteRevocation: { attempted: false, state: "remote_revocation_unavailable" } };
+    const requestFingerprint = crypto.createHash("sha256").update(JSON.stringify({ action: "disconnect" })).digest("base64url");
+    let operation = null;
+    let sourceAccount = account;
+    if (repository) {
+      operation = await repository.beginAccountOperation({ action: "disconnect", actorId, workspaceId, operationId, requestFingerprint });
+      if (operation.outcome === "completed") return { remoteRevocation: operation.safeResult.remoteRevocation || { attempted: false, state: "remote_revocation_unavailable" }, replayed: true };
+      if (operation.outcome === "in_progress") throw appError("heygen_operation_in_progress", "That HeyGen disconnect is already in progress.", 409);
+      if (operation.outcome === "failed") throw appError("heygen_disconnect_retry_required", "Start a new HeyGen disconnect attempt.", 409);
+      sourceAccount = operation.account;
+    }
+    try {
+      const token = unprotectToken(sourceAccount?.credential);
+      let remoteRevocation = { attempted: false, state: "remote_revocation_unavailable" };
+      if (token) {
+        try {
+          remoteRevocation = await oauthClient.revoke(sourceAccount.profile?.oauthMetadata, {
+            token,
+            clientId: configuration.internal.clientId,
+            clientSecret: configuration.internal.clientSecret
+          });
+        } catch {
+          remoteRevocation = { attempted: true, state: "remote_revocation_failed" };
+        }
+      }
+      if (repository) {
+        await repository.completeDisconnect({ actorId, workspaceId, operationId, requestFingerprint, safeResult: { remoteRevocation } });
+      }
+      return { remoteRevocation, replayed: false };
+    } catch (error) {
+      if (repository && operation?.outcome === "acquired") {
+        await repository.failAccountOperation({ actorId, workspaceId, action: "disconnect", operationId, requestFingerprint, failureCode: error?.code || "heygen_disconnect_failed" }).catch(() => null);
+      }
+      throw error;
+    }
   }
 
   async function invokeAccountAction(account, { action, args = {}, operationId } = {}) {

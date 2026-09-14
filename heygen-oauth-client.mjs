@@ -259,8 +259,8 @@ export function createHeyGenOAuthStateManager({
 } = {}) {
   if (String(secret || "").length < 16) throw new TypeError("A server-only OAuth state secret is required");
 
-  function issue(ledger, { actorId, workspaceId, verifier, metadata } = {}) {
-    if (!Array.isArray(ledger) || !actorId || !workspaceId || !verifier || !metadata?.issuer) {
+  function issueRecord({ actorId, workspaceId, verifier, metadata } = {}) {
+    if (!actorId || !workspaceId || !verifier || !metadata?.issuer) {
       throw oauthError("oauth_state_invalid", "HeyGen OAuth state could not be issued.");
     }
     const now = clock();
@@ -274,10 +274,7 @@ export function createHeyGenOAuthStateManager({
     };
     const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
     const state = `${encoded}.${stateSignature(secret, encoded)}`;
-    for (let index = ledger.length - 1; index >= 0; index -= 1) {
-      if (ledger[index]?.provider === "heygen" && Number(ledger[index].expiresAt || 0) < now) ledger.splice(index, 1);
-    }
-    ledger.push({
+    const record = {
       provider: "heygen",
       stateHash: stateHash(state),
       actorId: payload.actorId,
@@ -295,12 +292,12 @@ export function createHeyGenOAuthStateManager({
         scopesSupported: [...(metadata.scopesSupported || [])],
         tokenEndpointAuthMethods: [...(metadata.tokenEndpointAuthMethods || [])]
       }
-    });
-    return state;
+    };
+    return Object.freeze({ state, record: Object.freeze(record) });
   }
 
-  function consume(ledger, { state, actorId, workspaceId } = {}) {
-    if (!Array.isArray(ledger) || !state || !actorId || !workspaceId) {
+  function verify(state, { actorId, workspaceId } = {}) {
+    if (!state || !actorId || !workspaceId) {
       throw oauthError("oauth_state_rejected", "HeyGen OAuth state was rejected.", 400);
     }
     const [encoded, signature, extra] = String(state).split(".");
@@ -313,21 +310,28 @@ export function createHeyGenOAuthStateManager({
     } catch {
       throw oauthError("oauth_state_rejected", "HeyGen OAuth state was rejected.", 400);
     }
-    const index = ledger.findIndex(item => item?.provider === "heygen" && safeEqual(item.stateHash, stateHash(state)));
-    if (index < 0) throw oauthError("oauth_state_replayed", "HeyGen OAuth state was already used or is unknown.", 409);
-    const record = ledger[index];
     if (payload.provider !== "heygen"
       || String(payload.actorId) !== String(actorId)
-      || String(payload.workspaceId) !== String(workspaceId)
-      || String(record.actorId) !== String(actorId)
-      || String(record.workspaceId) !== String(workspaceId)) {
+      || String(payload.workspaceId) !== String(workspaceId)) {
       throw oauthError("oauth_state_owner_mismatch", "HeyGen OAuth state belongs to a different workspace.", 403);
     }
-    if (Number(payload.expiresAt || 0) <= clock() || Number(record.expiresAt || 0) <= clock()) {
-      ledger.splice(index, 1);
+    if (Number(payload.expiresAt || 0) <= clock()) {
       throw oauthError("oauth_state_expired", "HeyGen OAuth state expired.", 400);
     }
-    ledger.splice(index, 1);
+    return Object.freeze({ payload: Object.freeze(payload), stateHash: stateHash(state) });
+  }
+
+  function consumeRecord(record, { state, actorId, workspaceId } = {}) {
+    const verified = verify(state, { actorId, workspaceId });
+    if (!record || record.provider !== "heygen" || !safeEqual(record.stateHash, verified.stateHash)) {
+      throw oauthError("oauth_state_replayed", "HeyGen OAuth state was already used or is unknown.", 409);
+    }
+    if (String(record.actorId) !== String(actorId) || String(record.workspaceId) !== String(workspaceId)) {
+      throw oauthError("oauth_state_owner_mismatch", "HeyGen OAuth state belongs to a different workspace.", 403);
+    }
+    if (Number(record.expiresAt || 0) <= clock()) {
+      throw oauthError("oauth_state_expired", "HeyGen OAuth state expired.", 400);
+    }
     return Object.freeze({
       actorId: record.actorId,
       workspaceId: record.workspaceId,
@@ -336,7 +340,42 @@ export function createHeyGenOAuthStateManager({
     });
   }
 
-  return Object.freeze({ issue, consume });
+  function issue(ledger, input = {}) {
+    if (!Array.isArray(ledger)) throw oauthError("oauth_state_invalid", "HeyGen OAuth state could not be issued.");
+    const issued = issueRecord(input);
+    const now = clock();
+    for (let index = ledger.length - 1; index >= 0; index -= 1) {
+      if (ledger[index]?.provider === "heygen" && Number(ledger[index].expiresAt || 0) < now) ledger.splice(index, 1);
+    }
+    ledger.push(issued.record);
+    return issued.state;
+  }
+
+  function consume(ledger, input = {}) {
+    if (!Array.isArray(ledger)) throw oauthError("oauth_state_rejected", "HeyGen OAuth state was rejected.", 400);
+    let verified;
+    try {
+      verified = verify(input.state, input);
+    } catch (error) {
+      if (error?.code === "oauth_state_expired") {
+        const expiredIndex = ledger.findIndex(item => item?.provider === "heygen" && safeEqual(item.stateHash, stateHash(input.state)));
+        if (expiredIndex >= 0) ledger.splice(expiredIndex, 1);
+      }
+      throw error;
+    }
+    const index = ledger.findIndex(item => item?.provider === "heygen" && safeEqual(item.stateHash, verified.stateHash));
+    if (index < 0) throw oauthError("oauth_state_replayed", "HeyGen OAuth state was already used or is unknown.", 409);
+    const record = ledger[index];
+    if (Number(record.expiresAt || 0) <= clock()) {
+      ledger.splice(index, 1);
+      throw oauthError("oauth_state_expired", "HeyGen OAuth state expired.", 400);
+    }
+    const consumed = consumeRecord(record, input);
+    ledger.splice(index, 1);
+    return consumed;
+  }
+
+  return Object.freeze({ issue, issueRecord, verify, consume, consumeRecord });
 }
 
 export function sanitizeHeyGenOAuthError(error) {

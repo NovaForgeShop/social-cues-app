@@ -170,6 +170,103 @@ test("hosted writes remain held until a durable repository is enabled", async ()
   assert.equal(fixture.model.mediaRenderJobs.length, 0);
 });
 
+test("durable repository reservations prevent duplicate provider calls and bind terminal evidence", async () => {
+  const actorId = "11111111-1111-4111-8111-111111111111";
+  const workspaceId = "22222222-2222-4222-8222-222222222222";
+  const jobId = "33333333-3333-4333-8333-333333333333";
+  const durableAccount = {
+    id: "44444444-4444-4444-8444-444444444444",
+    platform: "heygen",
+    oauthProvider: "heygen",
+    providerAccountId: "provider-durable",
+    ownerUserId: actorId,
+    workspaceId,
+    status: "connected",
+    profile: { credits: { available: true, remaining: 8 } }
+  };
+  let reserved = false;
+  let invokes = 0;
+  const transitions = [];
+  const repository = {
+    async reserveJob(input) {
+      if (reserved) {
+        return {
+          replayed: true,
+          job: { id: jobId, provider: "heygen", action: input.action, operationId: input.operationId, status: "completed", ownerUserId: actorId, workspaceId },
+          requestArguments: input.requestArguments,
+          account: null
+        };
+      }
+      reserved = true;
+      return {
+        replayed: false,
+        job: { id: jobId, provider: "heygen", action: input.action, operationId: input.operationId, status: "submitted", ownerUserId: actorId, workspaceId },
+        requestArguments: input.requestArguments,
+        account: durableAccount
+      };
+    },
+    async listJobs() { return []; },
+    async listVersions() { return []; }
+  };
+  repository.transitionJob = async input => {
+    transitions.push(input);
+    return {
+      replayed: false,
+      job: {
+        id: jobId,
+        provider: "heygen",
+        action: "prompt_to_video",
+        operationId: "durable-operation",
+        status: input.state,
+        outputAssetId: "55555555-5555-4555-8555-555555555555",
+        ownerUserId: actorId,
+        workspaceId
+      },
+      version: {
+        id: "55555555-5555-4555-8555-555555555555",
+        provider: "heygen",
+        immutable: true,
+        operationId: "durable-operation",
+        ownerUserId: actorId,
+        workspaceId
+      }
+    };
+  };
+  const workflow = createHeyGenMediaWorkflow({
+    repository,
+    mutationsEnabled: true,
+    authorize: async input => input.actorId === actorId && input.workspaceId === workspaceId,
+    invoke: async () => {
+      invokes += 1;
+      return {
+        capability: { id: "prompt_to_video", toolName: "video_agent" },
+        outcome: {
+          status: "completed",
+          providerJobId: "provider-job-durable",
+          sessionId: "session-durable",
+          resourceId: "resource-durable",
+          previewUrl: "https://files.heygen.com/durable.mp4",
+          title: "Durable result",
+          message: "Completed"
+        }
+      };
+    }
+  });
+  const context = { actorId, workspaceId };
+  const input = { action: "prompt_to_video", args: { prompt: "Durable fixture" }, operationId: "durable-operation" };
+  const completed = await workflow.createJob(context, input);
+  const replay = await workflow.createJob(context, input);
+  assert.equal(completed.job.status, "completed");
+  assert.equal(completed.version.immutable, true);
+  assert.equal(replay.replayed, true);
+  assert.equal(invokes, 1);
+  assert.equal(transitions.length, 1);
+  assert.equal(transitions[0].resultFingerprint.length, 43);
+  assert.equal(transitions[0].capabilityId, "prompt_to_video");
+  assert.equal(transitions[0].title, "Durable result");
+  assert.equal(Object.hasOwn(completed.job, "request"), false);
+});
+
 test("unexpected workflow failures are sanitized", () => {
   const secret = "workflow-secret-fixture";
   const failure = sanitizeHeyGenWorkflowError(new Error(secret));

@@ -15082,12 +15082,18 @@
 
     async function refreshHeygenAccount(event) {
       const button = event.currentTarget;
+      button.dataset.heygenOperationId ||= globalThis.crypto?.randomUUID?.() || uid("heygen-refresh");
       button.disabled = true;
       button.textContent = "Refreshing...";
       try {
-        const response = await authedFetch("/api/heygen/refresh", { method: "POST" });
+        const response = await authedFetch("/api/heygen/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operationId: button.dataset.heygenOperationId })
+        });
         const data = await response.json().catch(() => ({}));
         if (!response.ok || data.ok === false) throw new Error(data.error || "HeyGen account refresh failed.");
+        button.dataset.heygenOperationId = "";
         if (data.account) model.connectedAccounts = mergeConnectedAccountLists(model.connectedAccounts || [], [data.account]);
         await refreshHeygenState();
         showAppResult("HeyGen account refreshed", "Identity, credits, and advertised MCP capabilities were reverified.", "success");
@@ -15102,12 +15108,18 @@
     async function disconnectHeygenAccount(event) {
       if (!window.confirm("Disconnect this HeyGen account and delete its stored OAuth credentials from this workspace?")) return;
       const button = event.currentTarget;
+      button.dataset.heygenOperationId ||= globalThis.crypto?.randomUUID?.() || uid("heygen-disconnect");
       button.disabled = true;
       button.textContent = "Disconnecting...";
       try {
-        const response = await authedFetch("/api/heygen/disconnect", { method: "POST" });
+        const response = await authedFetch("/api/heygen/disconnect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operationId: button.dataset.heygenOperationId })
+        });
         const data = await response.json().catch(() => ({}));
         if (!response.ok || data.ok === false || data.localCredentialsDeleted !== true) throw new Error(data.error || "HeyGen could not be disconnected safely.");
+        button.dataset.heygenOperationId = "";
         model.connectedAccounts = (model.connectedAccounts || []).filter(account => account.platform !== "heygen");
         await refreshHeygenState();
         showAppResult("HeyGen disconnected", "Stored OAuth credentials were deleted from this workspace.", "success");

@@ -79,7 +79,6 @@ function publicJob(job = {}) {
     action: job.action,
     operationId: job.operationId,
     status: job.status,
-    request: clone(job.request),
     sourceAssetId: job.sourceAssetId || null,
     parentVersionId: job.parentVersionId || null,
     outputAssetId: job.outputAssetId || null,
@@ -139,12 +138,13 @@ export function createHeyGenMediaWorkflow({
   saveModel,
   authorize,
   invoke,
+  repository = null,
   clock = () => new Date(),
   createId = prefix => `${prefix}-${crypto.randomBytes(12).toString("base64url")}`,
   mutationsEnabled = true,
   onCompletedResult = null
 } = {}) {
-  if (typeof loadModel !== "function" || typeof saveModel !== "function" || typeof authorize !== "function" || typeof invoke !== "function") {
+  if ((!repository && (typeof loadModel !== "function" || typeof saveModel !== "function")) || typeof authorize !== "function" || typeof invoke !== "function") {
     throw new TypeError("HeyGen workflow dependencies are required");
   }
   const workspaceLocks = new Map();
@@ -216,6 +216,18 @@ export function createHeyGenMediaWorkflow({
       throw workflowError("heygen_arguments_invalid", "HeyGen media arguments include an unsupported value.", 400);
     }
     const fingerprint = requestFingerprint({ action, args });
+    if (repository) {
+      return repository.reserveJob({
+        actorId,
+        workspaceId,
+        action,
+        operationId,
+        requestFingerprint: fingerprint,
+        requestArguments: args,
+        sourceAssetId: identifier(args.sourceAssetId || "") || null,
+        parentVersionId: identifier(args.parentVersionId || "") || null
+      });
+    }
     return withWorkspaceLock(workspaceId, async () => {
       const model = await loadModel({ actorId, workspaceId });
       const account = requireAccount(model, actorId, workspaceId);
@@ -239,7 +251,7 @@ export function createHeyGenMediaWorkflow({
         if (existing.fingerprint !== fingerprint) {
           throw workflowError("heygen_operation_conflict", "That operation id was already used for different work.", 409);
         }
-        return { replayed: true, job: safePublicJob(existing), account: clone(account) };
+        return { replayed: true, job: safePublicJob(existing), requestArguments: clone(existing.request), account: clone(account) };
       }
       const lineage = validateLineage(model, action, args, actorId, workspaceId);
       const now = clock().toISOString();
@@ -261,12 +273,23 @@ export function createHeyGenMediaWorkflow({
       };
       model.mediaRenderJobs.unshift(job);
       await saveModel(model, { actorId, workspaceId, reason: "heygen-job-reserved" });
-      return { replayed: false, job: safePublicJob(job), account: clone(account) };
+      return { replayed: false, job: safePublicJob(job), requestArguments: clone(args), account: clone(account) };
     });
   }
 
   async function markFailure(context, jobId, error) {
     const { actorId, workspaceId } = await requireContext(context, "update");
+    if (repository) {
+      return repository.transitionJob({
+        actorId,
+        workspaceId,
+        jobId,
+        state: "failed",
+        resultFingerprint: requestFingerprint({ state: "failed", failureCode: clean(error?.code || "heygen_provider_failed", 100) }),
+        failureCode: clean(error?.code || "heygen_provider_failed", 100),
+        publicMessage: "HeyGen could not complete this operation."
+      });
+    }
     return withWorkspaceLock(workspaceId, async () => {
       const model = await loadModel({ actorId, workspaceId });
       const job = (model.mediaRenderJobs || []).find(item => item.id === jobId && item.provider === "heygen" && owns(item, actorId, workspaceId));
@@ -282,6 +305,50 @@ export function createHeyGenMediaWorkflow({
 
   async function applyOutcome(context, jobId, invocation) {
     const { actorId, workspaceId } = await requireContext(context, "update");
+    if (repository) {
+      const outcome = invocation?.outcome || {};
+      const state = outcome.status === "completed" ? "completed" : outcome.status === "failed" ? "failed" : "processing";
+      const providerJobId = identifier(outcome.providerJobId || "") || null;
+      const sessionId = identifier(outcome.sessionId || "") || null;
+      const capabilityId = clean(invocation?.capability?.id || "", 120) || null;
+      const capabilityToolName = clean(invocation?.capability?.toolName || "", 200) || null;
+      const providerResourceId = identifier(outcome.resourceId || "") || null;
+      const previewUrl = clean(outcome.previewUrl || "", 2000) || null;
+      const title = clean(outcome.title || "", 200) || null;
+      const failureCode = state === "failed" ? clean(outcome.failureCode || "heygen_provider_failed", 100) : null;
+      const publicMessage = clean(outcome.message || "", 500) || (state === "failed" ? "HeyGen could not complete this operation." : null);
+      const result = await repository.transitionJob({
+        actorId,
+        workspaceId,
+        jobId,
+        state,
+        resultFingerprint: requestFingerprint({
+          state,
+          providerJobId,
+          sessionId,
+          capabilityId,
+          capabilityToolName,
+          providerResourceId,
+          previewUrl,
+          title,
+          failureCode,
+          publicMessage
+        }),
+        providerJobId,
+        sessionId,
+        capabilityId,
+        capabilityToolName,
+        providerResourceId,
+        previewUrl,
+        title,
+        failureCode,
+        publicMessage
+      });
+      if (result.job?.status === "completed" && typeof onCompletedResult === "function") {
+        await onCompletedResult({ actorId, workspaceId, job: result.job, version: result.version });
+      }
+      return result;
+    }
     return withWorkspaceLock(workspaceId, async () => {
       const model = await loadModel({ actorId, workspaceId });
       const job = (model.mediaRenderJobs || []).find(item => item.id === jobId && item.provider === "heygen" && owns(item, actorId, workspaceId));
@@ -349,7 +416,7 @@ export function createHeyGenMediaWorkflow({
       const invocation = await invoke({
         account: reservation.account,
         action: reservation.job.action,
-        args: reservation.job.request,
+        args: reservation.requestArguments,
         operationId: reservation.job.operationId,
         actorId: reservation.job.ownerUserId,
         workspaceId: reservation.job.workspaceId
@@ -363,6 +430,30 @@ export function createHeyGenMediaWorkflow({
 
   async function pollJob(context, jobId) {
     const { actorId, workspaceId } = await requireContext(context, "read");
+    if (repository) {
+      const snapshot = await repository.getJobContext({ actorId, workspaceId, jobId });
+      if (["completed", "failed"].includes(snapshot.job.status)) {
+        return { ok: true, replayed: true, job: snapshot.job, version: null };
+      }
+      try {
+        const invocation = await invoke({
+          account: snapshot.account,
+          action: "job_status",
+          args: {
+            providerJobId: snapshot.job.providerJobId || "",
+            sessionId: snapshot.job.sessionId || "",
+            operationId: snapshot.job.operationId
+          },
+          operationId: snapshot.job.operationId,
+          actorId,
+          workspaceId
+        });
+        return { ok: true, ...(await applyOutcome(context, snapshot.job.id, invocation)) };
+      } catch (error) {
+        if (error?.code !== "mcp_capability_unavailable") await markFailure(context, snapshot.job.id, error).catch(() => null);
+        throw error;
+      }
+    }
     const snapshot = await withWorkspaceLock(workspaceId, async () => {
       const model = await loadModel({ actorId, workspaceId });
       const found = (model.mediaRenderJobs || []).find(item => item.id === jobId && item.provider === "heygen" && owns(item, actorId, workspaceId));
@@ -390,12 +481,14 @@ export function createHeyGenMediaWorkflow({
 
   async function listJobs(context) {
     const { actorId, workspaceId } = await requireContext(context, "read");
+    if (repository) return repository.listJobs({ actorId, workspaceId });
     const model = await loadModel({ actorId, workspaceId });
     return (model.mediaRenderJobs || []).filter(job => job.provider === "heygen" && owns(job, actorId, workspaceId)).map(safePublicJob);
   }
 
   async function listVersions(context) {
     const { actorId, workspaceId } = await requireContext(context, "read");
+    if (repository) return repository.listVersions({ actorId, workspaceId });
     const model = await loadModel({ actorId, workspaceId });
     return (model.mediaAssets || []).filter(asset => asset.provider === "heygen" && owns(asset, actorId, workspaceId)).map(publicVersion);
   }
