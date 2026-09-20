@@ -23,6 +23,7 @@ server.out.log
 
 # Playwright
 /test-results/
+/.tmp/
 /playwright-report/
 /blob-report/
 /playwright/.cache/

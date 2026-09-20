@@ -14,15 +14,23 @@ export async function runPilotRehearsal() {
   await mkdir(output, { recursive: true });
   const report = { synthetic: true, ok: false, checks: 0, output, profiles: [] };
   const check = (condition, message) => { assert.ok(condition, message); report.checks += 1; };
+  const profiles = [
+    { name: "desktop-chromium", engine: chromium, viewport: { width: 1440, height: 1000 } },
+    { name: "mobile-webkit", engine: webkit, viewport: { width: 390, height: 844 }, mobile: true }
+  ];
+  const selectedProfile = process.env.SOCIAL_CUES_PILOT_PROFILE || "";
+  if (selectedProfile && !profiles.some(profile => profile.name === selectedProfile)) {
+    throw new Error("Unknown pilot profile: " + selectedProfile);
+  }
   try {
-    for (const profile of [
-      { name: "desktop-chromium", engine: chromium, viewport: { width: 1440, height: 1000 } },
-      { name: "mobile-webkit", engine: webkit, viewport: { width: 390, height: 844 }, mobile: true }
-    ]) {
+    for (const profile of profiles.filter(profile => !selectedProfile || profile.name === selectedProfile)) {
       const pilot = await createLocalPilot();
       const run = { profile: profile.name, steps: [], applicationRoutesMocked: false, browserExternalBlocked: [], responses: [], inspectionRequests: [] };
       report.profiles.push(run);
       let browser, context, page, inspectingSnapshot = false, step = "start";
+      const progressTimer = setInterval(() => {
+        void writeFile(path.join(output, "progress.json"), JSON.stringify({ profile: profile.name, step, checks: report.checks, updatedAt: new Date().toISOString() }, null, 2)).catch(() => {});
+      }, 3000);
       const email = "barton.cory.m+synthetic-pilot-" + randomUUID().slice(0, 8) + "@gmail.com";
       const password = "Synthetic-only-" + randomUUID() + "!";
       await writeFile(path.join(pilot.dataDir, "pilot-access.json"), JSON.stringify({
@@ -406,6 +414,7 @@ export async function runPilotRehearsal() {
         if (page && !page.isClosed()) await screenshot("failure").catch(() => {});
         throw new Error(profile.name + " / " + step + ": " + run.error);
       } finally {
+        clearInterval(progressTimer);
         if (context) await context.close();
         if (browser) await browser.close();
         await pilot.stop();
