@@ -1,6 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
+  "git": {
+    "deploymentEnabled": {
+      "codex/r39-acceptance-20261024": false
+    }
+  },
   "functions": {
     "server.mjs": {
       "maxDuration": 300,
